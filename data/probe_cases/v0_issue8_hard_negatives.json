@@ -1,0 +1,422 @@
+[
+  {
+    "case_id": "v0-hn-entity-001",
+    "query": "Which city did Mira choose for the Q3 offsite?",
+    "raw_events": [
+      {
+        "event_id": "evt-001",
+        "text": "Mira chose Lisbon for the Q3 offsite during the planning meeting."
+      },
+      {
+        "event_id": "evt-002",
+        "text": "Mira chose Porto for the Q4 offsite later that year."
+      },
+      {
+        "event_id": "evt-003",
+        "text": "Mira picked Madrid for the team retreat in spring."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "mem-001",
+        "source_event_ids": ["evt-001"],
+        "text": "Mira chose Lisbon for the Q3 offsite"
+      },
+      {
+        "memory_id": "mem-002",
+        "source_event_ids": ["evt-002"],
+        "text": "Mira chose Porto for the Q4 offsite"
+      },
+      {
+        "memory_id": "mem-003",
+        "source_event_ids": ["evt-003"],
+        "text": "Mira picked Madrid for the team retreat"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "gold-001",
+        "source_memory_id": "mem-001",
+        "source_event_id": "evt-001",
+        "text": "Mira chose Lisbon for the Q3 offsite",
+        "required_phrases": ["Mira", "Lisbon", "Q3 offsite"]
+      }
+    ],
+    "gold_answer": "Lisbon",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "retrieved_memory_ids": ["mem-002"],
+        "injected_context": "Mira chose Porto for the Q4 offsite",
+        "answer": "Porto",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "retrieved_memory_ids": ["mem-003"],
+        "injected_context": "Mira picked Madrid for the team retreat",
+        "answer": "Madrid",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      }
+    ],
+    "perturbation_label": "retrieval_error",
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    }
+  },
+
+  {
+    "case_id": "v0-hn-temporal-002",
+    "query": "Where is the Q3 offsite being held?",
+    "raw_events": [
+      {
+        "event_id": "evt-004",
+        "text": "Q3 offsite was originally planned for Lisbon."
+      },
+      {
+        "event_id": "evt-005",
+        "text": "Q3 offsite was moved to Madrid after budget review."
+      },
+      {
+        "event_id": "evt-006",
+        "text": "Budget for Q3 was approved at 50k."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "mem-004",
+        "source_event_ids": ["evt-004"],
+        "text": "Q3 offsite was originally planned for Lisbon"
+      },
+      {
+        "memory_id": "mem-005",
+        "source_event_ids": ["evt-005"],
+        "text": "Q3 offsite was moved to Madrid after budget review"
+      },
+      {
+        "memory_id": "mem-006",
+        "source_event_ids": ["evt-006"],
+        "text": "Budget for Q3 was approved at 50k"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "gold-002",
+        "source_memory_id": "mem-005",
+        "source_event_id": "evt-005",
+        "text": "Q3 offsite was moved to Madrid after budget review",
+        "required_phrases": ["Q3 offsite", "moved", "Madrid"]
+      }
+    ],
+    "gold_answer": "Madrid",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "retrieved_memory_ids": ["mem-004"],
+        "injected_context": "Q3 offsite was originally planned for Lisbon",
+        "answer": "Lisbon",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "retrieved_memory_ids": ["mem-006"],
+        "injected_context": "Budget for Q3 was approved at 50k",
+        "answer": "Unknown",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      }
+    ],
+    "perturbation_label": "retrieval_error",
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    }
+  },
+
+  {
+    "case_id": "v0-hn-paraphrase-003",
+    "query": "Which city was selected by Mira for the Q3 offsite?",
+    "raw_events": [
+      {
+        "event_id": "evt-007",
+        "text": "Mira chose Lisbon for the Q3 offsite."
+      },
+      {
+        "event_id": "evt-008",
+        "text": "Lisbon was picked by Mira for the offsite."
+      },
+      {
+        "event_id": "evt-009",
+        "text": "The Q3 team meeting will be in a European capital."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "mem-007",
+        "source_event_ids": ["evt-007"],
+        "text": "Mira chose Lisbon for the Q3 offsite"
+      },
+      {
+        "memory_id": "mem-008",
+        "source_event_ids": ["evt-008"],
+        "text": "Lisbon was picked by Mira for the offsite"
+      },
+      {
+        "memory_id": "mem-009",
+        "source_event_ids": ["evt-009"],
+        "text": "The Q3 team meeting will be in a European capital"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "gold-003",
+        "source_memory_id": "mem-007",
+        "source_event_id": "evt-007",
+        "text": "Mira chose Lisbon for the Q3 offsite",
+        "required_phrases": ["Mira", "chose", "Lisbon", "Q3 offsite"]
+      }
+    ],
+    "gold_answer": "Lisbon",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "retrieved_memory_ids": ["mem-008"],
+        "injected_context": "Lisbon was picked by Mira for the offsite",
+        "answer": "Lisbon",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "retrieved_memory_ids": ["mem-009"],
+        "injected_context": "The Q3 team meeting will be in a European capital",
+        "answer": "Unknown",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      }
+    ],
+    "perturbation_label": "retrieval_error",
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    }
+  },
+
+  {
+    "case_id": "v0-hn-multihop-004",
+    "query": "What is the approved Q3 offsite city?",
+    "raw_events": [
+      {
+        "event_id": "evt-010",
+        "text": "Mira proposed Lisbon for the Q3 offsite."
+      },
+      {
+        "event_id": "evt-011",
+        "text": "The budget committee approved Lisbon for Q3."
+      },
+      {
+        "event_id": "evt-012",
+        "text": "Porto was rejected due to venue cost."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "mem-010",
+        "source_event_ids": ["evt-010"],
+        "text": "Mira proposed Lisbon for the Q3 offsite"
+      },
+      {
+        "memory_id": "mem-011",
+        "source_event_ids": ["evt-011"],
+        "text": "The budget committee approved Lisbon for Q3"
+      },
+      {
+        "memory_id": "mem-012",
+        "source_event_ids": ["evt-012"],
+        "text": "Porto was rejected due to venue cost"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "gold-004a",
+        "source_memory_id": "mem-010",
+        "source_event_id": "evt-010",
+        "text": "Mira proposed Lisbon for the Q3 offsite",
+        "required_phrases": ["Mira", "proposed", "Lisbon", "Q3 offsite"]
+      },
+      {
+        "evidence_id": "gold-004b",
+        "source_memory_id": "mem-011",
+        "source_event_id": "evt-011",
+        "text": "The budget committee approved Lisbon for Q3",
+        "required_phrases": ["budget", "approved", "Lisbon", "Q3"]
+      }
+    ],
+    "gold_answer": "Lisbon",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "retrieved_memory_ids": ["mem-012"],
+        "injected_context": "Porto was rejected due to venue cost",
+        "answer": "Porto",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "retrieved_memory_ids": ["mem-012"],
+        "injected_context": "Porto was rejected due to venue cost",
+        "answer": "Porto",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      }
+    ],
+    "perturbation_label": "retrieval_error",
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    }
+  },
+
+  {
+    "case_id": "v0-hn-stale-005",
+    "query": "Which city did Kai choose for the partner workshop?",
+    "raw_events": [
+      {
+        "event_id": "evt-013",
+        "text": "Kai chose Vienna for last year's partner workshop."
+      },
+      {
+        "event_id": "evt-014",
+        "text": "This year Kai selected Brussels for the partner workshop."
+      },
+      {
+        "event_id": "evt-015",
+        "text": "Partner workshop agenda was finalized on Monday."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "mem-013",
+        "source_event_ids": ["evt-013"],
+        "text": "Kai chose Vienna for last year's partner workshop"
+      },
+      {
+        "memory_id": "mem-014",
+        "source_event_ids": ["evt-014"],
+        "text": "This year Kai selected Brussels for the partner workshop"
+      },
+      {
+        "memory_id": "mem-015",
+        "source_event_ids": ["evt-015"],
+        "text": "Partner workshop agenda was finalized on Monday"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "gold-005",
+        "source_memory_id": "mem-014",
+        "source_event_id": "evt-014",
+        "text": "This year Kai selected Brussels for the partner workshop",
+        "required_phrases": ["this year", "Kai", "Brussels", "partner workshop"]
+      }
+    ],
+    "gold_answer": "Brussels",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "retrieved_memory_ids": ["mem-013"],
+        "injected_context": "Kai chose Vienna for last year's partner workshop",
+        "answer": "Vienna",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "retrieved_memory_ids": ["mem-015"],
+        "injected_context": "Partner workshop agenda was finalized on Monday",
+        "answer": "Unknown",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      }
+    ],
+    "perturbation_label": "retrieval_error",
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    }
+  },
+
+  {
+    "case_id": "v0-hn-compress-006",
+    "query": "Which city did Omar pick for the retention review?",
+    "raw_events": [
+      {
+        "event_id": "evt-016",
+        "text": "Omar selected Prague for the retention review meeting."
+      },
+      {
+        "event_id": "evt-017",
+        "text": "Omar selected a Central European city for the review."
+      },
+      {
+        "event_id": "evt-018",
+        "text": "Retention review scheduled for next Tuesday."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "mem-016",
+        "source_event_ids": ["evt-016"],
+        "text": "Omar selected Prague for the retention review"
+      },
+      {
+        "memory_id": "mem-017",
+        "source_event_ids": ["evt-017"],
+        "text": "Omar selected a Central European city for the review"
+      },
+      {
+        "memory_id": "mem-018",
+        "source_event_ids": ["evt-018"],
+        "text": "Retention review scheduled for next Tuesday"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "gold-006",
+        "source_memory_id": "mem-016",
+        "source_event_id": "evt-016",
+        "text": "Omar selected Prague for the retention review",
+        "required_phrases": ["Omar", "Prague", "retention review"]
+      }
+    ],
+    "gold_answer": "Prague",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "retrieved_memory_ids": ["mem-017"],
+        "injected_context": "Omar selected a Central European city for the review",
+        "answer": "Unknown",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "retrieved_memory_ids": ["mem-018"],
+        "injected_context": "Retention review scheduled for next Tuesday",
+        "answer": "Unknown",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      }
+    ],
+    "perturbation_label": "retrieval_error",
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    }
+  }
+]

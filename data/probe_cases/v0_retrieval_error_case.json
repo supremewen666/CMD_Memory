@@ -1,0 +1,59 @@
+{
+  "case_id": "v0-retrieval-001",
+  "query": "Which city did Mira choose for the Q3 offsite?",
+  "raw_events": [
+    {
+      "event_id": "evt-001",
+      "text": "Mira said the Q3 offsite should be held in Lisbon because the team needs a direct flight from Boston."
+    },
+    {
+      "event_id": "evt-002",
+      "text": "A later planning note mentioned Porto as a rejected option because the venue was unavailable."
+    }
+  ],
+  "extracted_memory": [
+    {
+      "memory_id": "mem-001",
+      "source_event_ids": ["evt-001"],
+      "text": "Mira chose Lisbon for the Q3 offsite."
+    },
+    {
+      "memory_id": "mem-002",
+      "source_event_ids": ["evt-002"],
+      "text": "Porto was considered for the Q3 offsite but rejected."
+    }
+  ],
+  "gold_evidence": [
+    {
+      "evidence_id": "gold-001",
+      "source_memory_id": "mem-001",
+      "source_event_id": "evt-001",
+      "text": "Mira chose Lisbon for the Q3 offsite.",
+      "required_phrases": ["Mira", "Lisbon", "Q3 offsite"]
+    }
+  ],
+  "gold_answer": "Lisbon",
+  "baseline_outputs": [
+    {
+      "baseline_name": "vector_memory",
+      "retrieved_memory_ids": ["mem-002"],
+      "injected_context": "Porto was considered for the Q3 offsite but rejected.",
+      "answer": "Porto",
+      "answer_score": 0.0,
+      "evidence_score": 0.0
+    },
+    {
+      "baseline_name": "fixed_summary",
+      "retrieved_memory_ids": [],
+      "injected_context": "The team discussed Q3 offsite cities.",
+      "answer": "Unknown",
+      "answer_score": 0.0,
+      "evidence_score": 0.0
+    }
+  ],
+  "perturbation_label": "retrieval_error",
+  "scoring": {
+    "answer_metric": "casefold_exact_match",
+    "evidence_metric": "gold_evidence_recall"
+  }
+}

@@ -1,0 +1,12 @@
+CMD V0→V1 Gate Review — 2026-05-10
+============================================================
+
+Reviewer:   HITL
+Decision:   deferred
+Reviewed:   2026-05-10T12:00:00Z
+
+Rationale:
+  All four criteria pass on 6-case smoke suite. However, the PRD targets 50-100 probe cases, and 1-case-per-label provides no opportunity for off-diagonal confusion, coupled failures, or realistic macro F1. Gate check infrastructure is operational; defer final approval until probe suite scales.
+
+Missing evidence:
+  Smoke suite (6 cases) is insufficient for paper claims. Need 50-100 probe cases with realistic label distributions before V0→V1 gate can be credibly approved.

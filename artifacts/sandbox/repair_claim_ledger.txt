@@ -1,0 +1,29 @@
+CMD V0 Repair Claim Ledger — Issue 0006
+============================================================
+
+Total cases: 6
+
+Full Recovery (recovered):
+  CMD-guided targeted repair: 1.000
+  Undifferentiated hard-case:  0.500
+
+Full + Partial Recovery (recovered + partial):
+  CMD-guided targeted repair: 1.000
+  Undifferentiated hard-case:  0.500
+
+Targeted repair strictly better: 0.667
+Avg token saving (targeted vs hard-case): 1.1%
+
+Claim supported: True
+
+Claim: CMD-guided targeted repairs are at least as effective as
+undifferentiated hard-case updates while using less context.
+
+------------------------------------------------------------
+Per-label detail:
+  write_error: 1 case(s), targeted=1.000, hard_case=0.000, targeted_better=1/1
+  compression_error: 1 case(s), targeted=1.000, hard_case=0.000, targeted_better=1/1
+  premature_extraction_error: 1 case(s), targeted=1.000, hard_case=0.000, targeted_better=1/1
+  retrieval_error: 1 case(s), targeted=1.000, hard_case=1.000, targeted_better=1/1
+  injection_error: 1 case(s), targeted=1.000, hard_case=1.000, targeted_better=0/1
+  reasoning_error: 1 case(s), targeted=1.000, hard_case=1.000, targeted_better=0/1

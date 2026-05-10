@@ -1,0 +1,7 @@
+case_id,perturbation_label,predicted_label,pre_repair_answer_score,pre_repair_evidence_score,post_repair_answer_score,post_repair_evidence_score,repair_assessment,repair_action,hard_case_baseline_assessment,token_cost,regression_risk,had_repair_regression
+v0-write-001,write_error,write_error,0.000,0.000,1.000,1.000,recovered,write_error,failed,54.8,0.667,true
+v0-compression-001,compression_error,compression_error,0.000,0.000,1.000,1.000,recovered,compression_error,failed,56.2,0.400,false
+v0-premature-extraction-001,premature_extraction_error,premature_extraction_error,0.000,0.000,1.000,1.000,recovered,premature_extraction_error,failed,83.8,0.556,true
+v0-retrieval-001,retrieval_error,retrieval_error,0.000,0.000,1.000,1.000,recovered,retrieval_error,recovered,45.8,0.667,true
+v0-injection-001,injection_error,injection_error,0.000,0.000,1.000,1.000,recovered,injection_error,recovered,55.2,0.583,true
+v0-reasoning-001,reasoning_error,reasoning_error,0.000,1.000,1.000,1.000,recovered,reasoning_error,recovered,58.2,0.000,false

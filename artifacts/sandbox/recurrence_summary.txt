@@ -1,0 +1,36 @@
+CMD V0 ECS Failure Memory Recurrence Summary — Issue 0007
+============================================================
+
+Total future-task cases: 3
+
+Failure Memory Utility:
+  Cases where FM improved outcome: 3/3
+  FM useful rate: 1.000
+
+Evidence Gain (corrected_guidance vs none):
+  Average: +1.000
+
+Evidence Gain (corrected_guidance vs full_trace):
+  Average: +1.000
+
+Full Trace Pollution Risk:
+  Average: 1.000
+
+Token Cost (average per case):
+  No FM:           15.9
+  Full trace:      49.6
+  Corrected guide: 96.8
+
+Failure Memory worth keeping in scope: True
+
+Claim: CMD Failure Memory (corrected_memory + repair_guidance)
+improves future similar tasks over no-FM baseline without the
+pollution risk of full failed traces.
+
+Evidence threshold: FM useful rate >= 0.5
+
+------------------------------------------------------------
+Per-case detail:
+  v0-fm-retrieval-001 (retrieval_error): FM useful=True, ev gain vs none=+1.000, pollution risk=1.000
+  v0-fm-premature-extraction-001 (premature_extraction_error): FM useful=True, ev gain vs none=+1.000, pollution risk=1.000
+  v0-fm-compression-001 (compression_error): FM useful=True, ev gain vs none=+1.000, pollution risk=1.000

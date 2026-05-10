@@ -1,0 +1,7 @@
+gold_label,write_error,compression_error,premature_extraction_error,retrieval_error,injection_error,reasoning_error
+write_error,1,0,0,0,0,0
+compression_error,0,1,0,0,0,0
+premature_extraction_error,0,0,1,0,0,0
+retrieval_error,0,0,0,1,0,0
+injection_error,0,0,0,0,1,0
+reasoning_error,0,0,0,0,0,1
