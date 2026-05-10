@@ -1,0 +1,9 @@
+[project]
+name = "cmd-counterfactual-memory-debugger"
+version = "0.1.0"
+description = "Standalone CMD-Audit V0 harness for counterfactual memory-failure probes."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

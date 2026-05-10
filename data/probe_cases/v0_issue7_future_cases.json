@@ -1,0 +1,169 @@
+[
+  {
+    "case_id": "v0-fm-retrieval-001",
+    "query": "What location did Mira pick for the Q3 offsite meeting?",
+    "raw_events": [
+      {
+        "event_id": "evt-fm301",
+        "text": "Mira confirmed the Q3 offsite would be in Lisbon, noting the team needs a direct flight from Boston."
+      },
+      {
+        "event_id": "evt-fm302",
+        "text": "Porto was listed as a backup option but the venue was unavailable on the required dates."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "mem-fm301",
+        "source_event_ids": ["evt-fm301"],
+        "text": "Mira confirmed Lisbon for the Q3 offsite."
+      },
+      {
+        "memory_id": "mem-fm302",
+        "source_event_ids": ["evt-fm302"],
+        "text": "Porto was a rejected backup option for the offsite."
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "gold-fm301",
+        "source_memory_id": "mem-fm301",
+        "source_event_id": "evt-fm301",
+        "text": "Mira confirmed Lisbon for the Q3 offsite.",
+        "required_phrases": ["Mira", "Lisbon", "Q3 offsite"]
+      }
+    ],
+    "gold_answer": "Lisbon",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "retrieved_memory_ids": ["mem-fm302"],
+        "injected_context": "Porto was a rejected backup option for the offsite.",
+        "answer": "Porto",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "retrieved_memory_ids": [],
+        "injected_context": "The team discussed offsite locations.",
+        "answer": "Unknown",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      }
+    ],
+    "perturbation_label": "retrieval_error",
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    }
+  },
+  {
+    "case_id": "v0-fm-premature-extraction-001",
+    "query": "What city did Nia select for the incident review meeting?",
+    "raw_events": [
+      {
+        "event_id": "evt-fm201",
+        "text": "Nia picked Berlin for the incident review so the reliability team could share a timezone with Warsaw."
+      },
+      {
+        "event_id": "evt-fm202",
+        "text": "A follow-up planning note compressed the decision into a generic reference about a European review."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "mem-fm201",
+        "source_event_ids": ["evt-fm201", "evt-fm202"],
+        "text": "Nia selected a European city for the review meeting."
+      },
+      {
+        "memory_id": "mem-fm202",
+        "source_event_ids": ["evt-fm202"],
+        "text": "The review meeting needs to align with Warsaw time."
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "gold-fm201",
+        "source_event_id": "evt-fm201",
+        "text": "Nia picked Berlin for the incident review.",
+        "required_phrases": ["Nia", "Berlin", "incident review"]
+      }
+    ],
+    "gold_answer": "Berlin",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "retrieved_memory_ids": ["mem-fm201"],
+        "injected_context": "Nia selected a European city for the review meeting.",
+        "answer": "Unknown",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "retrieved_memory_ids": [],
+        "injected_context": "The incident review location was mentioned.",
+        "answer": "Unknown",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      }
+    ],
+    "perturbation_label": "premature_extraction_error",
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    }
+  },
+  {
+    "case_id": "v0-fm-compression-001",
+    "query": "Which city did Omar pick for the retention review meeting?",
+    "raw_events": [
+      {
+        "event_id": "evt-fm101",
+        "text": "Omar selected Prague for the retention review because the analytics team could travel there by train."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "mem-fm101",
+        "source_event_ids": ["evt-fm101"],
+        "text": "Omar selected a Central European city for the retention review."
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "gold-fm101",
+        "source_memory_id": "mem-fm101",
+        "source_event_id": "evt-fm101",
+        "text": "Omar selected Prague for the retention review.",
+        "required_phrases": ["Omar", "Prague", "retention review"]
+      }
+    ],
+    "gold_answer": "Prague",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "retrieved_memory_ids": ["mem-fm101"],
+        "injected_context": "Omar selected a Central European city for the retention review.",
+        "answer": "Unknown",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "retrieved_memory_ids": [],
+        "injected_context": "The retention review was discussed.",
+        "answer": "Unknown",
+        "answer_score": 0.0,
+        "evidence_score": 0.0
+      }
+    ],
+    "perturbation_label": "compression_error",
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    }
+  }
+]
