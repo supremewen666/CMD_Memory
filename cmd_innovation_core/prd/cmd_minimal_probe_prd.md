@@ -171,3 +171,96 @@ V0 excludes bad memory item labels from attribution evaluation: `item_wrong`, `i
 The first paper-worthy gate is whether CMD beats heuristic evidence recall and subagent judge on attribution accuracy, repair success, and stability. If CMD does not beat those baselines, the contribution should be narrowed to taxonomy and benchmark construction.
 
 Do not let stronger V0.5 retrieval baselines collapse `premature_extraction_error` into `retrieval_error`. The boundary is `evidence_recall_from_text(gold_evidence, memory_item.text)`: stronger retrieval may flip the label to `retrieval_error` only when the Memory Item text contains the evidence and a weak retriever simply missed it. When the Memory Item text does not contain the evidence phrases at all (extraction already lost them), no retriever improvement can change the label—it stays `premature_extraction_error`.
+
+---
+
+## V1 Scope (2026-05-11)
+
+### V1 Problem Statement
+
+V0 proved that counterfactual attribution works on a standalone harness with 6 pipeline labels and synthetic perturbations. This establishes the method's internal validity. But three questions remain before CMD can claim practical value:
+
+1. **Label coverage gap**: V0 deliberately excluded `granularity_error`, `route_error`, `graph_error`, `safety_error`, and `ingestion_error`. Real agent memory failures involve these pipeline stages, and without them CMD cannot diagnose the full failure surface. Memory-Probe (2603.02473) independently demonstrated that retrieval-vs-write is only the first diagnostic axis—route and granularity matter too.
+
+2. **Standalone-to-real gap**: V0 runs on fixture-controlled memory operations. A real memory agent (mem0, Letta) has actual `add()` and `search()` calls, entity linking, multi-signal fusion, and tiering. CMD must show that its counterfactual replays can intercept real operations without knowing agent internals, and that attribution accuracy does not degrade when moving from fixtures to real systems.
+
+3. **Comparator gap**: V0 compared against evidence-recall heuristics, subagent judge, and random baselines. Memory-Probe's 3×3 grid-comparison is a stronger diagnostic baseline—it explicitly separates write quality from retrieval quality at the aggregate level. V1 must add this comparator and show CMD's case-level counterfactual attribution outperforms aggregate grid-comparison.
+
+V1 addresses all three gaps by expanding to 11 pipeline labels, integrating with mem0 (first target) and Letta (second target), and adding memory-probe as a new baseline comparator.
+
+### V1 Solution
+
+Extend the CMD-Audit harness and introduce CMD-Skill Adapter:
+
+**Label expansion (11 labels):** Add 5 deferred pipeline labels in priority order—`ingestion_error` (split from `write_error`), `route_error`, `granularity_error`, `graph_error`, `safety_error`. Each new label has a corresponding counterfactual replay. The 11-label attribution must maintain macro F1 on the original 6-label smoke suite (no regression).
+
+**CMD-Skill Adapter (mem0 first):** Build `Mem0Adapter` with two interception cut points: `intercept_add()` for write-side replays and `intercept_search()` for retrieval-side replays. The Adapter runs sandboxed—it never mutates the original mem0 store. The ReplayEngine, Attribution, and ECS layers are unchanged from V0; only the input source changes from fixture to intercepted operations. After mem0 is proven, integrate Letta as the second agent (V1→V2 gate: ≥2 agents, no macro F1 regression).
+
+**Baseline strengthening:** Add memory-probe grid-comparison as a new comparator. Recalibrate top-2/multi-label thresholds for 11-label space (closer deltas expected). Re-run all V0 baselines against 11-label attribution.
+
+**Real data (researcher-led):** Mix LoCoMo/LongMemEval real data into probe cases alongside synthetic perturbations. Data construction is researcher-led; CMD-Audit consumes the resulting probe files.
+
+**RPE Pre-Filter (late V1):** Add D-MEM-style RPE gating to reduce replay cost. Deferred to late V1—not a gate prerequisite.
+
+### V1 Boundary Rules and Acceptance Conditions
+
+- **AC11 (Label non-regression):** Adding 5 V1 pipeline labels must not change attribution on the existing V0 6-label smoke suite. Macro F1 on the 6-label subset must remain 1.000.
+- **AC12 (mem0 Adapter sandbox):** `Mem0Adapter` replays run in sandbox. After any replay, the original mem0 store checksum must match the pre-replay checksum. No CMD-Audit operation writes to production mem0 state.
+- **AC13 (Adapter-label parity):** For the same probe case, the mem0 adapter path and standalone harness path must produce the same attribution label. Any discrepancy is a bug.
+- **AC14 (V1→V2 gate):** At least two distinct memory agents (mem0 + Letta) must be integrated through the Adapter Interface. 11-label macro F1 on the second agent must not regress below the first agent's baseline.
+- **AC15 (ingestion vs write boundary):** `ingestion_error` is attributed only when gold evidence never reached the agent at all (no corresponding `add()` call in trace). If `add()` was called but stored wrong/unformatted content, the label remains `write_error`.
+
+### V1 User Stories
+
+#### A. Mainline — Adapter Integration (core V1 value)
+
+- US34: As a researcher, I want CMD-Skill Adapter to intercept mem0's `add()` operation so that write-side counterfactual replays (Oracle Write, Oracle Compression, Verbatim Event Oracle, Injection-Oracle) can replace or bypass the stored facts with oracle variants.
+- US35: As a researcher, I want CMD-Skill Adapter to intercept mem0's `search()` operation so that retrieval-side counterfactual replays (Oracle Retrieval, Evidence-Given Reasoning) can replace or augment the retrieved facts.
+- US36: As a researcher, I want CMD-Audit running through the mem0 adapter to produce the same attribution labels as the standalone harness for identical probe cases, so that the adapter does not introduce attribution errors.
+
+#### B. Support — Label Expansion (complexity that makes V1 more than "V0 on real system")
+
+- US37: As a researcher, I want `ingestion_error` to be split from `write_error` so that "evidence never reached the agent" is distinguished from "evidence reached the agent but was not stored."
+- US38: As a researcher, I want `route_error` diagnosed by Oracle Route replay so that wrong store/tier routing failures are attributed correctly.
+- US39: As a researcher, I want `granularity_error` diagnosed by Oracle Granularity replay so that wrong memory granularity failures are attributed correctly.
+- US40: As a researcher, I want `graph_error` diagnosed by Graph-Off replay so that graph expansion distractor failures are attributed correctly.
+- US41: As a researcher, I want `safety_error` diagnosed by Safety-Off replay so that safety filter false-positive failures are attributed correctly.
+
+#### C. Validation — Baselines and Data
+
+- US42: As a researcher, I want memory-probe 3×3 grid-comparison added as a V1 baseline comparator so that CMD is measured against the strongest existing diagnostic approach.
+- US43: As a researcher, I want LoCoMo and LongMemEval real-data probe cases mixed with synthetic perturbation cases so that V1 evaluation covers both controlled and natural failure distributions.
+
+### V1 Implementation Decisions
+
+- V1 label expansion follows priority order: `ingestion_error` → `route_error` → `granularity_error` → `graph_error` → `safety_error`. Implementation proceeds in two issues (0011: first two; 0012: remaining three).
+- Bad memory item labels remain excluded from V1 attribution. They are deferred to V2.
+- mem0 Adapter uses exactly two interception cut points (`add()` + `search()`). No other mem0 internals are intercepted.
+- Entity linking and multi-signal fusion in mem0 are not intercepted—CMD evaluates retrieval outcomes, not retrieval internals.
+- Letta Adapter uses tier-aware interception (core write, archival store, recall retrieval) for Oracle Route replay.
+- All adapter replays run sandboxed. Store mutation by CMD-Audit during replay is a hard error.
+- Coupled-failure threshold is recalibrated for 11-label space. Multi-label (≥3) attribution is added for cases with three close deltas.
+- Memory-probe comparator implements a 3×3 grid (write strategy × retrieval method) per case, recording best grid-cell accuracy for comparison.
+- LoCoMo/LongMemEval real data probe construction is researcher-led. CMD-Audit consumes the resulting probe case files without coupling to the construction process.
+- RPE Pre-Filter is implemented in late V1 (Cycle 22). It does not block V1→V2 gate.
+- V0+V1+V2 constitute one paper. V2 is the final module/skill. V1 claims (C7-C10) join the existing V0 claim ledger (C1-C6).
+
+### V1 Testing Decisions
+
+- Each new label (Cycles 16-17) requires one smoke case with known perturbation, following the V0 tracer-bullet pattern.
+- 11-label non-regression: run V0 6-label smoke suite through V1 pipeline; all labels must match.
+- Adapter-label parity: run V0 6-label smoke suite through both standalone and mem0 adapter paths; all labels must match.
+- mem0 store immutability: checksum before and after every replay; any mutation is a test failure.
+- V1→V2 gate: automated check that ≥2 agents integrated AND macro F1(agent2) ≥ macro F1(agent1).
+- RPE pre-filter: batch evaluation on 50+ probe cases; false skip rate < 5%, cost reduction ≥ 30%.
+- Memory-probe comparator: produces valid accuracy scores (not NaN, not trivially zero).
+
+### V1 Out of Scope
+
+- Bad memory item labels (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) — deferred to V2.
+- Learned CMD classifier — still deferred; rule-based deltas remain the attribution method.
+- Agentic search retrieval — still deferred; introduces LLM-call non-determinism requiring independent taxonomy review.
+- Full production deployment of CMD-Skill Adapter as a runtime service.
+- UI or dashboard for attribution results.
+- Internal circuit/activation analysis.
+- CMD-Audit writing to production agent persistent memory—this remains prohibited; only CMD-Skill Adapter applies validated repairs.

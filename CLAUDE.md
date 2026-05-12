@@ -17,9 +17,9 @@ failed task
   -> Failure Memory for future similar tasks
 ```
 
-The first milestone is not a universal memory architecture. It is a standalone **CMD-Audit** harness that produces attribution and repair-validation evidence.
+The first milestone is not a universal memory architecture. It is a standalone **CMD-Audit** harness that produces attribution and repair-validation evidence. V0, V1, and V2 together constitute a single paper, with V2 as the final module/skill.
 
-CMD occupies an unverified gap confirmed by a broad 2026-05-10 metabolism survey (27 papers, 10 repos): no existing paper or open-source project does automated counterfactual memory replay for operation-level attribution. The closest approaches are observational (Trajectory-Informed Memory), interactive (Peaky Peek), or binary-detection (D-MEM).
+CMD occupies an unverified gap confirmed by a broad 2026-05-10 metabolism survey (27 papers, 10 repos) and 2026-05-11 V1 planning research: no existing paper or open-source project does automated counterfactual memory replay for operation-level attribution. The closest approaches are observational (Trajectory-Informed Memory, Memory-Probe 2603.02473), interactive (Peaky Peek), or binary-detection (D-MEM).
 
 ## Required Reading
 
@@ -73,6 +73,47 @@ A broad survey across arxiv + openalex + GitHub (27 papers, 10 repos) produced:
 
 Do not restart issue 0001-0005 or 0009 unless the contract changes. Extend them only when a later tracer bullet exposes a missing boundary.
 
+### 2026-05-11 V1 Planning Decisions
+
+Key decisions from V1 planning session (recorded in `cmd_innovation_core/plans/cmd_open_decisions.md` Decisions 13-16):
+
+1. **Single paper scope**: V0 + V1 + V2 constitute one paper. V2 is the final module/skill. V0→V1 and V1→V2 gates are internal checkpoints.
+2. **V1 label expansion order**: Pipeline labels first — `ingestion_error` → `route_error` → `granularity_error` → `graph_error` → `safety_error`. Bad memory item labels deferred to V2.
+3. **First adapter target: mem0** (mem0ai/mem0, 55k stars). Cleanest API (`add()`/`search()`), SOTA on LoCoMo/LongMemEval. Second target: Letta (22.6k stars) for V1→V2 gate.
+4. **RPE pre-filter**: deferred to late V1 (after core label + adapter claims are evidenced).
+5. **Real data**: LoCoMo/LongMemEval mixed into probe cases in V1. Data construction handled by researcher.
+6. **Adjacent work**: memory-probe (arXiv:2603.02473) independently validates write-vs-retrieval diagnostic framing via 3×3 grid comparison. Closest existing work to CMD; cite in paper.
+
+New reference notes: `reference_notes/github_mem0.md`, `reference_notes/paper_2603_02473_memory_probe.md`.
+
+Updated files: `cmd_open_decisions.md` (Decisions 13-16), `cmd_research_plan_and_roadmap.zh.md` (Section 19), `CONTEXT.md` (V1 Domain Language), `knowledge/current-memory.md` (V1 planning decisions), `gates/V0V1_gate_status.md` (V1 Integration Plan).
+
+### 2026-05-12 V1 Design Refinements
+
+Key decisions from May 12 design discussions (recorded in `cmd_innovation_core/plans/cmd_open_decisions.md` Decision 17):
+
+1. **Context Construction Mode**: V0/V1 Failure Memory context injects only `corrected_memory + repair_guidance` (corrected-only mode). A fourth mode (contrastive: `wrong_memory + cause + corrected_memory + repair_guidance`) is a V2 complete deliverable — code and evaluation together. Reasoning: V1 evaluates attribution accuracy; V2 evaluates context construction effectiveness; V0 synthetic string matching cannot measure contrastive learning signals.
+
+2. **4-Mode Context Experiment**: A minimum-viable LLM evaluation (none / full_trace / corrected_only / contrastive) can run at any time on existing V0 smoke artifacts + a real LLM, without CMD code changes. It answers whether contrastive mode is worth adding before full V2 infrastructure investment.
+
+3. **PrefixGuard (2605.06455)**: Online failure-warning from agent execution traces. Complementary to CMD, not a competitor — PrefixGuard detects anomalies from execution traces, CMD detects from memory state. Both are online, only CMD does attribution and repair. Key finding: LLM judges are substantially weaker than trained monitors for online warning, independently validating CMD's rule-based monitor design.
+
+4. **MAGE (2605.03228)**: Shadow memory for agent safety guardrails. Structurally mirrors CMD's Failure Memory — both are purpose-built parallel memory stores. Validates `safety_error` as V1 label. Published 1 day apart from Trojan Hippo (2605.01970), together defining agent memory security as May 2026 frontier.
+
+5. **MemORAI (2605.01386)**: SOTA graph memory on LOCOMO/LongMemEval. Should be cited as related work and SOTA baseline for V1. Turn-level provenance tracking independently validates CMD's evidence chain approach.
+
+6. **Two-experiment dataset design**: Experiment 2 (CMD attribution) requires Probe Cases with injected `perturbation_type` and `expected_behavior` — 50-100 cases for V0. Experiment 1 (context construction) requires 4-Mode Context Cases with pre-built context strings — 15-40 cases built from CMD's ECS output. Build order is constrained: Probe Cases → CMD pipeline → ECS → Context Cases. A 10-case minimum viable template serves both experiments simultaneously.
+
+7. **Dataset design references**: MEMAUDIT (2605.02199) package-oracle protocol, Memory-Probe (2603.02473) 3×3 grid, MemEvoBench (2604.15774) risk-type classification, ErrorProbe (2604.17658) step-level error injection, MedEinst (2601.06636) counterfactual diagnosis hierarchy. No existing work provides a controlled 4-mode context construction comparison.
+
+New reference notes: `reference_notes/paper_2605_06455.md`, `reference_notes/paper_2605_03228.md`, `reference_notes/paper_2605_01970.md`, `reference_notes/paper_2605_01386.md`.
+
+New hypothesis: `ideas/hyp-013.md` — PrefixGuard as CMD Subagent Judge Monitor replacement frontend.
+
+New decision: `cmd_open_decisions.md` Decision 18 — Dataset Build Order.
+
+Updated files: `cmd_open_decisions.md` (Decisions 17, 18), `CONTEXT.md` (V1 Domain Language: PrefixGuard, MAGE, MemORAI, Trojan Hippo, Context Construction Mode, Observability Ceiling, 4-Mode Context Experiment, Probe Case Schema, 4-Mode Context Case Schema, Probe Suite Scaling, Dataset Build Order), `cmd_research_plan_and_roadmap.zh.md` (Section 9 extended: two-experiment dataset formats, similar projects, build order), `knowledge/current-memory.md` (Day 2 incremental conclusions, dataset design), `knowledge/topic-cmd-memory-failure.md` (Day 2 signal table, dataset references).
+
 ## Domain Rules
 
 - Use the domain language in `cmd_innovation_core/CONTEXT.md`.
@@ -86,6 +127,11 @@ Do not restart issue 0001-0005 or 0009 unless the contract changes. Extend them 
 - V0.5 uses two retrieval baselines (BM25 as weak, HybridRerank as strong) as comparator systems, not as CMD counterfactual interventions. Both are deterministic, pure Python, blind to gold evidence during ranking. Agentic search is deferred to V1.
 - `evidence_recall_from_text` phrase matching is a necessary but not sufficient condition for semantic correctness (Decision 12). This is a known V0 limitation mitigated by careful `required_phrases` construction. Semantic scoring upgrade belongs to V1 alongside real LLM-agent integration.
 - ECS `cause` may describe item state in natural language but must not use V0-forbidden item label names or re-declare them through natural language equivalents.
+- Failure Memory context construction: V0/V1 uses **corrected-only mode** (`corrected_memory + repair_guidance` only). The contrastive mode (`wrong_memory + cause + corrected_memory + repair_guidance`) is a V2 complete deliverable. The 4-Mode Context Experiment (none / full_trace / corrected_only / contrastive) can run at any time on existing artifacts + a real LLM, without CMD code changes, to provide evidence for whether contrastive mode is worth adding to V2.
+- **PrefixGuard** (2605.06455) detects anomalies from execution traces; CMD detects anomalies from memory state. Both are online detection layers; only CMD does attribution and repair. They are complementary, not competitors.
+- Dataset build order is constrained: **Probe Cases** (experiment 2) must be built and run through CMD before **4-Mode Context Cases** (experiment 1) can be constructed, because Context Cases depend on ECS records (`wrong_memory`, `cause`, `corrected_memory`, `repair_guidance`) produced by CMD.
+- Probe Case `perturbation_type` is an injected ground-truth label, not a guessed one. Do not construct cases where `perturbation_type` is an LLM's post-hoc label.
+- 4-Mode Context Case `none` mode must fail. If baseline context already produces the correct answer, the case should be excluded.
 - Version gates V0→V1→V2 are evidence-driven: V0→V1 requires the four V0 evidence artifacts passing paper-claim thresholds; V1→V2 requires at least two distinct memory agents integrated through the Adapter Interface without macro F1 regression.
 
 ## V0 Attribution Scope
@@ -131,6 +177,18 @@ Work in dependency order, with current status:
 8. V0.5 retrieval baseline strengthening - ✅ done;
 9. Subagent Judge Monitor contract hardening - done;
 10. evidence-driven version gates - done (HITL review deferred pending probe suite scaling).
+
+### V1 Issues (planned, not active — 2026-05-11)
+
+11. `ingestion_error` + `route_error` labels — AFK, blocked by 0010 + probe suite scaling;
+12. `granularity_error` + `graph_error` + `safety_error` labels — AFK, blocked by 0011;
+13. 11-label coupled-failure recalibration + memory-probe baseline — AFK, blocked by 0012;
+14. mem0 adapter integration — AFK, blocked by 0013;
+15. Letta adapter + V1→V2 gate — AFK, blocked by 0014;
+16. LoCoMo/LongMemEval real-data probe cases — AFK, blocked by 0012;
+17. RPE pre-filter optimization — AFK, blocked by 0015.
+
+See `cmd_innovation_core/issues/README.md` for full V1 dependency graph and issue details.
 
 ## TDD Guidance
 

@@ -239,3 +239,49 @@ Incremental survey (2026-05-06 ~ 2026-05-11 window), 9 new papers + 1 GitHub rep
 | arXiv:2604.27045 Dual-Stream Reconciliation | dual-stream memory (narrative vs clinical record); 13.6% error cascade from extraction loss | empirical evidence for `premature_extraction_error`: extraction-stage information loss causing downstream errors |
 | arXiv:2604.20117 SCG-MEM | schema-constrained generation; formal guarantee against "structural hallucination" | introduces structural hallucination as new failure mode; potential V2 label or `reasoning_error` subtype |
 | GitHub: eth-jashan/MemoScope | framework-agnostic memory debugger; capture→visualize→diff; no replay or attribution | validates memory debugging tool demand; CMD's counterfactual approach remains unique; potential V1 integration target as plugin |
+
+## 2026-05-12 Metabolism Day 2 Signals
+
+Incremental survey (2026-05-07 ~ 2026-05-12 window). 4 new papers found, 4 directly CMD-relevant. Notable: arxiv API unavailable during search; all discovery via OpenAlex.
+
+| Source | Signal | CMD Implication |
+|--------|--------|-----------------|
+| arXiv:2605.06455 PrefixGuard | offline trace→monitor induction; prefix-risk scorer from terminal outcomes; LLM judges substantially weaker than trained monitors for online warning; observability ceiling concept | validates CMD's Subagent Judge Monitor design: rule-based over LLM-as-judge; PrefixGuard fires → CMD replays is a natural 2-tier architecture; observability ceiling maps to `anomaly_reason` enum limits |
+| arXiv:2605.03228 MAGE | shadow memory abstraction for safety guardrails; proactive risk assessment before action execution; first framework to detect/mitigate long-horizon agent threats via memory architecture | validates `safety_error` as first-class V1 label; MAGE's shadow memory structurally mirrors CMD's Failure Memory (separate purpose-built store); both share "detect cheap, prevent early" pattern |
+| arXiv:2605.01970 Trojan Hippo | systematic dormant payload attacks on agent memory; single untrusted tool call suffices; OpenEvolve adaptive red-teaming benchmark; capability-aware security/utility analysis | validates `item_poisoned` (V2 label) with systematic evidence; agent memory security emerges as distinct subfield alongside CMD's correctness focus |
+| arXiv:2605.01386 MemORAI | dual-layer compression + provenance-enriched multi-relational graph + Dynamic Weighted PageRank; SOTA on LOCOMO/LongMemEval | direct competitor on CMD's V1 target benchmarks; provenance tracking at turn level is prerequisite for pipeline attribution — MemORAI tracks WHERE facts came from, CMD diagnoses WHICH operation lost them; should be cited as both related work and SOTA baseline |
+
+## Updated Competitive Landscape (Day 2)
+
+**PrefixGuard (2605.06455)** is the closest new work to CMD's monitoring layer. Key comparison:
+
+| Dimension | PrefixGuard | CMD Subagent Judge Monitor |
+|-----------|------------|---------------------------|
+| Training | supervised on offline traces | rule-based (no training) |
+| Input | heterogeneous agent traces | memory operation trace |
+| Output | prefix-risk score | enum-locked anomaly_reason |
+| After anomaly | (not addressed) | triggers counterfactual replay |
+| Determinism | DFA-extractable | enum-locked |
+| Evidence | terminal outcomes | replay deltas |
+
+PrefixGuard stops at anomaly detection; CMD continues into attribution and repair. The two are complementary layers, not competitors: PrefixGuard could serve as CMD's monitor frontend, with CMD's replay engine providing the attribution backend.
+
+**MemORAI (2605.01386)** sets a new SOTA bar on CMD's V1 evaluation benchmarks (LOCOMO, LongMemEval). Its provenance tracking is an independent validation that turn-level evidence chains matter — exactly the infrastructure CMD needs for `premature_extraction_error` diagnosis.
+
+**MAGE (2605.03228) + Trojan Hippo (2605.01970)**: published 1 day apart, together define agent memory security as a May 2026 research frontier. CMD's current taxonomy covers correctness failures; adversarial failures (`item_poisoned`, `safety_error` exploited by attacks) represent a natural V2/V3 extension dimension.
+
+## 2026-05-12 Dataset Design References
+
+CMD 需要两类数据集，分别服务归因有效性实验和上下文拼接实验。5 篇论文提供了数据集设计方法论参考：
+
+| Source | Dataset Feature | CMD Reference Value |
+|--------|----------------|-------------------|
+| MEMAUDIT (2605.02199) | Package-oracle protocol: pre-constructed memory packages with known correct answers | Experiment 2 perturbation injection: pre-build gold evidence packages, then controllably delete/deform at write/compress/retrieve stages |
+| Memory-Probe (2603.02473) | 3×3 grid: 3 write strategies × 3 retrieval methods on LoCoMo | Experiment 2 baseline comparison design: grid layout of different memory systems × different retrieval methods |
+| MemEvoBench (2604.15774) | 7 domains, 36 risk types of memory mis-evolution detection | Experiment 2 perturbation variant design: borrow risk type taxonomy for richer perturbation variants |
+| ErrorProbe (2604.17658) | Step-level error injection into multi-agent traces, tests diagnosis accuracy | Experiment 2 error injection methodology: inject errors at specific steps → check if CMD localizes to correct step |
+| MedEinst (2601.06636) | 3-level causal hierarchy (association/intervention/counterfactual) for diagnosis | Experiment 2 counterfactual case construction: association → intervention → counterfactual hierarchy |
+
+Adaptable raw data sources: LoCoMo (long conversation history → memory units → perturbation injection), LongMemEval (QA pairs → trace evidence to original text → extraction loss scenarios), HotpotQA memory variant (multi-hop questions → delete one hop's evidence → retrieval vs reasoning boundary).
+
+Key finding: None of the 40+ papers surveyed provides a controlled 4-mode comparison of `wrong_memory + cause + corrected_memory` vs `corrected_memory only`. This makes the 4-Mode Context Experiment a potential novelty contribution regardless of outcome.
