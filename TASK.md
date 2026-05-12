@@ -117,6 +117,18 @@ Remaining work:
 - Probe suite scaling: expand from 6 smoke cases to 50-100 labeled cases (PRD target, V0→V1 gate prerequisite).
 - HITL gate review: human sign-off on V0→V1 gate once probe suite is scaled.
 
+## V1 Roadmap (2026-05-11)
+
+V1 planning is complete. Issues 0011-0017 are planned but not yet active—all blocked by probe suite scaling and V0→V1 gate. See `cmd_innovation_core/issues/README.md` for V1 dependency graph.
+
+Key V1 decisions (recorded in `cmd_innovation_core/plans/cmd_open_decisions.md` Decisions 13-16):
+- V0+V1+V2 = single paper. V2 is the final module/skill.
+- V1 label expansion: `ingestion_error` → `route_error` → `granularity_error` → `graph_error` → `safety_error`.
+- First adapter target: mem0 (55k stars). Second: Letta (22.6k stars).
+- RPE pre-filter deferred to late V1 (issue 0017).
+
+Updated V1 planning files: `cmd_tracer_bullets.md` (V1 cycles 16-22), `cmd_minimal_probe_prd.md` (V1 Scope section), `issues/0011-*.md` through `issues/0017-*.md`, `prototypes/mem0_adapter_interface_prototype.md` (+ `.zh.md`), existing prototypes now have `.zh.md` Chinese versions.
+
 ## Non-Code Skeleton Sync
 
 When planning files need updates, preserve the existing core paths and update in this order:

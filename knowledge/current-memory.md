@@ -1,6 +1,6 @@
 # Current Compressed Memory
 
-更新日期: 2026-05-10
+更新日期: 2026-05-12
 
 ## 当前状态
 
@@ -254,3 +254,126 @@ CMD 的独特定位在 Day 1 增量调研后进一步加强：
 | **CMD** | **counterfactual (replay intervention)** | **operation-level (6 labels)** | **yes** |
 
 新增工作进一步填充了 granurality 谱系（item → retrieval → step → capability → operation），CMD 的 operation-level granularity 依然是最细粒度的自动化方案。
+
+## 2026-05-11 V1 规划决策
+
+基于研究计划与业界调研，做出以下 V1 关键决策（详见 `cmd_innovation_core/plans/cmd_open_decisions.md` Decisions 13-16）：
+
+### 决策 1：V1 标签扩展顺序（pipeline labels 优先）
+
+V1 按实现成本从低到高引入 5 个 pipeline label：
+
+1. `ingestion_error` — 从 `write_error` 拆分，Oracle Write 已覆盖
+2. `route_error` — MemFlow (2605.03312) 独立验证了该 failure mode
+3. `granularity_error` — Oracle Granularity 概念已有
+4. `graph_error` — 需要图记忆基建
+5. `safety_error` — 需要安全过滤开关
+
+Bad memory item labels 延后到 V2。
+
+### 决策 2：第一个 Adapter 目标 — mem0
+
+选择 **mem0ai/mem0**（55,320 GitHub stars）作为第一个 CMD-Skill Adapter 集成目标。
+
+理由：
+- mem0 拥有最简洁的 memory API：`add()` → entity linking → `search()`
+- 55k stars + YC S24 + SOTA on LoCoMo (91.6) / LongMemEval (93.4) → 论文说服力最强
+- ADD-only extraction model 是最干净的 counterfactual 干预界面
+- "CMD on mem0" 是 V1 最强的 paper claim
+
+第二个目标：**Letta** (letta-ai/letta, 22,609 stars)，用于 V1→V2 gate（要求 ≥2 agent）。
+
+### 决策 3：V0 + V1 + V2 = 一篇论文
+
+V0（standalone harness）、V1（adapter + 真实 agent）、V2（final module/skill）共同构成一篇论文。V0→V1→V2 gate 成为论文内部 checkpoint。摘要和声明清单覆盖从诊断到部署的完整弧线。
+
+### 决策 4：RPE Pre-Filter → V1 后期
+
+RPE 预过滤不作为 V1 gate 前提，放在 V1 后期作为效率优化。V1 核心贡献是标签扩展 + 真实 agent 集成。
+
+### 决策 5：真实数据（LoCoMo/LongMemEval）
+
+V1 开始混入 LoCoMo/LongMemEval 真实数据。数据构建由研究者负责。
+
+### 新增邻接工作
+
+**memory-probe (arXiv:2603.02473)** — Boqin Yuan et al. 用 3×3 grid-comparison 诊断 write vs retrieval 瓶颈。关键发现：retrieval method 主导（20-point accuracy span）远超 write strategy（3-8 points）；raw chunks 匹配或超过 lossy extraction。这是最接近 CMD 的诊断工作，但是观测性而非反事实。应在论文中引用。
+
+竞争定位更新：
+
+| 新增方法 | Evidence Type | Attribution Granularity | Automated |
+|----------|--------------|------------------------|-----------|
+| Memory-Probe (2603.02473) | observational (3×3 grid comparison) | aggregate (write vs retrieve) | yes (no case-level attribution) |
+| **CMD** | **counterfactual (replay intervention)** | **operation-level (6→11 labels)** | **yes** |
+
+### V1 新增声明（C7-C11）
+
+C7: 标签扩展不降低原有 macro F1。C8: mem0 集成归因准确率不低于 standalone harness。C9: 跨 ≥2 agent 泛化且 macro F1 不退化。C10: RPE pre-filter 降低 ≥50% replay 成本。C11: 运行时修复闭环。
+
+### 更新后下一步
+
+1. Probe suite scaling: 6→50-100 labeled cases（V0→V1 gate）
+2. HITL gate review
+3. V1 启动：`ingestion_error` + `route_error` 标签 + mem0 adapter 集成
+
+## 2026-05-12 Metabolism Day 2 增量结论
+
+Day 2 在 2026-05-07~05-12 窗口发现 4 篇新论文，全部直接相关。
+
+### 关键信号
+
+**PrefixGuard (2605.06455)** — 最接近 CMD Monitor 层的独立工作：
+- 从 agent trace 离线训练 prefix-risk scorer，用于在线 failure warning
+- 关键发现：LLM judges 在 prefix-warning 协议下显著弱于训练后的 monitor
+- 提出 "observability ceiling" 概念，区分 monitor 能力上限与 trace 中缺乏信号
+- 与 CMD 互补而非竞争：PrefixGuard 做检测，CMD 做归因。自然融合：PrefixGuard 触发 → CMD counterfactual replay
+
+**MAGE (2605.03228)** — 确认 `safety_error` V1 价值：
+- "Shadow Memory" 抽象：专用安全记忆并行运行，存储安全关键上下文
+- 主动风险评估：在行动执行前进行评估 → 早期检测
+- 结构上类似 CMD 的 Failure Memory：独立、目的导向的记忆存储
+- 与 Trojan Hippo (2605.01970) 同天发表，共同定义 agent memory security 子领域
+
+**MemORAI (2605.01386)** — CMD V1 的新 SOTA 基线：
+- 图记忆系统，在 LOCOMO/LongMemEval 上达到 SOTA
+- 三项创新映射到三个 CMD label：dual-layer compression → `compression_error`，provenance tracking → `premature_extraction_error`，query-adaptive retrieval → `retrieval_error`
+- 应作为 V1 的 related work 和 SOTA baseline 同时引用
+
+**Trojan Hippo (2605.01970)** — 验证 `item_poisoned` (V2)：
+- 首次系统评估休眠 payload 攻击：单一不可信工具调用即可投毒
+- OpenEvolve 自适应红队基准可启发 CMD 的 probe perturbation 策略
+
+### 竞争定位更新
+
+PrefixGuard 是 May 2026 最接近 CMD Monitor 的工作。关键差异：PrefixGuard 停在异常检测（输出 risk score），CMD 继续做归因和修复（输出 operation label + ECS + Failure Memory）。两者是互补层，非替代关系。
+
+### 新决策
+
+Decision 17: Failure Memory 上下文构建模式 — V0/V1 仅注入 `corrected_memory + repair_guidance`。第 4 模式（`wrong_memory + cause` 对比学习）完整属于 V2，代码和评估一起交付。理由：V1 评估归因准确率，V2 评估上下文拼接有效性，合成 string-matching 无法测量对比学习信号。
+
+Decision 18: 数据集构建顺序 — 实验二（Probe Case，归因有效性）必须先于实验一（4-Mode Context Case，上下文拼接），因为 Context Case 依赖 CMD 产出的 ECS 记录。10-case 最小模板同时服务两个实验。路径：Probe Case → CMD → ECS → Context Case → LLM 评估。
+
+### 两个实验的数据集设计
+
+**实验二（CMD 归因有效性）— Probe Case**：
+- 格式：`query` + `extracted_memory` + `gold_answer` + `gold_evidence_units` + **`perturbation_type`（注入的已知标签）** + `expected_behavior`
+- 每条 label 需 8-10 个 case，含不同失败变体
+- 总量：V0 50-100（6 labels），V1 100-150（11 labels）
+- 核心约束：`perturbation_type` 是故意制造的，不是猜测的
+
+**实验一（上下文拼接）— 4-Mode Context Case**：
+- 格式：`query` + `gold_answer` + 预拼接的 4 个 `contexts`（none / full_trace / corrected_only / contrastive）
+- 被试内设计：同一 query × 4 种 context mode
+- `none` 模式必须失败（否则不需要 FM）
+- 总量：15-40 个（覆盖 3-4 种 label，每种 ≥5）
+- 来源：CMD 对 Probe Case 产出的 ECS → review → 构造 Context Case
+
+**数据集设计参考论文**：
+- MEMAUDIT (2605.02199) — package-oracle protocol（perturbation 注入方法论）
+- Memory-Probe (2603.02473) — 3×3 grid design（baseline 对照组设计）
+- MemEvoBench (2604.15774) — 36 种 risk type（perturbation 变体分类）
+- ErrorProbe (2604.17658) — step-level error injection（错误注入方法）
+- MedEinst (2601.06636) — counterfactual diagnosis hierarchy（counterfactual case 构造）
+- LoCoMo / LongMemEval / HotpotQA — 可改编原始数据源
+
+**关键发现**：40+ 篇论文中无一篇提供 `wrong_memory + cause + corrected_memory` vs `corrected_memory only` 的对照实验。这意味着 4-Mode Context Experiment 本身——无论结果如何——构成一个 novelty contribution。

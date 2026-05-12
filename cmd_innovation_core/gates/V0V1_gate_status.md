@@ -54,6 +54,33 @@ The four criteria pass against the current 6-case smoke suite, but the PRD targe
 |------|----------|----------|-------|
 | 2026-05-10 | (pending) | (pending) | Initial evidence check complete. All four criteria pass on 6-case smoke suite. |
 
+## V1 Integration Plan (2026-05-11)
+
+### First Adapter Target: mem0
+
+- **System:** mem0ai/mem0 (55,320 GitHub stars, YC S24)
+- **API:** `add()` → entity linking → `search()` (semantic + BM25 + entity matching)
+- **SOTA:** LoCoMo 91.6, LongMemEval 93.4 (v3 algorithm, April 2026)
+- **Integration points:** `add()` interception for write-side replays; `search()` interception for retrieval-side replays
+- **CMD replay mapping:** Oracle Write, Oracle Compression, Verbatim Event Oracle, Oracle Retrieval, Injection-Oracle, Evidence-Given Reasoning — all six V0 replays map to mem0 operations
+
+### Second Adapter Target: Letta
+
+- **System:** letta-ai/letta (22,609 GitHub stars)
+- **Architecture:** core/archival/recall memory tiering
+- **Integration value:** exercises `route_error` (memory tier selection) that mem0's flat store cannot test
+- **Timing:** after mem0 integration proven, for V1→V2 gate (requires ≥2 agents)
+
+### V1 Label Expansion Plan
+
+Priority order: `ingestion_error` → `route_error` → `granularity_error` → `graph_error` → `safety_error`
+
+Gate check: 11-label macro F1 must not regress from 6-label V0 baseline.
+
+### Adjacent Work to Cite
+
+**memory-probe (arXiv:2603.02473):** Boqin Yuan et al. independently validate the write-vs-retrieval diagnostic framing using 3×3 grid comparison on LoCoMo. Observational, not counterfactual. Closest existing work to CMD.
+
 ## V1→V2 Gate (deferred)
 
-The V1→V2 gate requires at least two distinct memory agents integrated through the Adapter Interface without macro F1 regression. This gate is not yet evaluable — 0 adapter integrations exist in V0.
+The V1→V2 gate requires at least two distinct memory agents integrated through the Adapter Interface without macro F1 regression. Current plan: mem0 as first target, Letta as second target. 0 adapter integrations exist in V0.

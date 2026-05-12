@@ -2,7 +2,7 @@
   "keywords": ["agent memory", "counterfactual attribution", "memory debugging", "LLM agent", "memory failure diagnosis", "memory repair", "retrieval error", "compression error", "premature extraction", "injection error", "reasoning error", "Error-Cause-Solution", "subagent judge monitor", "evidence-driven evaluation"],
   "arxivCategories": ["cs.AI", "cs.CL", "cs.LG", "cs.SE"],
   "sources": ["arxiv", "openalex"],
-  "currentDay": 2,
+  "currentDay": 3,
   "processed_ids": [
     "2601.01885", "2601.02553", "2602.02474", "2602.06025", "2604.01007",
     "2605.02199", "2605.02812", "2605.03354", "2605.03675", "2605.04264",
@@ -12,8 +12,9 @@
     "2604.12231", "2310.08560", "2603.18330", "2603.21272", "2604.01599",
     "2604.04853", "2605.01688", "2604.09747",
     "2604.25161", "2604.17658", "2604.15774", "2604.16548",
-    "2605.03312", "2604.20006", "2604.27045", "2604.20117",
+    "2605.03312", "2604.20006", "2604.27045", "2604.20117", "2603.02473",
     "github_acailic_agent_debugger", "github_exploreunive_agentlens",
-    "github_eth-jashan_memoscope"
+    "github_eth-jashan_memoscope", "github_mem0ai_mem0",
+    "2605.06455", "2605.03228", "2605.01970", "2605.01386"
   ]
 }

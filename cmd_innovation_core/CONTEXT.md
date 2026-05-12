@@ -145,9 +145,14 @@ _Avoid_: CMD competitor, replacement for CMD
 - **Verbatim Event Oracle** diagnoses **Premature Extraction Error** by comparing raw events with extracted memory before assigning retrieval blame.
 - **Error-Cause-Solution** updates **User Memory** and writes compact **Failure Memory**.
 - **Post-Repair Context Replay** follows **Error-Cause-Solution** and precedes future-task **Failure Memory** evaluation.
-- **Failure Memory** should retrieve `corrected_memory + repair_guidance`, not the full failed trace.
+- **Failure Memory** should retrieve `corrected_memory + repair_guidance`, not the full failed trace. The **Context Construction Mode** decision restricts V0/V1 to corrected-only; contrastive mode is a V2 experiment.
 - **Subagent Judge Baseline** compares against CMD, while **Subagent Judge Monitor** may trigger replay.
 - **Standalone Research Harness** owns V0 reproducibility and exposes an **Adapter Interface** for later integration.
+- **PrefixGuard** detects anomalies from execution traces; **CMD** detects anomalies from memory state. Both are online, but only CMD performs attribution and repair. The two are complementary layers, not competitors.
+- **MAGE** shadow memory and **CMD Failure Memory** are structurally analogous: both maintain purpose-built parallel memory stores separate from the agent's operational memory.
+- **MemORAI** provenance tracking records WHERE facts came from; **CMD** diagnoses WHICH pipeline operation lost them. Together they form a complete evidence-to-attribution chain.
+- A **Probe Case** (experiment 2) carries a known `perturbation_type` and `expected_behavior`; running it through CMD produces an **ECS record**. That ECS record becomes the input data for a **4-Mode Context Case** (experiment 1). Build order is constrained: Probe Cases → CMD → ECS → Context Cases.
+- **Probe Suite Scaling** is the V0→V1 gate prerequisite. The 10-case minimum viable template is the first scaling increment — enough to serve both experiments simultaneously.
 
 ## Example Dialogue
 
@@ -162,6 +167,12 @@ _Avoid_: CMD competitor, replacement for CMD
 
 > **Dev:** "Is **CMD-Skill Adapter** the same thing as **CMD-Audit**?"
 > **Domain expert:** "No. **CMD-Audit** proves attribution and repair validity; **CMD-Skill Adapter** is a later runtime layer that uses validated repair guidance."
+
+> **Dev:** "Should we include `wrong_memory + cause` alongside `corrected_memory` when building context for future tasks?"
+> **Domain expert:** "Not in V0/V1. Inject only `corrected_memory + repair_guidance`. The value of contrastive context (showing what went wrong) can only be measured with a real LLM agent, not with synthetic string matching. Test it as a 4th experimental mode in V2."
+
+> **Dev:** "Can **PrefixGuard** replace CMD's monitor?"
+> **Domain expert:** "PrefixGuard can replace the **detection** layer — it converts traces into risk scores. But it cannot replace CMD's attribution, ECS, Post-Repair Context Replay, or Failure Memory. The two are complementary: PrefixGuard fires the alarm, CMD investigates the cause."
 
 ## Flagged Ambiguities
 
@@ -181,3 +192,89 @@ _Avoid_: CMD competitor, replacement for CMD
 - Version gates are evidence-driven, not feature-stacking: V0→V1 requires the four V0 evidence artifacts passing paper-claim thresholds; V1→V2 requires at least two distinct memory agents integrated through the Adapter Interface without macro F1 regression.
 - When both Verbatim Event Oracle and Oracle Retrieval recover evidence, gain ranking naturally picks the stronger replay — no special tie-breaker needed. The case is not an extraction loss, it's a retrieval miss that raw events happened to partially patch.
 - When Verbatim Event Oracle and Oracle Retrieval both fail but Oracle Compression succeeds, the case is a legitimate `compression_error` — the diagnosis cost of running two non-recovering replays before finding the root cause is design-expected, not a bug. This additional replay cost is expected for taxonomy boundary cases and is considered design-internal, as long as it remains bounded within the smoke suite.
+- V0/V1 Failure Memory context uses **corrected-only mode** (`corrected_memory + repair_guidance`). The **contrastive mode** (`wrong_memory + cause + corrected_memory + repair_guidance`) is deferred to V2 because: (1) V1 evaluates attribution accuracy, not context construction effectiveness; (2) V0 synthetic string matching cannot measure the contrastive learning signal; (3) no existing literature provides evidence that contrastive context outperforms corrected-only context for agent memory repair.
+- The **4-Mode Context Experiment** (none / full_trace / corrected_only / contrastive) is a pre-V2 validation that can run at any time on existing V0 smoke artifacts + a real LLM. It does not require CMD code changes. It answers whether contrastive mode is worth adding to V2 before investing in full V2 infrastructure.
+- **PrefixGuard** detects anomalies from **execution traces** (tool calls, action sequences); **CMD Subagent Judge Monitor** detects anomalies from **memory state** (evidence-answer mismatch, retrieval completeness). The two signal sources are complementary — each can detect failures the other misses.
+- **MAGE** shadow memory and **CMD Failure Memory** are two independent instances (May 2026) of the same architectural pattern: purpose-built parallel memory stores separate from the agent's operational memory. This cross-team convergence suggests an emerging principle.
+- **Probe Case** `perturbation_type` is injected, not guessed. The perturbation is deliberately manufactured. Do not construct cases where `perturbation_type` is an LLM's best guess or post-hoc label.
+- **4-Mode Context Case** `none` mode must fail (baseline answer ≠ gold_answer). If `none` already succeeds, the case does not need Failure Memory and should be excluded from the context experiment.
+- **Dataset build order** is constrained: building Context Cases before CMD has produced ECS records is not possible — the `wrong_memory`, `cause`, `corrected_memory`, and `repair_guidance` fields come from CMD's ECS output. Build Probe Cases first, run CMD, then build Context Cases from ECS.
+- No existing literature (40+ papers surveyed as of 2026-05-12) provides a controlled comparison of `wrong_memory + cause + corrected_memory` vs `corrected_memory only` for agent memory repair context. **MEMAUDIT** (2605.02199) package-oracle protocol, **Memory-Probe** (2603.02473) 3×3 grid design, **MemEvoBench** (2604.15774) risk-type classification, **ErrorProbe** (2604.17658) step-level error injection, and **MedEinst** (2601.06636) counterfactual diagnosis benchmark are the closest methodological references for dataset design, but none address context construction comparison.
+
+## V1 Domain Language (2026-05-11)
+
+**V1 Pipeline Label Expansion**:
+The five deferred pipeline labels introduced in V1, in priority order: `ingestion_error` → `route_error` → `granularity_error` → `graph_error` → `safety_error`. Bad memory item labels remain deferred to V2.
+_Avoid_: adding all labels at once, adding item labels before pipeline labels
+
+**Ingestion Error** (V1, priority 1):
+A pipeline failure where gold evidence never reached the agent at all (truncated input, upstream loss, missing source). Split from `write_error` because repair paths differ: ingestion errors require upstream data pipeline fixes, while write errors require memory admission policy changes. Diagnosed by Oracle Write (same replay, different root cause).
+_Avoid_: write_error subtype
+
+**mem0** (external, V1 Adapter target):
+The most popular open-source agent memory layer (55k GitHub stars, YC S24). v3 algorithm uses single-pass ADD-only extraction with multi-signal retrieval (semantic + BM25 + entity matching). SOTA on LoCoMo (91.6) and LongMemEval (93.4). Selected as the first CMD-Skill Adapter integration target for V1.
+_Avoid_: CMD component, CMD dependency
+
+**Letta** (external, V1 Adapter target):
+Formerly MemGPT. Platform for building stateful agents with explicit memory tiering (core/archival/recall). Selected as the second CMD-Skill Adapter integration target for V1→V2 gate (≥2 agents required).
+_Avoid_: CMD component
+
+**Memory-Probe** (external, from 2603.02473):
+A diagnostic framework that separates retrieval quality from write quality using 3×3 grid comparison (Mem0-style / MemGPT-style / raw chunks × cosine / BM25 / hybrid). Closest existing work to CMD's diagnostic framing, but uses observational grid-comparison rather than counterfactual replay. Key finding: retrieval method dominates write strategy (20-point vs 3-8 point accuracy span), and raw chunks often outperform lossy extraction — directly validating `premature_extraction_error`.
+_Avoid_: CMD alternative, counterfactual method
+
+**Single-Paper Scope**:
+The decision that V0 + V1 + V2 together constitute one paper, with V2 as the final module/skill. V0→V1 and V1→V2 gates are internal checkpoints, not paper boundaries. The paper tells the full arc from diagnosis (V0) through cross-system generalization (V1) to runtime repair (V2).
+_Avoid_: three separate papers, V0-only paper
+
+**Adapter Integration Target**:
+A real-world memory agent system that CMD-Skill Adapter connects to in V1/V2. Must expose observable memory operations (write, retrieve) that map to CMD's counterfactual replays. First target: mem0. Second target: Letta.
+_Avoid_: custom agent, synthetic agent
+
+**RPE Pre-Filter** (late V1 optimization):
+A Reward Prediction Error gating mechanism for Subagent Judge Monitor, based on D-MEM (2603.14597). Deferred to late V1 — after label expansion and adapter integration produce full replay traces for training the surprise model.
+_Avoid_: V1 gate prerequisite, V0 component
+
+**PrefixGuard** (external, from 2605.06455):
+A trace-to-monitor framework that converts raw LLM agent traces into lightweight online failure-warning monitors. Offline StepView induction derives deterministic typed-step adapters; supervised monitor training learns a prefix-risk scorer from terminal outcomes. Key finding: LLM judges are substantially weaker than trained monitors for online warning — independently validates CMD's decision to use rule-based (not LLM) monitoring. Key concept: observability ceiling — a theoretical AUPRC bound separating monitor error from failures lacking evidence in the prefix. PrefixGuard and CMD are complementary: PrefixGuard detects anomalies from execution traces, CMD detects anomalies from memory state, and only CMD does attribution and repair.
+_Avoid_: CMD replacement, CMD monitor equivalent
+
+**MAGE** (external, from 2605.03228):
+Memory As Guardrail Enforcement. A defensive framework inspired by "shadow stack" in systems security: maintains a dedicated safety-focused agentic memory (shadow memory) that distills safety-critical context across the full execution trajectory, proactively assessing risk of pending actions before execution. Structurally mirrors CMD's Failure Memory — both are purpose-built parallel memory stores. Directly validates `safety_error` as a V1 label.
+_Avoid_: CMD component
+
+**MemORAI** (external, from 2605.01386):
+Memory Organization and Retrieval via Adaptive Graph Intelligence. SOTA graph-based memory on LOCOMO and LongMemEval. Three innovations: dual-layer compression, provenance-enriched multi-relational graph with turn-level factual origins, and query-adaptive Dynamic Weighted PageRank. Should be cited as both related work and SOTA baseline for V1 evaluation. Its turn-level provenance tracking independently validates CMD's need for evidence chains in pipeline attribution.
+_Avoid_: CMD component
+
+**Trojan Hippo** (external, from 2605.01970):
+First systematic characterization of dormant payload attacks on agent memory — single untrusted tool call plants payload, activates on sensitive topics. Validates `item_poisoned` as a necessary V2 label. Published 1 day apart from MAGE, together defining agent memory security as a May 2026 research frontier.
+_Avoid_: CMD component
+
+**Context Construction Mode** (CMD design decision):
+The strategy for building Failure Memory context injected into future similar tasks. V0/V1 uses **corrected-only mode**: injects `corrected_memory + repair_guidance` only. A fourth mode (**contrastive mode**: `wrong_memory + cause + corrected_memory + repair_guidance`) is deferred to V2 as a complete deliverable — code and evaluation together. Reasoning: V1 evaluates attribution accuracy, V2 evaluates context construction effectiveness; V0 synthetic string matching cannot measure the contrastive learning signal that only a real LLM agent exhibits.
+_Avoid_: full trace injection, mixing audiences (cause is diagnostic for researchers, guidance is prescriptive for agents)
+
+**Observability Ceiling** (from PrefixGuard, 2605.06455):
+A theoretical AUPRC bound that separates monitor error from failures lacking detectable evidence in the observed prefix. 6-49% of failures fall below this ceiling — even a perfect monitor cannot detect them from the prefix alone. Maps to CMD's monitor boundary: when no `anomaly_reason` fires, the failure may be undetectable from the memory trace prefix. Can be used to gate replay: skip replay when observability ceiling is low, saving cost for cases where the trace genuinely lacks diagnostic signal.
+_Avoid_: monitor performance metric, CMD internal concept
+
+**4-Mode Context Experiment** (pre-V2 validation):
+A minimum-viable LLM evaluation to test whether contrastive context (`wrong_memory + cause + corrected_memory`) outperforms corrected-only context. Uses **4-Mode Context Case Schema** (see below): each case contains one query, gold answer, and four pre-built context strings (none/full_trace/corrected_only/contrastive). Requires 15-40 cases covering 3-4 error types (minimum 5 per label, ideal 10). Runs with a real LLM without CMD code changes. Provides the evidence basis for whether contrastive mode is worth adding to V2. No existing literature provides a comparable controlled experiment — if results are significant, the experiment itself constitutes a novelty claim.
+_Avoid_: V0/V1 blocker, CMD code dependency
+
+**Probe Case Schema** (CMD experiment 2 dataset format):
+The JSON schema for CMD attribution probe cases. Each case carries `query`, `history/raw_events`, `extracted_memory` (list of `{memory_id, text}`), `gold_answer`, `gold_evidence_units` (list of `{evidence_id, text, source}`), `perturbation_type` (injected ground-truth label), and `expected_behavior` (which replays should/should not recover). `perturbation_type` is a known injected label, not a guessed one — the perturbation is deliberately manufactured to test whether CMD correctly identifies it. Each label requires 8-10 cases with different failure variants (e.g., `retrieval_error` variants: BM25 miss, semantic-distractor interference, multi-hop evidence dispersion). Total target: 50-100 cases for V0→V1 gate, 100-150 for 11-label.
+_Avoid_: guessed label, observational diagnosis, single-variant per label
+
+**4-Mode Context Case Schema** (CMD experiment 1 dataset format):
+The JSON schema for context construction comparison. Each case is a within-subject design (same query × 4 context modes). Carries `case_id`, `query`, `gold_answer`, `gold_evidence_phrases`, `failure_type`, `wrong_memory`, `cause`, `corrected_memory`, `repair_guidance`, and a pre-built `contexts` dict with four keys (`none`, `full_trace`, `corrected_only`, `contrastive`). The `contexts` are fully pre-rendered prompt strings — the experiment only compares LLM outputs. `none` mode must fail (otherwise the case doesn't need FM). Built from ECS records produced by running CMD on Probe Cases (experiment 2 outputs → experiment 1 inputs).
+_Avoid_: runtime context assembly, post-hoc context generation
+
+**Probe Suite Scaling** (V0→V1 gate prerequisite):
+The expansion of probe cases from 6 smoke cases (1 per V0 label) to 50-100 labeled cases (8-16 per label). Each label needs multiple failure variants: same error type, different root causes. Scaling path: 6 → 10 (2-3 labels, multiple variants) → 50 (all 6 labels, 8+ each) → 100 (full V0 gate threshold). The 10-case minimum viable template serves both experiments: run through CMD pipeline → produce ECS → feed into 4-Mode Context Experiment.
+_Avoid_: single-variant-per-label smoke suite, scaling without variant diversity
+
+**Dataset Build Order** (CMD design constraint):
+Experiment 2 (CMD attribution effectiveness) datasets must be built first, because Experiment 1 (context construction) depends on ECS records produced by running CMD on Experiment 2's probe cases. Path: Probe Cases (50-100, with perturbation labels) → CMD pipeline → ECS records → review ECS quality → construct 4-Mode Context Cases → LLM evaluation. Build the 10-case minimum viable template first — it serves both experiments simultaneously.
+_Avoid_: parallel build, context experiment before CMD produces ECS

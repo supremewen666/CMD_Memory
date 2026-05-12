@@ -35,6 +35,7 @@ This index intentionally points only to the current CMD-Audit line. Direction-di
 - `../ideas/hyp-010.md` - Strong retrieval baselines and evidence metrics.
 - `../ideas/hyp-011.md` - RPE as cheap anomaly pre-filter for Subagent Judge Monitor.
 - `../ideas/hyp-012.md` - Verified Episodic Memory as cross-domain convergence pattern.
+- `../ideas/hyp-013.md` - PrefixGuard as CMD Subagent Judge Monitor replacement frontend (two-tier architecture).
 
 ## Retained Reference Notes
 
@@ -85,3 +86,17 @@ This index intentionally points only to the current CMD-Audit line. Direction-di
 - `../reference_notes/paper_2604_27045.md` - Dual-stream memory and reconciliation for health coaching agents.
 - `../reference_notes/paper_2604_20117.md` - SCG-MEM: schema-constrained generation for agent memory.
 - `../reference_notes/github_memoscope.md` - MemoScope: framework-agnostic AI agent memory debugger.
+
+## 2026-05-11 V1 Planning Additions
+
+- `../reference_notes/github_mem0.md` - mem0: universal memory layer (55k stars), first CMD-Skill Adapter target.
+- `../reference_notes/paper_2603_02473_memory_probe.md` - Memory-Probe: write vs retrieval diagnostic framework, closest adjacent work to CMD.
+- `../cmd_innovation_core/plans/cmd_open_decisions.md` - New Decisions 13-16: V1 label order, mem0 adapter target, single-paper scope, RPE late V1. Decision 17: Failure Memory context construction mode.
+- `../cmd_innovation_core/plans/cmd_research_plan_and_roadmap.zh.md` - Section 19: single-paper scope, V1/V2 roadmap, updated claims and timeline.
+
+## 2026-05-12 Metabolism Day 2 Additions
+
+- `../reference_notes/paper_2605_06455.md` - PrefixGuard: trace-to-monitor framework, online failure-warning from agent traces, validates rule-based monitor over LLM judge.
+- `../reference_notes/paper_2605_03228.md` - MAGE: shadow memory abstraction for safety guardrails, proactive risk assessment, validates `safety_error` V1 label.
+- `../reference_notes/paper_2605_01970.md` - Trojan Hippo: dormant payload attacks on agent memory, validates `item_poisoned` V2 label, adaptive red-teaming benchmark.
+- `../reference_notes/paper_2605_01386.md` - MemORAI: SOTA graph memory on LOCOMO/LongMemEval, provenance tracking + dual-layer compression + Dynamic Weighted PageRank.
