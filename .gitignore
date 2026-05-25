@@ -5,3 +5,9 @@ __pycache__/
 data/
 artifact/
 artifacts/
+.codegraph/
+.cursor/
+cmd_innovation_core/
+ideas/
+knowledge/
+review/

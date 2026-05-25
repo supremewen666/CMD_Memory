@@ -1,5 +1,0 @@
-system_name,attribution_accuracy,macro_f1,top2_accuracy,cost_per_diagnosis
-CMD-Audit,1.000,1.000,1.000,6.200
-evidence_recall,0.833,0.778,0.833,0.050
-random_label,0.167,0.167,0.667,0.010
-subagent_judge,0.833,0.778,0.833,1.000

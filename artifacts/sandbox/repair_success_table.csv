@@ -1,7 +1,0 @@
-case_id,perturbation_label,predicted_label,repair_action,pre_repair_answer_score,pre_repair_evidence_score,targeted_assessment,targeted_answer_score,targeted_evidence_score,targeted_token_cost,hard_case_assessment,hard_case_answer_score,hard_case_evidence_score,hard_case_token_cost,targeted_better
-v0-write-001,write_error,write_error,Oracle Write Repair,0.000,0.000,recovered,1.000,1.000,54.8,failed,0.000,0.000,49.0,true
-v0-compression-001,compression_error,compression_error,Oracle Compression Repair,0.000,0.000,recovered,1.000,1.000,56.2,failed,0.000,0.000,58.2,true
-v0-premature-extraction-001,premature_extraction_error,premature_extraction_error,Verbatim Event Repair,0.000,0.000,recovered,1.000,1.000,83.8,failed,0.000,0.000,82.2,true
-v0-retrieval-001,retrieval_error,retrieval_error,Oracle Retrieval Repair,0.000,0.000,recovered,1.000,1.000,45.8,recovered,1.000,1.000,72.2,true
-v0-injection-001,injection_error,injection_error,Injection Oracle Repair,0.000,0.000,recovered,1.000,1.000,55.2,recovered,1.000,1.000,48.8,false
-v0-reasoning-001,reasoning_error,reasoning_error,Evidence-Given Reasoning Repair,0.000,1.000,recovered,1.000,1.000,58.2,recovered,1.000,1.000,47.5,false
