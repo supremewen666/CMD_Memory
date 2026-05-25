@@ -1,9 +1,8 @@
 ---
 title: Integrate mem0 as first CMD-Skill Adapter target
 labels:
-  - AFK
-type: AFK
-blocked_by: "0013"
+  - done
+type: done
 user_stories:
   - 34
   - 35
@@ -64,10 +63,19 @@ Build `Mem0Adapter` that intercepts mem0's `add()` and `search()` operations at 
 
 ## Acceptance Criteria
 
-- [ ] `Mem0Adapter.intercept_add()` correctly routes each write-side replay to the appropriate oracle variant.
-- [ ] `Mem0Adapter.intercept_search()` correctly routes each retrieval-side replay to the appropriate oracle variant.
-- [ ] All 6 V0 smoke cases produce identical attribution labels through adapter path vs standalone path.
-- [ ] mem0 store checksum is identical before and after every replay (no mutation).
-- [ ] `SandboxViolationError` is raised if any replay attempts to write to mem0 store.
-- [ ] Adapter macro F1 on 6-label suite == standalone macro F1.
-- [ ] Behavior-level tests: adapter-label parity, store immutability, sandbox violation rejection.
+- [x] `Mem0Adapter.intercept_add()` correctly routes each write-side replay to the appropriate oracle variant.
+- [x] `Mem0Adapter.intercept_search()` correctly routes each retrieval-side replay to the appropriate oracle variant.
+- [x] All 6 V0 smoke cases produce identical attribution labels through adapter path vs standalone path.
+- [x] mem0 store checksum is identical before and after every replay (no mutation).
+- [x] `SandboxViolationError` is raised if any replay attempts to write to mem0 store.
+- [x] Adapter macro F1 on 6-label suite == standalone macro F1.
+- [x] Behavior-level tests: adapter-label parity, store immutability, sandbox violation rejection.
+
+## Implementation Summary
+
+- **New package**: `cmd_audit/adapters/` — `base.py` (Mem0Trace, StoreChecksum, SandboxViolationError, ReplayName), `mem0_adapter.py` (Mem0Adapter with intercept_add/intercept_search), `mem0_replays.py` (10-replay portfolio: 6 adapter-intercepted + 4 V1 passthrough), `harness.py` (run_case_with_mem0, run_cases_with_mem0).
+- **Trace fixtures**: `data/probe_cases/mem0_v0_smoke_traces.json` — 6 pre-recorded mem0 operation traces with SHA-256 store checksums.
+- **Tests**: `tests/test_cmd_audit_issue14_mem0_adapter.py` — 30 tests, 90 subtests across 5 test classes (Mem0TraceValidation, Mem0AdapterInterception, Mem0AdapterSandbox, AdapterLabelParity, Mem0AdapterEndToEnd).
+- **No regressions**: Full suite 417 tests pass (387 baseline + 30 new).
+- **V1→V2 gate**: `check_v1_to_v2_gate(mem0_integrated=True)` now recognizes 1 adapter integration; second integration (Letta) still required.
+- Detail map: `cmd_innovation_core/issues/0014-integrate-mem0-adapter-implementation-details.md`

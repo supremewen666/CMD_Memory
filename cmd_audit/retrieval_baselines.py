@@ -1,13 +1,10 @@
-"""Deterministic retrieval baselines for CMD-Audit issue 0008 (V0.5).
+"""Deterministic retrieval baseline for CMD-Audit issue 0008 (V0.5).
 
-Two retrievers form a weak-to-strong contrast over case.extracted_memory:
-- BM25: pure keyword matching, fails on paraphrase and entity confusion.
-- HybridRerank: BM25 + TF-IDF cosine hybrid, then evidence-phrase rerank.
+BM25: pure keyword matching over case.extracted_memory, blind to gold
+evidence during ranking. Gold is used only for post-hoc trace annotation
+(is_gold_support, is_distractor).
 
-Both are blind to gold evidence during ranking. Gold is used only for
-post-hoc trace annotation (is_gold_support, is_distractor).
-
-Agentic search is deferred to V1.
+Strong retrieval (dense/hybrid) is deferred to V1 with mem0/Letta adapters.
 """
 
 from __future__ import annotations
@@ -75,8 +72,13 @@ class RetrievalMetrics:
 
     def __post_init__(self) -> None:
         for name in (
-            "recall_at_1", "recall_at_3", "recall_at_5", "recall_at_10",
-            "precision_at_1", "precision_at_3", "precision_at_5",
+            "recall_at_1",
+            "recall_at_3",
+            "recall_at_5",
+            "recall_at_10",
+            "precision_at_1",
+            "precision_at_3",
+            "precision_at_5",
         ):
             val = getattr(self, name)
             if val < 0.0 or val > 1.0:
@@ -112,7 +114,7 @@ class RetrievalBaselineSuiteResult:
 # ---------------------------------------------------------------------------
 
 
-def _tokenize(text: str) -> list[str]:
+def tokenize(text: str) -> list[str]:
     """Lowercase, extract alphanumeric runs, drop tokens shorter than 2 chars."""
     return [t for t in re.findall(r"[a-z0-9]{2,}", text.casefold())]
 
@@ -122,7 +124,7 @@ def _tokenize(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _compute_bm25_scores(
+def compute_bm25_scores(
     query_tokens: list[str],
     doc_tokens_list: list[list[str]],
     k1: float = 1.2,
@@ -179,14 +181,16 @@ def run_bm25_retrieval(
     if not memory_items:
         return []
 
-    query_tokens = _tokenize(case.query)
+    query_tokens = tokenize(case.query)
     if not query_tokens:
         return _all_rank_zero_traces(case, memory_items, "bm25")
 
-    doc_tokens_list = [_tokenize(item.text) for item in memory_items]
-    scores = _compute_bm25_scores(query_tokens, doc_tokens_list, k1=k1, b=b)
+    doc_tokens_list = [tokenize(item.text) for item in memory_items]
+    scores = compute_bm25_scores(query_tokens, doc_tokens_list, k1=k1, b=b)
 
-    ranked_indices = sorted(range(len(memory_items)), key=lambda i: scores[i], reverse=True)
+    ranked_indices = sorted(
+        range(len(memory_items)), key=lambda i: scores[i], reverse=True
+    )
     run_id = hashlib.sha256(f"{case.case_id}:bm25".encode()).hexdigest()[:12]
 
     return _annotate_traces(
@@ -200,16 +204,16 @@ def run_bm25_retrieval(
 
 
 # ---------------------------------------------------------------------------
-# TF-IDF utilities (used by HybridRerank)
+# TF-IDF utilities (used by memory_probe cosine retriever)
 # ---------------------------------------------------------------------------
 
 
-def _build_tfidf_vectors(
+def build_tfidf_vectors(
     memory_items: list, query: str
 ) -> tuple[dict[str, float], list[dict[str, float]]]:
     """Build TF-IDF weighted sparse vectors for query and all docs."""
-    query_tokens = _tokenize(query)
-    doc_tokens_list = [_tokenize(item.text) for item in memory_items]
+    query_tokens = tokenize(query)
+    doc_tokens_list = [tokenize(item.text) for item in memory_items]
 
     # Build vocabulary + document frequencies
     df: dict[str, int] = {}
@@ -245,9 +249,7 @@ def _build_tfidf_vectors(
     return query_vector, doc_vectors
 
 
-def _cosine_similarity(
-    vec_a: dict[str, float], vec_b: dict[str, float]
-) -> float:
+def cosine_similarity(vec_a: dict[str, float], vec_b: dict[str, float]) -> float:
     """Cosine similarity between two sparse vectors."""
     dot = 0.0
     for term, weight_a in vec_a.items():
@@ -260,120 +262,6 @@ def _cosine_similarity(
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
     return dot / (norm_a * norm_b)
-
-
-# ---------------------------------------------------------------------------
-# HybridRerank retriever
-# ---------------------------------------------------------------------------
-
-
-def run_hybrid_rerank_retrieval(
-    case: ProbeCase,
-    *,
-    bm25_weight: float = 0.4,
-    vector_weight: float = 0.6,
-    candidate_k: int = 5,
-) -> list[RankedRetrievalTrace]:
-    """BM25 + TF-IDF cosine hybrid retrieval with evidence-phrase rerank.
-
-    Steps:
-    1. Run BM25 and TF-IDF cosine independently over all memory items.
-    2. Min-max normalize each score distribution to [0, 1].
-    3. Combine with weighted sum.
-    4. Rerank top-k candidates by evidence-phrase match ratio.
-    5. Annotate all traces with gold evidence matches.
-
-    This is blind to gold evidence during steps 1-3 (retrieval).
-    Gold evidence is used only in step 4 (reranking) and step 5 (annotation).
-    """
-    memory_items = list(case.extracted_memory)
-    n = len(memory_items)
-    if n == 0:
-        return []
-
-    query_tokens = _tokenize(case.query)
-    if not query_tokens:
-        return _all_rank_zero_traces(case, tuple(memory_items), "hybrid_rerank")
-
-    # --- BM25 scores ---
-    doc_tokens_list = [_tokenize(item.text) for item in memory_items]
-    bm25_scores = _compute_bm25_scores(query_tokens, doc_tokens_list)
-
-    # --- TF-IDF cosine scores ---
-    query_vector, doc_vectors = _build_tfidf_vectors(memory_items, case.query)
-    vector_scores = [_cosine_similarity(query_vector, dv) for dv in doc_vectors]
-
-    # --- Min-max normalize ---
-    def _minmax(values: list[float]) -> list[float]:
-        vmin = min(values)
-        vmax = max(values)
-        if vmax == vmin:
-            return [0.5] * len(values)
-        return [(v - vmin) / (vmax - vmin) for v in values]
-
-    norm_bm25 = _minmax(bm25_scores)
-    norm_vector = _minmax(vector_scores)
-
-    # --- Weighted combination ---
-    hybrid_scores = [
-        bm25_weight * nb + vector_weight * nv
-        for nb, nv in zip(norm_bm25, norm_vector)
-    ]
-
-    # --- Rerank top-k by evidence-phrase match ---
-    gold_evidence = case.gold_evidence
-    total_evidence_units = len(gold_evidence) if gold_evidence else 1
-
-    # Rank by hybrid score first
-    hybrid_ranked = sorted(
-        range(n), key=lambda i: hybrid_scores[i], reverse=True
-    )
-    rerank_candidates = hybrid_ranked[:candidate_k]
-
-    # Compute evidence match for each candidate
-    candidate_evidence_scores: dict[int, float] = {}
-    for idx in rerank_candidates:
-        matched = 0
-        for evidence in gold_evidence:
-            phrases = evidence.required_phrases or (evidence.text,)
-            item_text = memory_items[idx].text.casefold()
-            if all(p.casefold() in item_text for p in phrases):
-                matched += 1
-        candidate_evidence_scores[idx] = matched / total_evidence_units
-
-    # Rerank candidates: primary key = evidence_match desc, secondary = hybrid desc
-    reranked_candidates = sorted(
-        rerank_candidates,
-        key=lambda i: (candidate_evidence_scores[i], hybrid_scores[i]),
-        reverse=True,
-    )
-
-    # Build final ordering: reranked top-k, then remaining in original hybrid order
-    final_order = reranked_candidates.copy()
-    for idx in hybrid_ranked:
-        if idx not in set(reranked_candidates):
-            final_order.append(idx)
-
-    # Build scores reflecting rerank: evidence-match for top-k, hybrid for rest
-    final_scores = []
-    for idx in final_order:
-        if idx in candidate_evidence_scores and candidate_evidence_scores[idx] > 0:
-            final_scores.append(candidate_evidence_scores[idx])
-        else:
-            final_scores.append(hybrid_scores[idx])
-
-    run_id = hashlib.sha256(
-        f"{case.case_id}:hybrid_rerank".encode()
-    ).hexdigest()[:12]
-
-    return _annotate_traces(
-        case=case,
-        memory_items=tuple(memory_items),
-        ranked_indices=final_order,
-        scores=final_scores,
-        retriever_name="hybrid_rerank",
-        run_id=run_id,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -430,9 +318,9 @@ def _all_rank_zero_traces(
     case: ProbeCase, memory_items: tuple, retriever_name: str
 ) -> list[RankedRetrievalTrace]:
     """Return traces with zero scores when query has no usable tokens."""
-    run_id = hashlib.sha256(
-        f"{case.case_id}:{retriever_name}".encode()
-    ).hexdigest()[:12]
+    run_id = hashlib.sha256(f"{case.case_id}:{retriever_name}".encode()).hexdigest()[
+        :12
+    ]
     traces: list[RankedRetrievalTrace] = []
     for i, item in enumerate(memory_items):
         matched = _count_matched_evidence_units(case.gold_evidence, item.text)
@@ -470,10 +358,18 @@ def compute_retrieval_metrics(
         return RetrievalMetrics(
             retriever_name=retriever_name,
             case_id=case_id,
-            recall_at_1=0.0, recall_at_3=0.0, recall_at_5=0.0, recall_at_10=0.0,
-            mrr=0.0, ndcg_at_10=0.0,
-            precision_at_1=0.0, precision_at_3=0.0, precision_at_5=0.0,
-            context_noise_ratio=0.0, answer_accuracy=0.0, answer_f1=0.0,
+            recall_at_1=0.0,
+            recall_at_3=0.0,
+            recall_at_5=0.0,
+            recall_at_10=0.0,
+            mrr=0.0,
+            ndcg_at_10=0.0,
+            precision_at_1=0.0,
+            precision_at_3=0.0,
+            precision_at_5=0.0,
+            context_noise_ratio=0.0,
+            answer_accuracy=0.0,
+            answer_f1=0.0,
         )
 
     total_gold = sum(1 for t in traces if t.is_gold_support)
@@ -497,17 +393,14 @@ def compute_retrieval_metrics(
         return found / limit
 
     # nDCG@10
-    max_evidence = max(
-        (t.matched_gold_evidence_units for t in traces), default=1
-    )
+    max_evidence = max((t.matched_gold_evidence_units for t in traces), default=1)
     dcg = 0.0
     for i, t in enumerate(traces[:10]):
         rel = t.matched_gold_evidence_units / max_evidence if max_evidence > 0 else 0.0
-        dcg += (2.0 ** rel - 1.0) / math.log2(i + 2)
+        dcg += (2.0**rel - 1.0) / math.log2(i + 2)
     ideal_rel = 1.0
     idcg = sum(
-        (2.0 ** ideal_rel - 1.0) / math.log2(i + 2)
-        for i in range(min(total_gold, 10))
+        (2.0**ideal_rel - 1.0) / math.log2(i + 2) for i in range(min(total_gold, 10))
     )
     ndcg_val = dcg / idcg if idcg > 0 else 0.0
 
@@ -545,8 +438,8 @@ def compute_retrieval_metrics(
 
 def _answer_token_f1(predicted_text: str, gold_answer: str) -> float:
     """Token-level F1 between top-1 retrieved text and gold answer."""
-    pred_tokens = set(_tokenize(predicted_text))
-    gold_tokens = set(_tokenize(gold_answer))
+    pred_tokens = set(tokenize(predicted_text))
+    gold_tokens = set(tokenize(gold_answer))
     if not pred_tokens or not gold_tokens:
         return 0.0
     tp = len(pred_tokens & gold_tokens)
@@ -602,10 +495,9 @@ def compute_evidence_boundary_audit(case: ProbeCase) -> dict[str, bool]:
 def run_retrieval_baseline_suite(
     case: ProbeCase,
 ) -> RetrievalBaselineSuiteResult:
-    """Run both retrieval baselines (BM25 + HybridRerank) for one probe case."""
+    """Run BM25 retrieval baseline for one probe case."""
     retrievers = {
         "bm25": run_bm25_retrieval,
-        "hybrid_rerank": run_hybrid_rerank_retrieval,
     }
     results: list[RetrievalBaselineResult] = []
     for name, retriever_fn in retrievers.items():

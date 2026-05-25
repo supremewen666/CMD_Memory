@@ -22,7 +22,7 @@ The first milestone is an attribution table, not a production memory architectur
 
 ## Current Execution Addendum
 
-As of 2026-05-10, issues 0001-0005 and 0009 are complete:
+As of 2026-05-19, issues 0001-0015 are complete. 453 tests pass, 622 subtests pass. V1 label expansion complete (issues 0011-0012: all 11 pipeline labels active). V1 coupled-failure recalibration and memory-probe baseline complete (issue 0013). mem0 adapter (first CMD-Skill Adapter target) complete (issue 0014). Letta adapter (second CMD-Skill Adapter target) complete (issue 0015). V1→V2 gate passes with both `mem0_integrated=True` and `letta_integrated=True`.
 
 - one `retrieval_error` probe case loads through the public CMD-Audit harness;
 - Oracle Retrieval recovers the answer and produces a correct attribution row;
@@ -31,10 +31,18 @@ As of 2026-05-10, issues 0001-0005 and 0009 are complete:
 - Subagent Judge Monitor is leak-safe with enum-locked `anomaly_reason` and opaque evidence pointers;
 - the six V0 replay paths produce one smoke attribution row per V0 label;
 - Post-Repair Context Replay outputs three-value `repair_assessment` (`recovered`/`partial`/`failed`);
-- `artifacts/attribution_table.csv`, `artifacts/comparison_metrics.csv`, and `artifacts/attribution_confusion_matrix.csv` exist as initial smoke artifacts;
-- 57 tests pass.
+- V1 `ingestion_error` + `route_error` labels implemented: 8-label pipeline, 7-replay V1 portfolio, `has_ingestion_trace` boundary, `oracle_route` store enumeration;
+- V1 `granularity_error` + `graph_error` + `safety_error` labels implemented: 11-label pipeline, 10-replay V1 portfolio;
+- V1 coupled-failure recalibration: configurable `top_k` parameter (default 2, supports 3+), `close_deltas` transparent delta distribution;
+- V1 memory-probe 3x2 grid baseline: 3 write strategies × 2 retrieval methods (cosine + BM25; dense retrieval deferred to V1 adapter layer per issue 0008), aggregate best-cell accuracy in `comparison_metrics.csv`;
+- 4 retrieval helpers made public (`tokenize`, `compute_bm25_scores`, `build_tfidf_vectors`, `cosine_similarity`) for cross-module reuse;
+- mem0 adapter (`Mem0Adapter` with `intercept_add`/`intercept_search` sandbox-interception, recorded-trace mode, adapter-label parity);
+- `artifacts/attribution_table.csv` with `top_k_labels` and `close_deltas` columns; `artifacts/comparison_metrics.csv` with optional `memory_probe_best_accuracy` column;
+- Letta adapter (`LettaAdapter` with `intercept_core_write`/`intercept_archival_store`/`intercept_recall` three-cut-point sandbox-interception, tripartite memory model, recorded-trace mode, adapter-label parity, cross-agent non-regression);
+- V1→V2 gate now passes with both `mem0_integrated=True` and `letta_integrated=True`.
+- 453 tests pass, 622 subtests pass.
 
-The active slice is issue 0006: validate targeted memory fixes.
+The active slice is issue 0016: RPE prefilter (evidence-surprise scoring, top-k replay selection).
 
 ## Competitive Landscape Addendum (2026-05-10 Metabolism)
 
@@ -58,7 +66,7 @@ V0 covers six core pipeline labels:
 - `injection_error`
 - `reasoning_error`
 
-`granularity_error`, `route_error`, `graph_error`, `safety_error`, and `ingestion_error` are deferred to V1/V2.
+`granularity_error`, `graph_error`, and `safety_error` are deferred to V1 (issue 0012). `route_error` and `ingestion_error` are V1-active via issue 0011.
 
 V0 excludes bad memory item labels from attribution evaluation: `item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, and `item_compression_distorted`.
 
@@ -68,7 +76,7 @@ V0 excludes bad memory item labels from attribution evaluation: `item_wrong`, `i
 - AC2: **Subagent Judge Monitor** is leak-safe: it can trigger replay but cannot emit final labels, Error-Cause-Solution, memory writes, gold answers, or full failed traces.
 - AC3: V0 attribution excludes bad memory item labels and evaluates only six pipeline labels: `write_error`, `compression_error`, `premature_extraction_error`, `retrieval_error`, `injection_error`, and `reasoning_error`.
 - AC4: Post-Repair Context Replay is a required V0 gate: it rebuilds repaired context, reruns the original failed query, does not inject the gold answer, and outputs layered scores (`post_repair_answer_score`, `post_repair_evidence_score`) with a three-value `repair_assessment` (`recovered` / `partial` / `failed`), not a binary gate.
-- AC5: `write_error` subsumes "evidence never reached the agent" cases in V0. `ingestion_error` is deferred to V1 as a potential future split if these cases have distinct repair paths.
+- AC5: `write_error` subsumes "evidence never reached the agent" cases in V0. `ingestion_error` is now a V1-active label (issue 0011) that splits these cases from `write_error` when `has_ingestion_trace=false`.
 - AC6: **Subagent Judge Monitor** `anomaly_reason` is locked to a predefined enum (`answer_vs_evidence_mismatch`, `retrieved_context_incomplete`, `evidence_recall_low`, `confidence_anomaly`); free-form natural language is prohibited. Evidence pointers are opaque IDs only, never content text.
 - AC7: ECS `cause` may describe item state in natural language but must not use V0-forbidden item label names (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) or re-declare them through natural language equivalents.
 - AC8: **CMD-Audit** write permissions are limited to replay-local sandbox (in-memory probe state, repaired context construction). It must not write to a real agent's persistent memory. Only **CMD-Skill Adapter** applies validated repairs to production agent state.
@@ -184,23 +192,27 @@ V0 proved that counterfactual attribution works on a standalone harness with 6 p
 
 2. **Standalone-to-real gap**: V0 runs on fixture-controlled memory operations. A real memory agent (mem0, Letta) has actual `add()` and `search()` calls, entity linking, multi-signal fusion, and tiering. CMD must show that its counterfactual replays can intercept real operations without knowing agent internals, and that attribution accuracy does not degrade when moving from fixtures to real systems.
 
-3. **Comparator gap**: V0 compared against evidence-recall heuristics, subagent judge, and random baselines. Memory-Probe's 3×3 grid-comparison is a stronger diagnostic baseline—it explicitly separates write quality from retrieval quality at the aggregate level. V1 must add this comparator and show CMD's case-level counterfactual attribution outperforms aggregate grid-comparison.
+3. **Comparator gap**: V0 compared against evidence-recall heuristics, subagent judge, and random baselines. Memory-Probe's 3×2 grid-comparison (3 write × 2 retrieval: cosine + BM25; dense retrieval deferred to V1 adapter layer) is a stronger diagnostic baseline—it explicitly separates write quality from retrieval quality at the aggregate level. V1 must add this comparator and show CMD's case-level counterfactual attribution outperforms aggregate grid-comparison.
 
-V1 addresses all three gaps by expanding to 11 pipeline labels, integrating with mem0 (first target) and Letta (second target), and adding memory-probe as a new baseline comparator.
+4. **Provenance gap**: CMD currently lacks influence provenance—it cannot track which memory items influenced which decisions or downstream items. Five provenance papers (MemLineage, TRACER, PACT, Execution Lineage, MemQ) in a single week confirm provenance is becoming fundamental infrastructure for memory trust and reproducibility. Without provenance tracking, CMD cannot: (a) validate `graph_error` attribution (graph edge influence requires lineage), (b) compute cascade repair (which downstream items were affected by a root failure), (c) enable MemQ TD(λ) credit propagation in V2. V1 must add basic provenance tracking: a derivation DAG recording which items influenced each new memory creation.
+
+V1 addresses all four gaps by expanding to 11 pipeline labels, integrating with mem0 (first target) and Letta (second target), adding memory-probe as a new baseline comparator, and implementing Execution Lineage DAG provenance tracking.
 
 ### V1 Solution
 
 Extend the CMD-Audit harness and introduce CMD-Skill Adapter:
 
-**Label expansion (11 labels):** Add 5 deferred pipeline labels in priority order—`ingestion_error` (split from `write_error`), `route_error`, `granularity_error`, `graph_error`, `safety_error`. Each new label has a corresponding counterfactual replay. The 11-label attribution must maintain macro F1 on the original 6-label smoke suite (no regression).
+**Label expansion (11 labels):** Add 5 deferred pipeline labels in priority order—`ingestion_error` (split from `write_error`, ✅ done issue 0011), `route_error` (✅ done issue 0011), `granularity_error` (✅ done issue 0012), `graph_error` (✅ done issue 0012), `safety_error` (✅ done issue 0012). Each new label has a corresponding counterfactual replay. All 11 pipeline labels active.
 
 **CMD-Skill Adapter (mem0 first):** Build `Mem0Adapter` with two interception cut points: `intercept_add()` for write-side replays and `intercept_search()` for retrieval-side replays. The Adapter runs sandboxed—it never mutates the original mem0 store. The ReplayEngine, Attribution, and ECS layers are unchanged from V0; only the input source changes from fixture to intercepted operations. After mem0 is proven, integrate Letta as the second agent (V1→V2 gate: ≥2 agents, no macro F1 regression).
 
-**Baseline strengthening:** Add memory-probe grid-comparison as a new comparator. Recalibrate top-2/multi-label thresholds for 11-label space (closer deltas expected). Re-run all V0 baselines against 11-label attribution.
+**Baseline strengthening:** Add memory-probe grid-comparison as a new comparator (✅ done issue 0013). Recalibrate top-2/multi-label thresholds for 11-label space with configurable `top_k` and transparent `close_deltas` (✅ done issue 0013). Re-run all V0 baselines against 11-label attribution.
 
 **Real data (researcher-led):** Mix LoCoMo/LongMemEval real data into probe cases alongside synthetic perturbations. Data construction is researcher-led; CMD-Audit consumes the resulting probe files.
 
 **RPE Pre-Filter (late V1):** Add D-MEM-style RPE gating to reduce replay cost. Deferred to late V1—not a gate prerequisite.
+
+**Provenance tracking (V1, Issue 0017):** Add Execution Lineage DAG per MemoryItem with trace-mem HMAC citation format. Phase 1 records in-edge derivation per replay (which items influenced this item's creation). Phase 2 (V2) enables cascade repair via MemQ TD(λ) on the provenance DAG. Architecture per Decision 28: `ProvenanceEdge` (source_id, target_id, operation, Citation) + `Citation` (trajectory_turn, char_span, content_hash). Required for `graph_error` validation and cascade repair integration.
 
 ### V1 Boundary Rules and Acceptance Conditions
 
@@ -209,6 +221,7 @@ Extend the CMD-Audit harness and introduce CMD-Skill Adapter:
 - **AC13 (Adapter-label parity):** For the same probe case, the mem0 adapter path and standalone harness path must produce the same attribution label. Any discrepancy is a bug.
 - **AC14 (V1→V2 gate):** At least two distinct memory agents (mem0 + Letta) must be integrated through the Adapter Interface. 11-label macro F1 on the second agent must not regress below the first agent's baseline.
 - **AC15 (ingestion vs write boundary):** `ingestion_error` is attributed only when gold evidence never reached the agent at all (no corresponding `add()` call in trace). If `add()` was called but stored wrong/unformatted content, the label remains `write_error`.
+- **AC16 (Provenance DAG completeness):** Every `MemoryItem` produced or modified by a counterfactual replay must carry `provenance: List[ProvenanceEdge]` recording in-edge derivation. Provenance completeness (fraction of items with non-empty provenance) must be measured on the 596-case suite. Content hash tamper detection must flag mismatches. `graph_error` attribution must reference provenance edges showing which graph-distractor items influenced the failed answer.
 
 ### V1 User Stories
 
@@ -220,29 +233,37 @@ Extend the CMD-Audit harness and introduce CMD-Skill Adapter:
 
 #### B. Support — Label Expansion (complexity that makes V1 more than "V0 on real system")
 
-- US37: As a researcher, I want `ingestion_error` to be split from `write_error` so that "evidence never reached the agent" is distinguished from "evidence reached the agent but was not stored."
-- US38: As a researcher, I want `route_error` diagnosed by Oracle Route replay so that wrong store/tier routing failures are attributed correctly.
-- US39: As a researcher, I want `granularity_error` diagnosed by Oracle Granularity replay so that wrong memory granularity failures are attributed correctly.
-- US40: As a researcher, I want `graph_error` diagnosed by Graph-Off replay so that graph expansion distractor failures are attributed correctly.
-- US41: As a researcher, I want `safety_error` diagnosed by Safety-Off replay so that safety filter false-positive failures are attributed correctly.
+- US37: As a researcher, I want `ingestion_error` to be split from `write_error` so that "evidence never reached the agent" is distinguished from "evidence reached the agent but was not stored." — ✅ implemented (issue 0011)
+- US38: As a researcher, I want `route_error` diagnosed by Oracle Route replay so that wrong store/tier routing failures are attributed correctly. — ✅ implemented (issue 0011)
+- US39: As a researcher, I want `granularity_error` diagnosed by Oracle Granularity replay so that wrong memory granularity failures are attributed correctly. — ✅ implemented (issue 0012)
+- US40: As a researcher, I want `graph_error` diagnosed by Graph-Off replay so that graph expansion distractor failures are attributed correctly. — ✅ implemented (issue 0012)
+- US41: As a researcher, I want `safety_error` diagnosed by Safety-Off replay so that safety filter false-positive failures are attributed correctly. — ✅ implemented (issue 0012)
 
 #### C. Validation — Baselines and Data
 
-- US42: As a researcher, I want memory-probe 3×3 grid-comparison added as a V1 baseline comparator so that CMD is measured against the strongest existing diagnostic approach.
+- US42: As a researcher, I want memory-probe 3×2 grid-comparison added as a V1 baseline comparator so that CMD is measured against the strongest existing diagnostic approach. — ✅ implemented (issue 0013)
 - US43: As a researcher, I want LoCoMo and LongMemEval real-data probe cases mixed with synthetic perturbation cases so that V1 evaluation covers both controlled and natural failure distributions.
+
+#### D. Infrastructure — Provenance Tracking (Issue 0017)
+
+- US44: As a researcher, I want each `MemoryItem` to carry a `provenance` field recording which items and operations influenced its creation (in-edge derivation DAG), so that I can trace evidence lineage through the memory pipeline.
+- US45: As a researcher, I want provenance edges to carry trace-mem HMAC citations (trajectory turn, character span, content hash) so that tampering with source evidence is detectable.
+- US46: As a researcher, I want `graph_error` attribution to reference specific provenance edges (which graph-distractor items influenced the answer), so that graph-expansion failures are validated by lineage evidence, not just recovery gain.
+- US47: As a researcher, I want provenance completeness measured across the 596-case suite (what fraction of items have full provenance chains), so that the coverage of lineage tracking is quantified for the paper.
 
 ### V1 Implementation Decisions
 
-- V1 label expansion follows priority order: `ingestion_error` → `route_error` → `granularity_error` → `graph_error` → `safety_error`. Implementation proceeds in two issues (0011: first two; 0012: remaining three).
+- V1 label expansion follows priority order: `ingestion_error` (✅ done) → `route_error` (✅ done) → `granularity_error` (✅ done) → `graph_error` (✅ done) → `safety_error` (✅ done). Implementation completed in three issues (0011: first two; 0012: remaining three; 0013: recalibration + baseline).
 - Bad memory item labels remain excluded from V1 attribution. They are deferred to V2.
 - mem0 Adapter uses exactly two interception cut points (`add()` + `search()`). No other mem0 internals are intercepted.
 - Entity linking and multi-signal fusion in mem0 are not intercepted—CMD evaluates retrieval outcomes, not retrieval internals.
 - Letta Adapter uses tier-aware interception (core write, archival store, recall retrieval) for Oracle Route replay.
 - All adapter replays run sandboxed. Store mutation by CMD-Audit during replay is a hard error.
-- Coupled-failure threshold is recalibrated for 11-label space. Multi-label (≥3) attribution is added for cases with three close deltas.
-- Memory-probe comparator implements a 3×3 grid (write strategy × retrieval method) per case, recording best grid-cell accuracy for comparison.
+- Coupled-failure threshold with configurable `top_k` (default 2, supports 3+) and full `close_deltas` transparency for 11-label space (issue 0013 ✅ done).
+- Memory-probe 3×2 grid comparator (issue 0013 ✅ done): 3 write strategies × 2 retrieval methods (cosine + BM25; dense deferred to V1 per issue 0008) per case, aggregate best-cell accuracy in `comparison_metrics.csv`.
 - LoCoMo/LongMemEval real data probe construction is researcher-led. CMD-Audit consumes the resulting probe case files without coupling to the construction process.
 - RPE Pre-Filter is implemented in late V1 (Cycle 22). It does not block V1→V2 gate.
+- Provenance tracking (Issue 0017) uses Decision 28 architecture: Execution Lineage DAG structure + trace-mem HMAC citation format. Phase 1: in-edge tracking per MemoryItem. Phase 2 (V2): cascade repair via MemQ TD(λ). `graph_error` attribution must reference provenance edges. Content hash tamper detection via `Citation.content_hash`. No cryptographic provenance (MemLineage) in V1 — deferred to V2.
 - V0+V1+V2 constitute one paper. V2 is the final module/skill. V1 claims (C7-C10) join the existing V0 claim ledger (C1-C6).
 
 ### V1 Testing Decisions
@@ -254,6 +275,7 @@ Extend the CMD-Audit harness and introduce CMD-Skill Adapter:
 - V1→V2 gate: automated check that ≥2 agents integrated AND macro F1(agent2) ≥ macro F1(agent1).
 - RPE pre-filter: batch evaluation on 50+ probe cases; false skip rate < 5%, cost reduction ≥ 30%.
 - Memory-probe comparator: produces valid accuracy scores (not NaN, not trivially zero).
+- Provenance tracking (Issue 0017): one smoke case per replay type with provenance edges recorded; provenance completeness ≥ 80% on 596-case suite; content hash mismatch → tamper detection flag; `graph_error` smoke case with provenance edges referencing distractor items; backward compatibility — existing MemoryItem without provenance works as before (provenance=None).
 
 ### V1 Out of Scope
 

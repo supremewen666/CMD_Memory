@@ -5,7 +5,7 @@ labels:
 type: AFK
 blocked_by:
   - 0003-generate-counterfactual-attribution-table
-status: ✅ done
+status: ✅ done (HybridRerank removed 2026-05-19 — BM25 only; see modify.md)
 user_stories:
   - 3
   - 4

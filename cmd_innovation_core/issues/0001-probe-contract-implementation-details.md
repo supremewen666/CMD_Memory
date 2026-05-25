@@ -1,10 +1,10 @@
-# Issue 0001 Implementation Details: Probe Dataset and Gold Evidence Contract
+# Issue 0001 实现细节：探针数据集与黄金证据合约
 
-## Purpose
+## 目的
 
-This document is the zoomed-out implementation map for issue 0001, `Define the probe dataset and gold evidence contract`.
+本文档是 issue 0001（`Define the probe dataset and gold evidence contract`）的宏观实现地图。
 
-Issue 0001 is the first executable slice of **CMD-Audit**, not the whole CMD system. Its job is to make one labeled **Memory Failure** loadable and diagnosable through the first tracer bullet:
+Issue 0001 是 **CMD-Audit** 的第一个可执行切片，而非整个 CMD 系统。其职责是让一个带标记的 **Memory Failure** 能够通过第一条示踪弹路径加载和诊断：
 
 ```text
 ProbeCase JSON
@@ -16,53 +16,53 @@ ProbeCase JSON
   -> attribution_table.csv row
 ```
 
-The implemented slice intentionally stops before a full replay engine, **Error-Cause-Solution**, **Post-Repair Context Replay**, **Subagent Judge Monitor**, or **CMD-Skill Adapter**. Those are later issue slices.
+当前实现的切片刻意在完整的重放引擎、**Error-Cause-Solution**、**Post-Repair Context Replay**、**Subagent Judge Monitor** 或 **CMD-Skill Adapter** 之前停止。这些属于后续 issue 的切片。
 
-## Source Requirements
+## 源需求
 
-The implementation follows these local planning files:
+本实现遵循以下本地规划文件：
 
 - `TASK.md`
-  - Start with issue 0001 and the first TDD tracer bullet.
-  - Define the probe case contract.
-  - Include raw events, extracted memory, gold evidence, gold answer, baseline output, perturbation label, and scoring fields.
-  - Add one minimal `retrieval_error` case where extracted memory contains gold evidence, baseline retrieval misses it, and Oracle Retrieval recovers the answer.
-  - Do not implement the full replay engine before the first red-green path exists.
+  - 从 issue 0001 和第一条 TDD 示踪弹开始。
+  - 定义探针案例合约。
+  - 包含原始事件、提取后的记忆、黄金证据、黄金答案、基线输出、扰动标签和评分字段。
+  - 添加一个最小的 `retrieval_error` 案例：提取后的记忆包含黄金证据，基线检索遗漏了它，Oracle Retrieval 恢复了答案。
+  - 在第一条红绿路径存在之前，不要实现完整的重放引擎。
 - `CLAUDE.md`
-  - Treat `cmd_innovation_core/` as source of truth.
-  - Keep **CMD-Audit** separate from **CMD-Skill Adapter**.
-  - Keep V0 scoped to six pipeline labels.
-  - Do not emit bad memory item labels in V0 attribution.
+  - 将 `cmd_innovation_core/` 视为事实来源。
+  - 保持 **CMD-Audit** 与 **CMD-Skill Adapter** 分离。
+  - 将 V0 范围限定在六个 pipeline 标签内。
+  - 在 V0 归因中不要输出坏的 Memory Item 标签。
 - `cmd_innovation_core/CONTEXT.md`
-  - Use **Memory Failure**, **Memory Item**, **Memory Pipeline**, **Counterfactual Replay**, **Recovery Gain**, and **Operation-Level Attribution** precisely.
-  - `retrieval_error` means correct memory exists in recoverable form but was not retrieved.
-  - If raw events contain evidence but extracted memory cannot recover it, future code must prefer `premature_extraction_error`, not `retrieval_error`.
+  - 精确使用 **Memory Failure**、**Memory Item**、**Memory Pipeline**、**Counterfactual Replay**、**Recovery Gain** 和 **Operation-Level Attribution**。
+  - `retrieval_error` 表示正确记忆以可恢复形式存在但未被检索到。
+  - 如果原始事件包含证据但提取后的记忆无法恢复它，后续代码必须优先使用 `premature_extraction_error`，而非 `retrieval_error`。
 - `cmd_innovation_core/prd/cmd_minimal_probe_prd.md`
-  - Make the probe dataset the first deep module.
-  - Make the replay engine the second deep module.
-  - Make the attribution layer the third deep module.
-  - Use rule-based replay deltas first.
+  - 将探针数据集作为第一个深层模块。
+  - 将重放引擎作为第二个深层模块。
+  - 将归因层作为第三个深层模块。
+  - 首先使用基于规则的重放增量。
 - `cmd_innovation_core/tdd/cmd_tracer_bullets.md`
-  - Cycle 1: recoverable extracted memory + failed baseline retrieval + successful Oracle Retrieval = `retrieval_error`.
+  - 周期 1：可恢复的提取后记忆 + 基线检索失败 + Oracle Retrieval 成功 = `retrieval_error`。
 
-## Current Code Artifacts
+## 当前代码工件
 
-| Artifact | Role in issue 0001 |
+| 工件 | 在 issue 0001 中的角色 |
 | --- | --- |
-| `cmd_audit/models.py` | Probe case contract and JSON loader. |
-| `cmd_audit/labels.py` | V0 label boundary and replay-to-label mapping. |
-| `cmd_audit/scoring.py` | Deterministic answer/evidence scoring helpers. |
-| `cmd_audit/replays.py` | First Counterfactual Replay: Oracle Retrieval. |
-| `cmd_audit/attribution.py` | Recovery Gain ranking and Operation-Level Attribution. |
-| `cmd_audit/harness.py` | Public harness entry points and CSV table writer. |
-| `cmd_audit/cli.py` | CLI entry point for the standalone research harness. |
-| `cmd_audit/__main__.py` | Enables `python3 -m cmd_audit ...`. |
-| `cmd_audit/__init__.py` | Small public import surface. |
-| `data/probe_cases/v0_retrieval_error_case.json` | First executable synthetic probe case. |
-| `tests/test_cmd_audit_tracer_bullet.py` | Behavior-level tests for the first tracer bullet and label boundaries. |
-| `artifacts/attribution_table.csv` | First generated attribution evidence artifact. |
+| `cmd_audit/models.py` | 探针案例合约和 JSON 加载器。 |
+| `cmd_audit/labels.py` | V0 标签边界和重放到标签的映射。 |
+| `cmd_audit/scoring.py` | 确定性的答案/证据评分辅助函数。 |
+| `cmd_audit/replays.py` | 第一个 Counterfactual Replay：Oracle Retrieval。 |
+| `cmd_audit/attribution.py` | Recovery Gain 排序和 Operation-Level Attribution。 |
+| `cmd_audit/harness.py` | 公开的 harness 入口点和 CSV 表格写入器。 |
+| `cmd_audit/cli.py` | 独立研究 harness 的 CLI 入口点。 |
+| `cmd_audit/__main__.py` | 支持 `python3 -m cmd_audit ...`。 |
+| `cmd_audit/__init__.py` | 小型公开导入接口。 |
+| `data/probe_cases/v0_retrieval_error_case.json` | 第一个可执行的合成探针案例。 |
+| `tests/test_cmd_audit_tracer_bullet.py` | 第一条示踪弹和标签边界的行为级测试。 |
+| `artifacts/attribution_table.csv` | 第一个人工生成的归因证据工件。 |
 
-## Zoom-Out Module Map
+## 宏观模块地图
 
 ```text
 cmd_audit.__main__
@@ -89,63 +89,63 @@ cmd_audit.__main__
       -> harness.write_attribution_table
 ```
 
-Domain reading:
+领域含义：
 
-- `models.py` owns the **Memory Failure** probe contract.
-- `labels.py` enforces the **V0 Core Label Set**.
-- `replays.py` runs a controlled **Counterfactual Replay**.
-- `scoring.py` computes answer and evidence scores.
-- `attribution.py` converts **Recovery Gain** into **Operation-Level Attribution**.
-- `harness.py` is the **CMD-Audit** public surface for this first slice.
-- `cli.py` is a standalone runner, not a **CMD-Skill Adapter**.
+- `models.py` 拥有 **Memory Failure** 探针合约。
+- `labels.py` 强制实施 **V0 Core Label Set**。
+- `replays.py` 运行受控的 **Counterfactual Replay**。
+- `scoring.py` 计算答案和证据得分。
+- `attribution.py` 将 **Recovery Gain** 转换为 **Operation-Level Attribution**。
+- `harness.py` 是此第一切片的 **CMD-Audit** 公开接口。
+- `cli.py` 是独立运行器，而非 **CMD-Skill Adapter**。
 
-## Probe Case Contract
+## 探针案例合约
 
-The JSON fixture in `data/probe_cases/v0_retrieval_error_case.json` is the concrete contract example.
+`data/probe_cases/v0_retrieval_error_case.json` 中的 JSON fixture 即为具体的合约示例。
 
-Required top-level fields:
+必需的顶级字段：
 
-| JSON field | Python representation | Domain meaning |
+| JSON 字段 | Python 表示 | 领域含义 |
 | --- | --- | --- |
-| `case_id` | `ProbeCase.case_id` | Stable synthetic case identifier. |
-| `query` | `ProbeCase.query` | Original failed query for the Memory-Augmented Agent. |
-| `raw_events` | `tuple[RawEvent, ...]` | Pre-extraction history or event trace. |
-| `extracted_memory` | `tuple[MemoryItem, ...]` | Stored recoverable Memory Items. |
-| `gold_evidence` | `tuple[GoldEvidence, ...]` | Evidence needed to score replay success. |
-| `gold_answer` | `ProbeCase.gold_answer` | Expected answer used only for scoring, not injected into Post-Repair Context Replay. |
-| `baseline_outputs` | `tuple[BaselineOutput, ...]` | Failed outputs from fixed-summary/vector-memory baselines. |
-| `perturbation_label` | validated V0 label | Known synthetic failure cause for evaluation. |
-| `scoring` | `ScoringSpec` | Declares answer/evidence metric names. |
+| `case_id` | `ProbeCase.case_id` | 稳定的合成案例标识符。 |
+| `query` | `ProbeCase.query` | Memory-Augmented Agent 的原始失败查询。 |
+| `raw_events` | `tuple[RawEvent, ...]` | 提取前的历史或事件轨迹。 |
+| `extracted_memory` | `tuple[MemoryItem, ...]` | 已存储的可恢复 Memory Item 集合。 |
+| `gold_evidence` | `tuple[GoldEvidence, ...]` | 评分重放成功所需的证据。 |
+| `gold_answer` | `ProbeCase.gold_answer` | 仅用于评分的预期答案，不注入 Post-Repair Context Replay。 |
+| `baseline_outputs` | `tuple[BaselineOutput, ...]` | 来自 fixed-summary/vector-memory 基线的失败输出。 |
+| `perturbation_label` | 经过验证的 V0 标签 | 已知的合成失败原因，用于评估。 |
+| `scoring` | `ScoringSpec` | 声明答案/证据指标名称。 |
 
-For the current case:
+对于当前案例：
 
-- Raw event `evt-001` contains the true decision: Mira chose Lisbon.
-- Extracted memory `mem-001` preserves that gold evidence.
-- Baseline `vector_memory` retrieves `mem-002`, a distractor about Porto.
-- Baseline answer is wrong: `Porto`.
-- Oracle Retrieval recovers `mem-001`, answers `Lisbon`, and yields Recovery Gain `1.000`.
-- CMD-Audit predicts `retrieval_error`.
+- 原始事件 `evt-001` 包含真实决策：Mira 选择了 Lisbon。
+- 提取后的记忆 `mem-001` 保留了该黄金证据。
+- 基线 `vector_memory` 检索到了 `mem-002`，一个关于 Porto 的干扰项。
+- 基线答案是错误的：`Porto`。
+- Oracle Retrieval 恢复到 `mem-001`，回答 `Lisbon`，产生 Recovery Gain `1.000`。
+- CMD-Audit 预测为 `retrieval_error`。
 
-## Function-Level Contract
+## 函数级合约
 
 ### `cmd_audit/labels.py`
 
 #### `LabelValidationError`
 
-Purpose:
+目的：
 
-- Signals that a label violates the **V0 Core Label Set** boundary.
+- 表示某个标签违反了 **V0 Core Label Set** 边界。
 
-Used by:
+使用者：
 
-- `validate_v0_label`.
-- Tests that assert bad memory item labels and deferred pipeline labels are rejected.
+- `validate_v0_label`。
+- 断言坏 Memory Item 标签和延迟 pipeline 标签应被拒绝的测试。
 
 #### `validate_v0_label(label: str) -> str`
 
-Purpose:
+目的：
 
-- Accepts only the six V0 pipeline labels:
+- 仅接受六个 V0 pipeline 标签：
   - `write_error`
   - `compression_error`
   - `premature_extraction_error`
@@ -153,48 +153,48 @@ Purpose:
   - `injection_error`
   - `reasoning_error`
 
-Behavior:
+行为：
 
-- Returns the label unchanged when it is in `V0_PIPELINE_LABELS`.
-- Raises `LabelValidationError` for bad **Memory Item** labels:
+- 当标签在 `V0_PIPELINE_LABELS` 中时，原样返回标签。
+- 对坏的 **Memory Item** 标签抛出 `LabelValidationError`：
   - `item_wrong`
   - `item_stale`
   - `item_conflict`
   - `item_poisoned`
   - `item_compression_distorted`
-- Raises `LabelValidationError` for deferred pipeline labels:
+- 对延迟的 pipeline 标签抛出 `LabelValidationError`：
   - `granularity_error`
   - `route_error`
   - `graph_error`
   - `safety_error`
-- Raises `LabelValidationError` for unknown labels.
+- 对未知标签抛出 `LabelValidationError`。
 
-Why issue 0001 needs it:
+为什么 issue 0001 需要它：
 
-- The probe dataset contract must not accidentally admit V1/V2 labels or item-level labels into V0 attribution scoring.
+- 探针数据集合约不得意外地将 V1/V2 标签或 item 级标签纳入 V0 归因评分。
 
-Callers:
+调用者：
 
-- `ProbeCase.from_mapping` validates each case's `perturbation_label`.
-- `assign_attribution` validates the final predicted label.
-- `V0LabelBoundaryTest.test_v0_accepts_only_pipeline_labels` verifies boundary behavior.
+- `ProbeCase.from_mapping` 验证每个案例的 `perturbation_label`。
+- `assign_attribution` 验证最终预测标签。
+- `V0LabelBoundaryTest.test_v0_accepts_only_pipeline_labels` 验证边界行为。
 
-Constants:
+常量：
 
-- `V0_PIPELINE_LABELS` is the allowed V0 scoring set.
-- `OUT_OF_SCOPE_ITEM_LABELS` documents explicitly excluded item labels.
-- `DEFERRED_PIPELINE_LABELS` documents deferred V1/V2 labels.
-- `REPLAY_TO_LABEL` maps replay names to the pipeline labels that they diagnose.
+- `V0_PIPELINE_LABELS` 是允许的 V0 评分集合。
+- `OUT_OF_SCOPE_ITEM_LABELS` 记录显式排除的 item 标签。
+- `DEFERRED_PIPELINE_LABELS` 记录延迟的 V1/V2 标签。
+- `REPLAY_TO_LABEL` 将重放名称映射到其诊断的 pipeline 标签。
 
 ### `cmd_audit/models.py`
 
 #### `ProbeCaseError`
 
-Purpose:
+目的：
 
-- Signals malformed probe JSON or contract violations.
+- 表示格式错误的探针 JSON 或合约违规。
 
-Used by:
+使用者：
 
 - `_required_str`
 - `load_probe_cases`
@@ -202,226 +202,226 @@ Used by:
 
 #### `RawEvent.from_mapping(cls, value: dict[str, Any]) -> RawEvent`
 
-Purpose:
+目的：
 
-- Converts one raw event JSON object into an immutable `RawEvent`.
+- 将一个原始事件 JSON 对象转换为不可变的 `RawEvent`。
 
-Required JSON fields:
+必需的 JSON 字段：
 
 - `event_id`
 - `text`
 
-Domain meaning:
+领域含义：
 
-- Represents pre-extraction evidence available to future **Verbatim Event Oracle** logic.
+- 表示未来 **Verbatim Event Oracle** 逻辑可用的提取前证据。
 
-Current issue 0001 usage:
+当前 issue 0001 用法：
 
-- Loaded as part of `ProbeCase.from_mapping`.
-- Ensures the case distinguishes raw events from extracted memory.
+- 作为 `ProbeCase.from_mapping` 的一部分加载。
+- 确保案例区分原始事件与提取后的记忆。
 
 #### `MemoryItem.from_mapping(cls, value: dict[str, Any]) -> MemoryItem`
 
-Purpose:
+目的：
 
-- Converts one extracted memory JSON object into an immutable `MemoryItem`.
+- 将一个提取后的记忆 JSON 对象转换为不可变的 `MemoryItem`。
 
-Required JSON fields:
+必需的 JSON 字段：
 
 - `memory_id`
 - `text`
 
-Optional JSON field:
+可选的 JSON 字段：
 
 - `source_event_ids`
 
-Domain meaning:
+领域含义：
 
-- Represents a recoverable **Memory Item** after ingestion/extraction.
+- 表示摄入/提取后的一个可恢复 **Memory Item**。
 
-Current issue 0001 usage:
+当前 issue 0001 用法：
 
-- Oracle Retrieval can recover gold evidence only if `GoldEvidence.source_memory_id` points to one of these Memory Items.
+- 只有当 `GoldEvidence.source_memory_id` 指向这些 Memory Item 之一时，Oracle Retrieval 才能恢复黄金证据。
 
 #### `GoldEvidence.from_mapping(cls, value: dict[str, Any]) -> GoldEvidence`
 
-Purpose:
+目的：
 
-- Converts one gold evidence JSON object into an immutable `GoldEvidence`.
+- 将一个黄金证据 JSON 对象转换为不可变的 `GoldEvidence`。
 
-Required JSON fields:
+必需的 JSON 字段：
 
 - `evidence_id`
 - `text`
 
-Optional JSON fields:
+可选的 JSON 字段：
 
 - `source_memory_id`
 - `source_event_id`
 - `required_phrases`
 
-Domain meaning:
+领域含义：
 
-- Defines the evidence that a Counterfactual Replay must recover.
+- 定义 Counterfactual Replay 必须恢复的证据。
 
-Current issue 0001 usage:
+当前 issue 0001 用法：
 
-- For `retrieval_error`, `source_memory_id` must identify a real Memory Item in `extracted_memory`.
-- `required_phrases` drives `evidence_recall_from_text`.
+- 对于 `retrieval_error`，`source_memory_id` 必须指向 `extracted_memory` 中一个真实存在的 Memory Item。
+- `required_phrases` 驱动 `evidence_recall_from_text`。
 
 #### `BaselineOutput.from_mapping(cls, value: dict[str, Any]) -> BaselineOutput`
 
-Purpose:
+目的：
 
-- Converts one baseline output JSON object into an immutable `BaselineOutput`.
+- 将一个基线输出 JSON 对象转换为不可变的 `BaselineOutput`。
 
-Required JSON fields:
+必需的 JSON 字段：
 
 - `baseline_name`
 - `answer`
 
-Optional JSON fields:
+可选的 JSON 字段：
 
 - `retrieved_memory_ids`
 - `answer_score`
 - `evidence_score`
 - `injected_context`
 
-Domain meaning:
+领域含义：
 
-- Records the failed starting point before CMD-Audit replays.
+- 记录 CMD-Audit 重放前的失败起点。
 
-Current issue 0001 usage:
+当前 issue 0001 用法：
 
-- The first baseline is `vector_memory`.
-- It retrieves distractor `mem-002`, answers `Porto`, and starts with answer/evidence scores of `0.0`.
+- 第一个基线是 `vector_memory`。
+- 它检索到干扰项 `mem-002`，回答 `Porto`，答案/证据得分初始为 `0.0`。
 
 #### `ScoringSpec.from_mapping(cls, value: dict[str, Any] | None) -> ScoringSpec`
 
-Purpose:
+目的：
 
-- Loads the scoring metric names declared by the probe case.
+- 加载探针案例声明的评分指标名称。
 
-Defaults:
+默认值：
 
 - `answer_metric = "casefold_exact_match"`
 - `evidence_metric = "gold_evidence_recall"`
 
-Domain meaning:
+领域含义：
 
-- Keeps the probe contract explicit about how answer score and evidence score are measured.
+- 使探针合约明确声明答案得分和证据得分如何衡量。
 
-Current issue 0001 usage:
+当前 issue 0001 用法：
 
-- The actual deterministic implementations live in `scoring.py`.
-- Future cases can keep the same declared metric names while expanding fixtures.
+- 实际的确定性实现位于 `scoring.py`。
+- 后续案例可以在扩展 fixture 的同时保持相同的声明指标名称。
 
 #### `ProbeCase.from_mapping(cls, value: dict[str, Any]) -> ProbeCase`
 
-Purpose:
+目的：
 
-- Constructs a complete immutable `ProbeCase` from one JSON object.
+- 从一个 JSON 对象构建完整的不可变 `ProbeCase`。
 
-Work performed:
+执行的工作：
 
-- Reads required scalar fields with `_required_str`.
-- Converts `raw_events` through `RawEvent.from_mapping`.
-- Converts `extracted_memory` through `MemoryItem.from_mapping`.
-- Converts `gold_evidence` through `GoldEvidence.from_mapping`.
-- Converts `baseline_outputs` through `BaselineOutput.from_mapping`.
-- Validates `perturbation_label` through `validate_v0_label`.
-- Loads scoring through `ScoringSpec.from_mapping`.
-- Calls `ProbeCase.validate`.
+- 使用 `_required_str` 读取必需的标量字段。
+- 通过 `RawEvent.from_mapping` 转换 `raw_events`。
+- 通过 `MemoryItem.from_mapping` 转换 `extracted_memory`。
+- 通过 `GoldEvidence.from_mapping` 转换 `gold_evidence`。
+- 通过 `BaselineOutput.from_mapping` 转换 `baseline_outputs`。
+- 通过 `validate_v0_label` 验证 `perturbation_label`。
+- 通过 `ScoringSpec.from_mapping` 加载 scoring。
+- 调用 `ProbeCase.validate`。
 
-Domain meaning:
+领域含义：
 
-- This is the core issue 0001 contract boundary. Everything downstream assumes that a loaded `ProbeCase` has separated raw events, extracted memory, gold evidence, baseline outputs, gold answer, perturbation label, and scoring fields.
+- 这是 issue 0001 的核心合约边界。所有下游都假设加载后的 `ProbeCase` 已将原始事件、提取后的记忆、黄金证据、基线输出、黄金答案、扰动标签和评分字段彼此分离。
 
-Callers:
+调用者：
 
-- `load_probe_cases`.
-- Tests constructing a deliberately broken case.
+- `load_probe_cases`。
+- 构建故意破坏案例的测试。
 
 #### `ProbeCase.primary_baseline(self) -> BaselineOutput`
 
-Purpose:
+目的：
 
-- Returns the first baseline output for the initial tracer bullet.
+- 返回第一个基线输出，用于初始示踪弹。
 
-Domain meaning:
+领域含义：
 
-- The first slice needs one failed baseline starting point before measuring replay Recovery Gain.
+- 第一切片需要一个失败的基线起跑点，然后才能测量重放 Recovery Gain。
 
-Current limitation:
+当前限制：
 
-- V0 issue 0001 uses only the first baseline for `run_case`.
-- Issue 0002 should generalize baseline comparison across fixed-summary and vector-memory behavior.
+- V0 issue 0001 对 `run_case` 仅使用第一个基线。
+- Issue 0002 应跨 fixed-summary 和 vector-memory 行为推广基线比较。
 
 #### `ProbeCase.validate(self) -> None`
 
-Purpose:
+目的：
 
-- Enforces structural invariants after object construction.
+- 在对象构造后强制实施结构不变量。
 
-Checks:
+检查项：
 
-- `raw_events` is not empty.
-- `extracted_memory` is not empty.
-- `gold_evidence` is not empty.
-- `baseline_outputs` is not empty.
-- Every `GoldEvidence.source_memory_id`, when present, points to an existing `MemoryItem.memory_id`.
+- `raw_events` 不为空。
+- `extracted_memory` 不为空。
+- `gold_evidence` 不为空。
+- `baseline_outputs` 不为空。
+- 每一个 `GoldEvidence.source_memory_id`（当存在时）必须指向一个实际存在的 `MemoryItem.memory_id`。
 
-Why issue 0001 needs it:
+为什么 issue 0001 需要它：
 
-- The first `retrieval_error` tracer bullet depends on gold evidence being recoverable from extracted memory.
-- If `GoldEvidence.source_memory_id` points nowhere, Oracle Retrieval would be testing a broken fixture rather than a retrieval failure.
+- 第一条 `retrieval_error` 示踪弹依赖于黄金证据能够从提取后的记忆中恢复。
+- 如果 `GoldEvidence.source_memory_id` 指向空，Oracle Retrieval 将是在测试一个损坏的 fixture 而非检索失败。
 
-Callers:
+调用者：
 
-- `ProbeCase.from_mapping`.
+- `ProbeCase.from_mapping`。
 
 #### `load_probe_cases(path: str | Path) -> list[ProbeCase]`
 
-Purpose:
+目的：
 
-- Public file loader for probe datasets.
+- 探针数据集的公开文件加载器。
 
-Behavior:
+行为：
 
-- Reads UTF-8 JSON.
-- Accepts either:
-  - one JSON object, or
-  - a list of JSON objects.
-- Converts each object through `ProbeCase.from_mapping`.
-- Raises `ProbeCaseError` if the JSON top level is neither object nor list.
+- 读取 UTF-8 JSON。
+- 接受以下格式之一：
+  - 一个 JSON 对象，或
+  - 一个 JSON 对象列表。
+- 将每个对象通过 `ProbeCase.from_mapping` 转换。
+- 如果 JSON 顶层既不是对象也不是列表，抛出 `ProbeCaseError`。
 
-Domain meaning:
+领域含义：
 
-- This is the first public dataset-loading API for the standalone **CMD-Audit** harness.
+- 这是独立 **CMD-Audit** harness 的第一个公开数据集加载 API。
 
-Callers:
+调用者：
 
-- `cli.main`.
-- `tests/test_cmd_audit_tracer_bullet.py`.
-- External users can import it from `cmd_audit`.
+- `cli.main`。
+- `tests/test_cmd_audit_tracer_bullet.py`。
+- 外部用户可以从 `cmd_audit` 导入它。
 
 #### `_required_str(value: dict[str, Any], key: str) -> str`
 
-Purpose:
+目的：
 
-- Internal helper for required non-empty string fields.
+- 用于必需的非空字符串字段的内部辅助函数。
 
-Behavior:
+行为：
 
-- Raises `ProbeCaseError` when the key is absent.
-- Raises `ProbeCaseError` when the value is not a non-empty string.
-- Returns the raw string otherwise.
+- 当键不存在时抛出 `ProbeCaseError`。
+- 当值不是非空字符串时抛出 `ProbeCaseError`。
+- 否则返回原始字符串。
 
-Domain meaning:
+领域含义：
 
-- Keeps the case contract strict enough for 50-100 synthetic cases to fail fast on malformed identifiers and text.
+- 使案例合约足够严格，确保 50-100 个合成案例在格式错误的标识符和文本上快速失败。
 
-Callers:
+调用者：
 
 - `RawEvent.from_mapping`
 - `MemoryItem.from_mapping`
@@ -433,93 +433,93 @@ Callers:
 
 #### `answer_score(answer: str, gold_answer: str) -> float`
 
-Purpose:
+目的：
 
-- Scores answer correctness for synthetic cases.
+- 为合成案例评估答案正确性。
 
-Behavior:
+行为：
 
-- Normalizes both strings with `_normalize`.
-- Returns `1.0` for exact match after normalization.
-- Returns `0.0` otherwise.
+- 使用 `_normalize` 对两个字符串进行标准化。
+- 标准化后完全匹配返回 `1.0`。
+- 否则返回 `0.0`。
 
-Domain meaning:
+领域含义：
 
-- Produces the answer-score part of **Recovery Gain**:
+- 产生 **Recovery Gain** 的答案得分部分：
 
 ```text
 Recovery Gain = replay answer score - baseline answer score
 ```
 
-Current issue 0001 usage:
+当前 issue 0001 用法：
 
-- `Porto` vs `Lisbon` scores `0.0`.
-- `Lisbon` vs `Lisbon` scores `1.0`.
+- `Porto` 对比 `Lisbon` 得分为 `0.0`。
+- `Lisbon` 对比 `Lisbon` 得分为 `1.0`。
 
 #### `evidence_recall_from_memory_ids(case: ProbeCase, memory_ids: tuple[str, ...]) -> float`
 
-Purpose:
+目的：
 
-- Scores whether a set of retrieved memory IDs includes the required gold evidence memory IDs.
+- 评估一组检索到的 memory ID 是否包含所需的黄金证据 memory ID。
 
-Behavior:
+行为：
 
-- Builds the set of required `source_memory_id` values from `case.gold_evidence`.
-- Returns `0.0` if no required memory IDs exist.
-- Returns recall as `matched_required_ids / required_ids`.
+- 从 `case.gold_evidence` 构建所需的 `source_memory_id` 值集合。
+- 如果没有所需的 memory ID，返回 `0.0`。
+- 返回召回率为 `matched_required_ids / required_ids`。
 
-Current status:
+当前状态：
 
-- Implemented as a small baseline/evidence helper.
-- Not currently called by `run_case`.
-- Useful for issue 0002 evidence recall heuristics and baseline comparison.
+- 作为一个小型基线/证据辅助函数实现。
+- 当前未被 `run_case` 调用。
+- 对 issue 0002 证据召回启发式和基线比较有用。
 
 #### `evidence_recall_from_text(gold_evidence: tuple[GoldEvidence, ...], text: str) -> float`
 
-Purpose:
+目的：
 
-- Scores whether replay evidence text contains each gold evidence item's required phrases.
+- 评估重放证据文本是否包含每个黄金证据项的必需短语。
 
-Behavior:
+行为：
 
-- Returns `0.0` if there is no gold evidence.
-- Casefolds the evidence block.
-- For each `GoldEvidence`, uses `required_phrases` if present, otherwise uses full `GoldEvidence.text`.
-- Counts an evidence item as matched only if all its phrases appear in the evidence block.
-- Returns `matched / total_gold_evidence`.
+- 如果没有黄金证据，返回 `0.0`。
+- 对证据文本块进行 casefold。
+- 对每个 `GoldEvidence`，如果存在 `required_phrases` 则使用之，否则使用完整的 `GoldEvidence.text`。
+- 只有当证据项的所有短语都在证据文本块中出现时，才将该证据项计为匹配。
+- 返回 `matched / total_gold_evidence`。
 
-Current issue 0001 usage:
+当前 issue 0001 用法：
 
-- Oracle Retrieval builds an evidence block from `mem-001`.
-- Required phrases `Mira`, `Lisbon`, and `Q3 offsite` all appear.
-- Evidence score becomes `1.0`.
+- Oracle Retrieval 从 `mem-001` 构建证据文本块。
+- 必需短语 `Mira`、`Lisbon` 和 `Q3 offsite` 全部出现。
+- 证据得分变为 `1.0`。
 
 #### `_normalize(value: str) -> str`
 
-Purpose:
+目的：
 
-- Internal helper for answer matching.
+- 用于答案匹配的内部辅助函数。
 
-Behavior:
+行为：
 
-- Casefolds.
-- Strips surrounding whitespace.
-- Removes leading/trailing non-word punctuation.
-- Collapses repeated whitespace.
+- Casefold。
+- 去除首尾空白。
+- 去除首尾非单词标点符号。
+- 折叠重复空白。
 
-Caller:
+调用者：
 
-- `answer_score`.
+- `answer_score`。
 
 ### `cmd_audit/replays.py`
 
 #### `ReplayResult`
 
-Purpose:
+目的：
 
-- Immutable output record for one **Counterfactual Replay**.
+- 一次 **Counterfactual Replay** 的不可变输出记录。
 
-Fields:
+字段：
 
 - `replay_name`
 - `answer`
@@ -528,65 +528,65 @@ Fields:
 - `evidence_block`
 - `recovery_gain`
 
-Domain meaning:
+领域含义：
 
-- This is the first replay result shape that later issue slices can reuse for Oracle Write, Oracle Compression, Verbatim Event Oracle, Injection-Oracle, and Evidence-Given Reasoning.
+- 这是第一个重放结果形态，后续 issue 切片可以复用于 Oracle Write、Oracle Compression、Verbatim Event Oracle、Injection-Oracle 和 Evidence-Given Reasoning。
 
 #### `run_oracle_retrieval(case: ProbeCase) -> ReplayResult`
 
-Purpose:
+目的：
 
-- Runs the first implemented Counterfactual Replay.
+- 运行第一个已实现的 Counterfactual Replay。
 
-Behavior:
+行为：
 
-1. Reads the failed baseline through `case.primary_baseline`.
-2. Recovers the gold evidence block from extracted memory through `_recover_extracted_gold_evidence`.
-3. Scores evidence recovery with `evidence_recall_from_text`.
-4. Returns `case.gold_answer` only if evidence score is `1.0`.
-5. Scores the replay answer with `answer_score`.
-6. Computes `recovery_gain = replay answer score - baseline answer score`.
-7. Returns `ReplayResult(replay_name="oracle_retrieval", ...)`.
+1. 通过 `case.primary_baseline` 读取失败的基线。
+2. 通过 `_recover_extracted_gold_evidence` 从提取后的记忆中恢复黄金证据文本块。
+3. 使用 `evidence_recall_from_text` 对证据恢复评分。
+4. 仅当证据得分为 `1.0` 时返回 `case.gold_answer`。
+5. 使用 `answer_score` 对重放答案评分。
+6. 计算 `recovery_gain = replay answer score - baseline answer score`。
+7. 返回 `ReplayResult(replay_name="oracle_retrieval", ...)`。
 
-Domain meaning:
+领域含义：
 
-- Diagnoses `retrieval_error` only when the correct memory survived extraction/storage and can be recovered from `extracted_memory`.
-- It does not inspect raw events. That boundary matters because raw-event-only recovery belongs to future `verbatim_event_oracle` and `premature_extraction_error`.
+- 仅当正确记忆在提取/存储后幸存且能从 `extracted_memory` 中恢复时，才诊断为 `retrieval_error`。
+- 它不检查原始事件。这个边界很重要，因为只能从原始事件恢复的情况属于未来的 `verbatim_event_oracle` 和 `premature_extraction_error`。
 
-Callers:
+调用者：
 
-- `harness.run_case`.
+- `harness.run_case`。
 
 #### `_recover_extracted_gold_evidence(case: ProbeCase) -> str`
 
-Purpose:
+目的：
 
-- Internal helper that builds the Oracle Retrieval evidence block.
+- 构建 Oracle Retrieval 证据文本块的内部辅助函数。
 
-Behavior:
+行为：
 
-- Indexes `case.extracted_memory` by `memory_id`.
-- For each `GoldEvidence`, looks up `source_memory_id`.
-- Appends the corresponding `MemoryItem.text` when found.
-- Joins recovered memory texts with newline separators.
+- 按 `memory_id` 索引 `case.extracted_memory`。
+- 对每个 `GoldEvidence`，查找 `source_memory_id`。
+- 找到时追加对应的 `MemoryItem.text`。
+- 用换行符连接恢复的记忆文本。
 
-Domain meaning:
+领域含义：
 
-- Encodes the condition "gold evidence exists in recoverable extracted memory".
+- 编码"黄金证据存在于可恢复的提取后记忆中"这一条件。
 
-Caller:
+调用者：
 
-- `run_oracle_retrieval`.
+- `run_oracle_retrieval`。
 
 ### `cmd_audit/attribution.py`
 
 #### `AttributionResult`
 
-Purpose:
+目的：
 
-- Immutable result of Operation-Level Attribution.
+- Operation-Level Attribution 的不可变结果。
 
-Fields:
+字段：
 
 - `predicted_label`
 - `top_replay`
@@ -594,73 +594,73 @@ Fields:
 - `top2_labels`
 - `is_ambiguous`
 
-Domain meaning:
+领域含义：
 
-- Stores the failure label assigned from replay deltas rather than from a post-hoc explanation.
+- 存储从重放增量（而非事后解释）中分配的失败标签。
 
 #### `assign_attribution(replay_results: tuple[ReplayResult, ...], *, positive_gain_threshold: float = 0.0, tie_margin: float = 0.05) -> AttributionResult`
 
-Purpose:
+目的：
 
-- Converts replay deltas into an attribution label.
+- 将重放增量转换为归因标签。
 
-Behavior:
+行为：
 
-1. Requires at least one replay result.
-2. Sorts results by descending `recovery_gain`.
-3. Rejects the set if the top gain is not greater than `positive_gain_threshold`.
-4. Maps `top.replay_name` to a label through `_label_for_replay`.
-5. Validates the mapped label through `validate_v0_label`.
-6. Builds up to two close labels within `tie_margin`.
-7. Marks `is_ambiguous = True` if two close labels exist.
-8. Returns `AttributionResult`.
+1. 要求至少一个重放结果。
+2. 按 `recovery_gain` 降序排序。
+3. 如果最高增益不大于 `positive_gain_threshold`，则拒绝该集合。
+4. 通过 `_label_for_replay` 将 `top.replay_name` 映射到标签。
+5. 通过 `validate_v0_label` 验证映射后的标签。
+6. 构建最多两个在 `tie_margin` 范围内的相近标签。
+7. 如果存在两个相近标签，标记 `is_ambiguous = True`。
+8. 返回 `AttributionResult`。
 
-Domain meaning:
+领域含义：
 
-- Implements the rule-based V0 attribution principle:
+- 实现了基于规则的 V0 归因原则：
 
 ```text
 operation label = label of replay with strongest positive Recovery Gain
 ```
 
-Current issue 0001 usage:
+当前 issue 0001 用法：
 
-- Receives one replay: `oracle_retrieval`.
-- Maps it to `retrieval_error`.
-- Produces `top2_labels = ("retrieval_error",)` and `is_ambiguous = False`.
+- 接收一个重放：`oracle_retrieval`。
+- 映射到 `retrieval_error`。
+- 产生 `top2_labels = ("retrieval_error",)` 和 `is_ambiguous = False`。
 
-Future issue usage:
+未来 issue 用法：
 
-- Cycle 4 can use `tie_margin` for top-2 or multi-label behavior once more replay types exist.
+- 一旦有更多重放类型，周期 4 可以使用 `tie_margin` 实现 top-2 或多标签行为。
 
 #### `_label_for_replay(replay_name: str) -> str`
 
-Purpose:
+目的：
 
-- Internal replay-name to label lookup.
+- 内部重放名称到标签的查找。
 
-Behavior:
+行为：
 
-- Looks up `replay_name` in `REPLAY_TO_LABEL`.
-- Raises `ValueError` for unknown replay names.
+- 在 `REPLAY_TO_LABEL` 中查找 `replay_name`。
+- 对未知重放名称抛出 `ValueError`。
 
-Domain meaning:
+领域含义：
 
-- Keeps replay implementation names separate from attribution labels while preserving an explicit mapping.
+- 保持重放实现名称与归因标签分离，同时保留显式映射表。
 
-Caller:
+调用者：
 
-- `assign_attribution`.
+- `assign_attribution`。
 
 ### `cmd_audit/harness.py`
 
 #### `AuditResult`
 
-Purpose:
+目的：
 
-- Immutable row-level result for one audited probe case.
+- 一次审计探针案例的不可变行级结果。
 
-Fields:
+字段：
 
 - `case_id`
 - `perturbation_label`
@@ -670,85 +670,85 @@ Fields:
 - `replay`
 - `attribution`
 
-Domain meaning:
+领域含义：
 
-- Bundles the known synthetic label, baseline state, replay result, and CMD attribution for evidence table generation.
+- 将已知的合成标签、基线状态、重放结果和 CMD 归因捆绑在一起，用于证据表格生成。
 
 #### `AuditResult.attribution_correct(self) -> bool`
 
-Purpose:
+目的：
 
-- Reports whether CMD recovered the synthetic perturbation label.
+- 报告 CMD 是否恢复了合成扰动标签。
 
-Behavior:
+行为：
 
-- Returns `self.attribution.predicted_label == self.perturbation_label`.
+- 返回 `self.attribution.predicted_label == self.perturbation_label`。
 
-Domain meaning:
+领域含义：
 
-- First building block for later attribution accuracy and macro F1 metrics.
+- 为后续归因准确率和 Macro F1 指标提供第一个构建块。
 
-Current issue 0001 usage:
+当前 issue 0001 用法：
 
-- `retrieval_error == retrieval_error`, so the first row is correct.
+- `retrieval_error == retrieval_error`，因此第一行是正确的。
 
 #### `run_case(case: ProbeCase) -> AuditResult`
 
-Purpose:
+目的：
 
-- Public single-case CMD-Audit path for the first tracer bullet.
+- 第一条示踪弹的公开单案例 CMD-Audit 路径。
 
-Behavior:
+行为：
 
-1. Runs `run_oracle_retrieval(case)`.
-2. Passes the replay result into `assign_attribution`.
-3. Reads `case.primary_baseline`.
-4. Returns `AuditResult`.
+1. 运行 `run_oracle_retrieval(case)`。
+2. 将重放结果传入 `assign_attribution`。
+3. 读取 `case.primary_baseline`。
+4. 返回 `AuditResult`。
 
-Domain meaning:
+领域含义：
 
-- This is the minimal standalone **CMD-Audit** harness path:
+- 这是最小化的独立 **CMD-Audit** harness 路径：
 
 ```text
 ProbeCase -> Counterfactual Replay -> Recovery Gain -> Operation-Level Attribution
 ```
 
-Current limitation:
+当前限制：
 
-- It only runs Oracle Retrieval.
-- Future issues should add replay selection or a replay set without changing the `ProbeCase` contract unnecessarily.
+- 仅运行 Oracle Retrieval。
+- 后续 issue 应在不必要地扩大 `ProbeCase` 合约的前提下添加重放选择或重放集合。
 
-Callers:
+调用者：
 
-- `run_cases`.
-- Tests.
-- External users can import it from `cmd_audit`.
+- `run_cases`。
+- 测试。
+- 外部用户可以从 `cmd_audit` 导入它。
 
 #### `run_cases(cases: list[ProbeCase]) -> list[AuditResult]`
 
-Purpose:
+目的：
 
-- Applies `run_case` to a list of loaded cases.
+- 对已加载案例列表应用 `run_case`。
 
-Behavior:
+行为：
 
-- Returns one `AuditResult` per input case.
+- 每个输入案例返回一个 `AuditResult`。
 
-Domain meaning:
+领域含义：
 
-- Keeps the API compatible with the target 50-100 synthetic probe cases from `TASK.md`.
+- 保持 API 与 `TASK.md` 中目标 50-100 个合成探针案例的兼容性。
 
-Callers:
+调用者：
 
-- `cli.main`.
+- `cli.main`。
 
 #### `write_attribution_table(results: list[AuditResult], output_path: str | Path) -> None`
 
-Purpose:
+目的：
 
-- Writes a CSV evidence artifact for attribution.
+- 为归因写入 CSV 证据工件。
 
-CSV columns:
+CSV 列：
 
 - `case_id`
 - `perturbation_label`
@@ -764,33 +764,33 @@ CSV columns:
 - `is_ambiguous`
 - `attribution_correct`
 
-Behavior:
+行为：
 
-- Creates the parent output directory if needed.
-- Writes one header row.
-- Writes one row per `AuditResult`.
-- Formats numeric scores to three decimals.
-- Joins `top2_labels` with `|`.
-- Writes booleans as lowercase strings.
+- 如有需要则创建父输出目录。
+- 写入一行表头。
+- 每个 `AuditResult` 写入一行。
+- 数值得分格式化为三位小数。
+- `top2_labels` 用 `|` 连接。
+- 布尔值写为小写字符串。
 
-Domain meaning:
+领域含义：
 
-- Produces the first evidence artifact required before any attribution claim can be made.
+- 在提出任何归因声明之前，产生第一个必需的证据工件。
 
-Callers:
+调用者：
 
-- `cli.main`.
-- Tests.
+- `cli.main`。
+- 测试。
 
 ### `cmd_audit/cli.py`
 
 #### `main(argv: list[str] | None = None) -> int`
 
-Purpose:
+目的：
 
-- Command-line entry point for the standalone CMD-Audit harness.
+- 独立 CMD-Audit harness 的命令行入口点。
 
-Command:
+命令：
 
 ```bash
 python3 -m cmd_audit run \
@@ -798,42 +798,42 @@ python3 -m cmd_audit run \
   --out artifacts/attribution_table.csv
 ```
 
-Behavior:
+行为：
 
-- Parses subcommand `run`.
-- Defaults `--cases` to the first retrieval-error fixture.
-- Defaults `--out` to `artifacts/attribution_table.csv`.
-- Loads cases through `load_probe_cases`.
-- Runs cases through `run_cases`.
-- Writes CSV through `write_attribution_table`.
-- Prints how many attribution rows were written.
-- Returns `0` on success.
+- 解析子命令 `run`。
+- `--cases` 默认为第一个 retrieval-error fixture。
+- `--out` 默认为 `artifacts/attribution_table.csv`。
+- 通过 `load_probe_cases` 加载案例。
+- 通过 `run_cases` 运行案例。
+- 通过 `write_attribution_table` 写入 CSV。
+- 打印写入了多少归因行。
+- 成功时返回 `0`。
 
-Domain meaning:
+领域含义：
 
-- Provides a reproducible local execution surface for CMD-Audit.
-- It is not a production memory-agent integration and not a CMD-Skill Adapter.
+- 为 CMD-Audit 提供可复现的本地执行界面。
+- 它不是一个生产级 memory-agent 集成，也不是一个 CMD-Skill Adapter。
 
 ### `cmd_audit/__main__.py`
 
-#### Module-level `raise SystemExit(main())`
+#### 模块级 `raise SystemExit(main())`
 
-Purpose:
+目的：
 
-- Allows Python module execution with `python3 -m cmd_audit ...`.
+- 允许通过 `python3 -m cmd_audit ...` 以 Python 模块方式执行。
 
-Behavior:
+行为：
 
-- Imports `main` from `cmd_audit.cli`.
-- Converts the returned integer into the process exit status.
+- 从 `cmd_audit.cli` 导入 `main`。
+- 将返回的整数转换为进程退出状态。
 
 ### `cmd_audit/__init__.py`
 
-Purpose:
+目的：
 
-- Defines the package's public import surface.
+- 定义包的公开导入接口。
 
-Exported objects:
+导出的对象：
 
 - `AttributionResult`
 - `AuditResult`
@@ -846,219 +846,219 @@ Exported objects:
 - `validate_v0_label`
 - `write_attribution_table`
 
-Domain meaning:
+领域含义：
 
-- Keeps caller-facing CMD-Audit API narrow while implementation modules stay replaceable.
+- 保持面向调用者的 CMD-Audit API 精简，同时实现模块保持可替换。
 
-## Test-Level Contract
+## 测试级合约
 
-Tests live in `tests/test_cmd_audit_tracer_bullet.py`.
+测试位于 `tests/test_cmd_audit_tracer_bullet.py`。
 
 ### `RetrievalFailureTracerBulletTest.test_probe_case_contract_loads_retrieval_failure_case`
 
-Verifies:
+验证：
 
-- `load_probe_cases` loads the JSON fixture.
-- The perturbation label is `retrieval_error`.
-- Raw events, extracted memory, and gold evidence are present.
-- The gold answer is `Lisbon`.
-- The primary baseline is `vector_memory`.
-- The primary baseline retrieved distractor `mem-002`.
+- `load_probe_cases` 加载 JSON fixture。
+- 扰动标签为 `retrieval_error`。
+- 原始事件、提取后的记忆和黄金证据均存在。
+- 黄金答案为 `Lisbon`。
+- 主基线为 `vector_memory`。
+- 主基线检索到干扰项 `mem-002`。
 
-Requirement coverage:
+需求覆盖：
 
-- Issue 0001 case contract distinction.
-- TDD Cycle 1 setup.
+- Issue 0001 案例合约区分。
+- TDD 周期 1 设置。
 
 ### `RetrievalFailureTracerBulletTest.test_oracle_retrieval_recovers_answer_and_attributes_retrieval_error`
 
-Verifies:
+验证：
 
-- `run_case` runs `oracle_retrieval`.
-- Replay answer is `Lisbon`.
-- Replay answer score is `1.0`.
-- Replay evidence score is `1.0`.
-- Predicted label is `retrieval_error`.
-- `attribution_correct` is true.
+- `run_case` 运行 `oracle_retrieval`。
+- 重放答案为 `Lisbon`。
+- 重放答案得分为 `1.0`。
+- 重放证据得分为 `1.0`。
+- 预测标签为 `retrieval_error`。
+- `attribution_correct` 为 true。
 
-Requirement coverage:
+需求覆盖：
 
-- First red-green tracer bullet.
-- Operation-Level Attribution from Recovery Gain.
+- 第一条红绿示踪弹。
+- 从 Recovery Gain 到 Operation-Level Attribution。
 
 ### `RetrievalFailureTracerBulletTest.test_attribution_table_contains_first_retrieval_row`
 
-Verifies:
+验证：
 
-- `write_attribution_table` writes the expected CSV header.
-- The first row contains `v0-retrieval-001,retrieval_error,retrieval_error`.
+- `write_attribution_table` 写入预期的 CSV 表头。
+- 第一行包含 `v0-retrieval-001,retrieval_error,retrieval_error`。
 
-Requirement coverage:
+需求覆盖：
 
-- First evidence artifact shape for `attribution_table.csv`.
+- `attribution_table.csv` 的第一个证据工件形态。
 
 ### `V0LabelBoundaryTest.test_v0_accepts_only_pipeline_labels`
 
-Verifies:
+验证：
 
-- `retrieval_error` is accepted.
-- `item_wrong` is rejected.
-- `route_error` is rejected.
+- `retrieval_error` 被接受。
+- `item_wrong` 被拒绝。
+- `route_error` 被拒绝。
 
-Requirement coverage:
+需求覆盖：
 
-- Bad memory item labels excluded from V0.
-- Deferred pipeline labels excluded from V0.
+- 坏的 Memory Item 标签被排除在 V0 之外。
+- 延迟的 pipeline 标签被排除在 V0 之外。
 
 ### `V0LabelBoundaryTest.test_probe_case_rejects_gold_evidence_missing_from_extracted_memory`
 
-Verifies:
+验证：
 
-- A `retrieval_error` fixture is invalid if gold evidence points to a missing extracted memory item.
+- 如果黄金证据指向一个缺失的提取后记忆项，则 `retrieval_error` fixture 无效。
 
-Requirement coverage:
+需求覆盖：
 
-- Prevents false `retrieval_error` cases where the evidence was never recoverable from extracted memory.
-- Protects the boundary between `retrieval_error` and future `premature_extraction_error`.
+- 防止在证据从提取后记忆中本来就不可恢复的情况下产生虚假的 `retrieval_error` 案例。
+- 保护 `retrieval_error` 与未来 `premature_extraction_error` 之间的边界。
 
-## Label Scenario Examples for Issue 0001
+## Issue 0001 标签场景示例
 
-These examples satisfy issue 0001's contract-level requirement that each minimum V0 label has at least one scenario. Only `retrieval_error` is executable in the current code slice; the other five are contract examples for future tracer bullets.
+以下示例满足 issue 0001 的合约级要求——每个 V0 最小标签都至少有一个场景。在当前代码切片中，只有 `retrieval_error` 是可执行的；其余五个是面向未来示踪弹的合约示例。
 
 ### `write_error`
 
-Scenario:
+场景：
 
-- Raw events contain the needed evidence.
-- Extracted memory lacks any Memory Item representing that evidence.
-- Oracle Write injects a correct Memory Item.
-- The answer recovers.
+- 原始事件包含所需证据。
+- 提取后的记忆缺少任何代表该证据的 Memory Item。
+- Oracle Write 注入一个正确的 Memory Item。
+- 答案恢复。
 
-Expected attribution:
+预期归因：
 
 - `write_error`
 
-Implementation status:
+实现状态：
 
-- Label is allowed by `V0_PIPELINE_LABELS`.
-- Replay mapping exists as `REPLAY_TO_LABEL["oracle_write"] = "write_error"`.
-- Oracle Write replay is not implemented in issue 0001.
+- 标签被 `V0_PIPELINE_LABELS` 允许。
+- 重放映射存在：`REPLAY_TO_LABEL["oracle_write"] = "write_error"`。
+- Oracle Write 重放尚未在 issue 0001 中实现。
 
 ### `compression_error`
 
-Scenario:
+场景：
 
-- Raw events contain a complete fact: entity, relation, time, and constraint.
-- Extracted memory contains a compressed Memory Item that drops a critical field.
-- Oracle Compression replaces it with a complete compressed memory.
-- The answer recovers.
+- 原始事件包含完整的事实：实体、关系、时间和约束。
+- 提取后的记忆包含一个压缩过的 Memory Item，丢失了关键字段。
+- Oracle Compression 将其替换为完整的压缩记忆。
+- 答案恢复。
 
-Expected attribution:
+预期归因：
 
 - `compression_error`
 
-Implementation status:
+实现状态：
 
-- Label is allowed by `V0_PIPELINE_LABELS`.
-- Replay mapping exists as `REPLAY_TO_LABEL["oracle_compression"] = "compression_error"`.
-- Oracle Compression replay is not implemented in issue 0001.
+- 标签被 `V0_PIPELINE_LABELS` 允许。
+- 重放映射存在：`REPLAY_TO_LABEL["oracle_compression"] = "compression_error"`。
+- Oracle Compression 重放尚未在 issue 0001 中实现。
 
 ### `premature_extraction_error`
 
-Scenario:
+场景：
 
-- Raw events contain the needed evidence.
-- Extracted memory contains no recoverable representation of it because ingestion abstracted too early.
-- Oracle Retrieval over extracted memory fails.
-- Verbatim Event Oracle recovers from raw events.
+- 原始事件包含所需证据。
+- 提取后的记忆不包含该证据的可恢复表示，因为摄入时过早进行了抽象。
+- 在提取后的记忆上 Oracle Retrieval 失败。
+- Verbatim Event Oracle 从原始事件中恢复。
 
-Expected attribution:
+预期归因：
 
 - `premature_extraction_error`
 
-Implementation status:
+实现状态：
 
-- Label is allowed by `V0_PIPELINE_LABELS`.
-- Replay mapping exists as `REPLAY_TO_LABEL["verbatim_event_oracle"] = "premature_extraction_error"`.
-- Verbatim Event Oracle replay is planned for TDD Cycle 2.
+- 标签被 `V0_PIPELINE_LABELS` 允许。
+- 重放映射存在：`REPLAY_TO_LABEL["verbatim_event_oracle"] = "premature_extraction_error"`。
+- Verbatim Event Oracle 重放计划在 TDD 周期 2 中实现。
 
 ### `retrieval_error`
 
-Scenario:
+场景：
 
-- Extracted memory contains the gold evidence.
-- Baseline vector memory retrieves the wrong Memory Item.
-- Oracle Retrieval directly recovers the gold Memory Item.
-- The answer recovers.
+- 提取后的记忆包含黄金证据。
+- 基线 vector memory 检索到错误的 Memory Item。
+- Oracle Retrieval 直接恢复黄金 Memory Item。
+- 答案恢复。
 
-Expected attribution:
+预期归因：
 
 - `retrieval_error`
 
-Implementation status:
+实现状态：
 
-- Fully executable in `data/probe_cases/v0_retrieval_error_case.json`.
-- Covered by `run_oracle_retrieval`.
-- Covered by behavior tests.
+- 在 `data/probe_cases/v0_retrieval_error_case.json` 中完全可执行。
+- 被 `run_oracle_retrieval` 覆盖。
+- 被行为测试覆盖。
 
 ### `injection_error`
 
-Scenario:
+场景：
 
-- Correct Memory Item is retrieved.
-- Baseline injects it into a confusing or malformed context block.
-- Injection-Oracle provides a canonical evidence block.
-- The answer recovers.
+- 正确的 Memory Item 被检索到。
+- 基线将其注入到混乱或格式错误的上下文块中。
+- Injection-Oracle 提供规范的证据文本块。
+- 答案恢复。
 
-Expected attribution:
+预期归因：
 
 - `injection_error`
 
-Implementation status:
+实现状态：
 
-- Label is allowed by `V0_PIPELINE_LABELS`.
-- Replay mapping exists as `REPLAY_TO_LABEL["injection_oracle"] = "injection_error"`.
-- Injection-Oracle replay is not implemented in issue 0001.
+- 标签被 `V0_PIPELINE_LABELS` 允许。
+- 重放映射存在：`REPLAY_TO_LABEL["injection_oracle"] = "injection_error"`。
+- Injection-Oracle 重放尚未在 issue 0001 中实现。
 
 ### `reasoning_error`
 
-Scenario:
+场景：
 
-- Correct evidence is retrieved and injected.
-- Baseline answer is still wrong because final reasoning misuses the evidence.
-- Evidence-Given Reasoning recovers the answer.
+- 正确的证据被检索到并注入。
+- 基线答案仍然错误，因为最终推理误用了证据。
+- Evidence-Given Reasoning 恢复答案。
 
-Expected attribution:
+预期归因：
 
 - `reasoning_error`
 
-Implementation status:
+实现状态：
 
-- Label is allowed by `V0_PIPELINE_LABELS`.
-- Replay mapping exists as `REPLAY_TO_LABEL["evidence_given_reasoning"] = "reasoning_error"`.
-- Evidence-Given Reasoning replay is planned for TDD Cycle 3.
+- 标签被 `V0_PIPELINE_LABELS` 允许。
+- 重放映射存在：`REPLAY_TO_LABEL["evidence_given_reasoning"] = "reasoning_error"`。
+- Evidence-Given Reasoning 重放计划在 TDD 周期 3 中实现。
 
-## Acceptance Criteria Mapping
+## 验收标准对照
 
-| Issue 0001 AC | Current implementation |
+| Issue 0001 AC | 当前实现 |
 | --- | --- |
-| Distinguish raw events, extracted memory, gold evidence, base output, injected failure label. | `ProbeCase` fields and JSON fixture separate these fields explicitly. |
-| Include labels for six V0 pipeline labels. | `V0_PIPELINE_LABELS` includes all six labels. |
-| Exclude bad memory item labels. | `OUT_OF_SCOPE_ITEM_LABELS` and `validate_v0_label` reject them. |
-| Exclude deferred labels. | `DEFERRED_PIPELINE_LABELS` and `validate_v0_label` reject them. |
-| At least one example scenario per minimum label. | This document defines one scenario per label; only `retrieval_error` is currently executable. |
-| State answer score and evidence score measurement. | `ScoringSpec`, `answer_score`, and `evidence_recall_from_text` define current scoring. |
-| Small enough for 50-100 synthetic cases. | `load_probe_cases` accepts one case or a list; `run_cases` maps one case path over a list. |
+| 区分原始事件、提取后的记忆、黄金证据、基线输出、注入的失败标签。 | `ProbeCase` 字段和 JSON fixture 明确分离这些字段。 |
+| 包含六个 V0 pipeline 标签。 | `V0_PIPELINE_LABELS` 包含全部六个标签。 |
+| 排除坏的 Memory Item 标签。 | `OUT_OF_SCOPE_ITEM_LABELS` 和 `validate_v0_label` 拒绝它们。 |
+| 排除延迟的标签。 | `DEFERRED_PIPELINE_LABELS` 和 `validate_v0_label` 拒绝它们。 |
+| 每个最小标签至少有一个示例场景。 | 本文档为每个标签定义一个场景；当前仅 `retrieval_error` 可执行。 |
+| 说明答案得分和证据得分的衡量方式。 | `ScoringSpec`、`answer_score` 和 `evidence_recall_from_text` 定义了当前评分方式。 |
+| 体量足够小，适合 50-100 个合成案例。 | `load_probe_cases` 接受一个案例或一个列表；`run_cases` 对列表映射单案例路径。 |
 
-## Current Execution
+## 当前执行
 
-Run tests:
+运行测试：
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-Run the first CMD-Audit case:
+运行第一个 CMD-Audit 案例：
 
 ```bash
 python3 -m cmd_audit run \
@@ -1066,25 +1066,25 @@ python3 -m cmd_audit run \
   --out artifacts/attribution_table.csv
 ```
 
-Expected first CSV row:
+预期的第一行 CSV：
 
 ```text
 v0-retrieval-001,retrieval_error,retrieval_error,oracle_retrieval,vector_memory,0.000,0.000,1.000,1.000,1.000,retrieval_error,false,true
 ```
 
-## Non-Goals Preserved
+## 已保留的非目标
 
-- No production memory agent is implemented.
-- No CMD-Skill Adapter is implemented.
-- No UI or dashboard is added.
-- No learned attribution classifier is added.
-- No full replay engine is added before the first red-green path exists.
-- No bad Memory Item label is emitted as V0 attribution.
-- No Post-Repair Context Replay injects a gold answer; that gate is not implemented yet.
+- 不实现生产级 memory agent。
+- 不实现 CMD-Skill Adapter。
+- 不添加 UI 或仪表板。
+- 不添加学习型归因分类器。
+- 在第一条红绿路径存在之前不添加完整重放引擎。
+- 不输出坏的 Memory Item 标签作为 V0 归因结果。
+- Post-Repair Context Replay 不注入黄金答案；该关卡尚未实现。
 
-## Next Technical Step
+## 下一步技术动作
 
-The next tracer bullet should add a `premature_extraction_error` fixture and **Verbatim Event Oracle** replay:
+下一条示踪弹应添加一个 `premature_extraction_error` fixture 和 **Verbatim Event Oracle** 重放：
 
 ```text
 raw events contain evidence
@@ -1094,4 +1094,4 @@ Verbatim Event Oracle recovers
 predicted label = premature_extraction_error
 ```
 
-That next step should reuse `ProbeCase`, `GoldEvidence.source_event_id`, `ReplayResult`, and `assign_attribution` rather than broadening the contract prematurely.
+该下一步应复用以 `ProbeCase`、`GoldEvidence.source_event_id`、`ReplayResult` 和 `assign_attribution`，而非过早扩大合约。

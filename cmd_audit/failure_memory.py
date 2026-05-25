@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .labels import validate_v0_label
+from .labels import validate_v0_label, validate_v1_label
 from .models import ProbeCase
 from .post_repair import ECSDraft
 from .scoring import evidence_recall_from_text
@@ -14,12 +14,52 @@ from .writers import write_csv_table, write_text_artifact
 
 _STOP_WORDS = frozenset(
     {
-        "the", "a", "an", "is", "was", "are", "were", "be", "been",
-        "for", "of", "in", "to", "with", "on", "at", "by", "from",
-        "which", "what", "who", "whom", "whose", "where", "when",
-        "did", "do", "does", "has", "have", "had", "this", "that",
-        "and", "or", "not", "but", "if", "then", "else", "about",
-        "city", "chose", "choose", "selected", "select",
+        "the",
+        "a",
+        "an",
+        "is",
+        "was",
+        "are",
+        "were",
+        "be",
+        "been",
+        "for",
+        "of",
+        "in",
+        "to",
+        "with",
+        "on",
+        "at",
+        "by",
+        "from",
+        "which",
+        "what",
+        "who",
+        "whom",
+        "whose",
+        "where",
+        "when",
+        "did",
+        "do",
+        "does",
+        "has",
+        "have",
+        "had",
+        "this",
+        "that",
+        "and",
+        "or",
+        "not",
+        "but",
+        "if",
+        "then",
+        "else",
+        "about",
+        "city",
+        "chose",
+        "choose",
+        "selected",
+        "select",
     }
 )
 
@@ -51,9 +91,10 @@ class FailureMemoryRecord:
     repair_action: str
     repair_guidance: str
     trigger_signature: str
+    memory_top_terms: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        validate_v0_label(self.error_type)
+        validate_v1_label(self.error_type)
 
     @classmethod
     def from_ecs_draft(cls, ecs: ECSDraft, case: ProbeCase) -> "FailureMemoryRecord":
@@ -67,9 +108,11 @@ class FailureMemoryRecord:
             repair_action=ecs.predicted_label,
             repair_guidance=ecs.repair_guidance,
             trigger_signature=_build_trigger_signature(case.query, ecs.predicted_label),
+            memory_top_terms=compute_memory_top_terms(case.extracted_memory),
         )
 
 
+# V0 baseline — kept for paper comparison.
 @dataclass(frozen=True)
 class FailureMemoryStore:
     """Immutable store of Failure Memory records with keyword-based retrieval."""
@@ -202,7 +245,9 @@ def run_recurrence_comparison(
         case.gold_evidence, case.gold_answer, corrected_ctx, case.query
     )
 
-    full_trace_has_evidence = evidence_recall_from_text(case.gold_evidence, full_trace_ctx)
+    full_trace_has_evidence = evidence_recall_from_text(
+        case.gold_evidence, full_trace_ctx
+    )
     pollution_risk = 1.0 - full_trace_has_evidence
 
     cg_better_none = cg_ev > no_fm_ev or (cg_ev == no_fm_ev and cg_ans > no_fm_ans)
@@ -406,3 +451,138 @@ def _write_recurrence_summary(
         )
 
     write_text_artifact(path, lines)
+
+
+# ── Issue 0020-D: Failure Memory Upgrade ────────────────────────────────
+
+
+def compute_memory_top_terms(retrieved_items: tuple, top_n: int = 5) -> tuple[str, ...]:
+    """Extract top-N terms from retrieved items using simple frequency scoring.
+
+    Used as the third dimension of the composite FM retrieval key.
+    """
+    from collections import Counter
+
+    if not retrieved_items:
+        return ()
+    all_text = " ".join(
+        getattr(item, "text", str(item)) for item in retrieved_items
+    )
+    words = re.findall(r"\b[a-zA-Z]{4,}\b", all_text.casefold())
+    filtered = [w for w in words if w not in _STOP_WORDS]
+    counts = Counter(filtered)
+    return tuple(word for word, _ in counts.most_common(top_n))
+
+
+def _score_composite_key(
+    record: FailureMemoryRecord,
+    query: str,
+    label: str,
+) -> int:
+    """Score a record against a composite key (label + query + memory_terms).
+
+    Returns integer score: label_match (2) + query_overlap + stored memory-term overlap.
+    """
+    score = 0
+    if record.error_type == label:
+        score += 2
+
+    query_keywords = set(_extract_keywords(query))
+    sig_keywords = set(record.trigger_signature.casefold().split())
+    query_overlap = len(query_keywords & sig_keywords)
+    score += query_overlap
+
+    if record.memory_top_terms:
+        mem_overlap = len(set(record.memory_top_terms) & query_keywords)
+        score += mem_overlap
+
+    return score
+
+
+@dataclass(frozen=True)
+class FailureMemoryStoreV1:
+    """Upgraded Failure Memory store with composite-key retrieval."""
+
+    records: tuple[FailureMemoryRecord, ...] = ()
+
+    def add(self, record: FailureMemoryRecord) -> "FailureMemoryStoreV1":
+        return FailureMemoryStoreV1(records=self.records + (record,))
+
+    def add_if_recovered(
+        self, record: FailureMemoryRecord, assessment: str
+    ) -> "FailureMemoryStoreV1":
+        """Store only recovered ECS records (Decision 32, Point 9).
+
+        Partial and failed repairs are discarded. Per-agent persistence
+        stores as FAILURE_MEMORY.md alongside agent's MEMORY.md.
+        """
+        if assessment == "recovered":
+            return self.add(record)
+        return self
+
+    def retrieve(
+        self,
+        query: str,
+        label: str = "",
+        top_k: int = 3,
+    ) -> tuple[FailureMemoryRecord, ...]:
+        """Composite-key retrieval: label + query_keywords + memory_top_terms."""
+        scored: list[tuple[int, FailureMemoryRecord]] = []
+        for record in self.records:
+            score = _score_composite_key(record, query, label)
+            if score > 0:
+                scored.append((score, record))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return tuple(record for _, record in scored[:top_k])
+
+    def __len__(self) -> int:
+        return len(self.records)
+
+    def __bool__(self) -> bool:
+        return len(self.records) > 0
+
+
+_FM_CONTEXT_HEADER = (
+    "[Failure Memory Diagnostic Context]\n"
+    "The following shows a past error pattern similar to the current situation.\n"
+    "It contains the incorrect memory content and the evidence of why it was wrong.\n"
+)
+
+
+def build_failure_memory_context_v1(
+    records: tuple[FailureMemoryRecord, ...],
+) -> str:
+    """Build fm_context = wrong_memory + original_evidence (diagnostic signal).
+
+    Complements corrected_memory (repair signal: "what it should be").
+    """
+    if not records:
+        return ""
+    parts: list[str] = [_FM_CONTEXT_HEADER]
+    for i, record in enumerate(records, start=1):
+        parts.append(
+            f"[Past Error {i} — {record.error_type}]\n"
+            f"Wrong memory content: {record.wrong_memory}\n"
+            f"Evidence of error: {record.original_evidence}"
+        )
+    return "\n\n".join(parts)
+
+
+def build_repair_context(
+    baseline_context: str,
+    label: str,
+    evidence_block: str,
+    fm_context: str,
+) -> str:
+    """Build the full repair context: baseline + label + evidence + fm_context.
+
+    Injected at ECS stage (downstream of attribution, preserves causal purity).
+    """
+    parts = [baseline_context]
+    if label:
+        parts.append(f"[Diagnosis: {label}]")
+    if evidence_block:
+        parts.append(f"[Corrected Evidence]\n{evidence_block}")
+    if fm_context:
+        parts.append(fm_context)
+    return "\n\n".join(parts)

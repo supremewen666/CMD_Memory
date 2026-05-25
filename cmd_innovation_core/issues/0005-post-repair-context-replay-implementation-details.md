@@ -1,118 +1,118 @@
-# Issue 0005 Implementation Details: Post-Repair Context Replay
+# Issue 0005 实现细节：修复后上下文回放
 
-## Purpose
+## 目的
 
-This document is the zoomed-out implementation map for issue 0005, `Validate Post-Repair Context Replay`. It maps every function, dataclass, helper, exception, and constant to its exact source location, signature, behavior, callers, and domain meaning — in the same format as the issue 0001 and issue 0002 implementation details documents.
+本文档是 issue 0005《验证修复后上下文回放》的全局实现地图。它按照与 issue 0001 和 issue 0002 实现细节文档相同的格式，映射每个函数、数据类、辅助函数、异常和常量到其确切的源码位置、签名、行为、调用者和领域含义。
 
-Issue 0005 builds the repair-validation pipeline on top of the existing attribution layer:
+Issue 0005 在现有归因层之上构建修复-验证流水线：
 
 ```text
 ProbeCase
   -> run_case_full
-      -> run_case (existing: run_v0_replay_portfolio → assign_attribution)
-      -> draft_ecs (per-label rule-based Error-Cause-Solution)
-      -> build_repaired_context (corrected memory + repair guidance + evidence block)
-      -> run_post_repair_context_replay (three-value repair_assessment, no gold answer injection)
-      -> run_hard_case_update_baseline (generic comparison baseline)
+      -> run_case（现有：run_v0_replay_portfolio → assign_attribution）
+      -> draft_ecs（基于规则逐标签的 Error-Cause-Solution）
+      -> build_repaired_context（修正后的记忆 + 修复指导 + 证据块）
+      -> run_post_repair_context_replay（三值 repair_assessment，无金标准答案注入）
+      -> run_hard_case_update_baseline（通用对比基线）
   -> FullAuditResult
-  -> write_post_repair_table (sandbox-boundary-validated CSV)
+  -> write_post_repair_table（经沙箱边界校验的 CSV）
 ```
 
-The slice delivers four TDD cycles from `cmd_tracer_bullets.md`:
+该切片交付 `cmd_tracer_bullets.md` 中的四个 TDD 周期：
 
-| Cycle | Title | Status |
+| 周期 | 标题 | 状态 |
 | --- | --- | --- |
-| Cycle 5 | Post-Repair Context Replay | Green |
-| Cycle 12 | Three-Value Post-Repair Assessment | Green |
-| Cycle 13 | ECS Cause Item-Label-Name Prohibition | Green |
-| Cycle 15 | CMD-Audit Sandbox Write Boundary | Green |
+| Cycle 5 | Post-Repair Context Replay | 绿色 |
+| Cycle 12 | Three-Value Post-Repair Assessment | 绿色 |
+| Cycle 13 | ECS Cause Item-Label-Name Prohibition | 绿色 |
+| Cycle 15 | CMD-Audit Sandbox Write Boundary | 绿色 |
 
-Issue 0006 (`cmd_audit/repairs.py`) later builds on issue 0005's `FullAuditResult` and `run_case_full` to produce the repair success comparison table; issue 0005 remains the foundational repair-validation layer.
+Issue 0006（`cmd_audit/repairs.py`）后续在 issue 0005 的 `FullAuditResult` 和 `run_case_full` 之上构建修复成功对比表；issue 0005 是基础的修复验证层。
 
-## Source Requirements
+## 源需求
 
-The implementation follows these local documents.
+本实现遵循以下本地文档。
 
-| Source | Requirement Applied In Issue 0005 |
+| 来源 | 在 Issue 0005 中应用的需求 |
 | --- | --- |
-| `TASK.md` | Post-Repair Context Replay must rerun the original failed query with repaired context, without injecting the gold answer, and output three-value `repair_assessment` (`recovered` / `partial` / `failed`). `partial` means evidence recovered but answer still wrong — exposes coupled failures. ECS `cause` may describe item state but must not use V0-forbidden item label names or re-declare them through natural language equivalents. CMD-Audit write permissions limited to replay-local sandbox. |
-| `CLAUDE.md` | Keep CMD-Audit separate from CMD-Skill Adapter; CMD-Audit write permissions limited to replay-local sandbox; three-value `repair_assessment`; ECS `cause` item-state description rules; do not inject gold answers into Post-Repair Context Replay. |
-| `cmd_innovation_core/CONTEXT.md` | **Post-Repair Context Replay** definition: rebuilds repaired context from CMD outputs, reruns original failed query, outputs three-value `repair_assessment`, does not inject gold answer. **ECS** cause rules. **CMD-Audit** sandbox write limitation — only CMD-Skill Adapter applies validated repairs to production agent state. |
-| `cmd_innovation_core/prd/cmd_minimal_probe_prd.md` | User Story 17 (Post-Repair Context Replay), AC4 (three-value assessment, not binary gate), AC7 (ECS cause item-label-name prohibition), AC8 (CMD-Audit sandbox write boundary). |
-| `cmd_innovation_core/issues/0005-validate-post-repair-context-replay.md` | Six acceptance criteria: full pipeline flow, repaired context components, no gold answer injection, three-value assessment, token cost + regression risk, hard-case update baseline, sandbox write limit. |
-| `cmd_innovation_core/prototypes/post_repair_and_monitor_contract_prototype.md` | State transitions for three-value classification, four scenario cards (Full Recovery, Partial Coupled Failure, Failed, Partial Injection). |
-| `cmd_innovation_core/tdd/cmd_tracer_bullets.md` | Cycle 5 RED/GREEN: Post-Repair Context Replay. Cycle 12 RED/GREEN: Three-Value Assessment. Cycle 13 RED/GREEN: ECS Cause Prohibition. Cycle 15 RED/GREEN: Sandbox Write Boundary. |
+| `TASK.md` | Post-Repair Context Replay 必须使用修复后的上下文重新运行原始失败查询，不注入金标准答案，并输出三值 `repair_assessment`（`recovered` / `partial` / `failed`）。`partial` 表示证据已恢复但答案仍然错误——暴露耦合失败。ECS `cause` 可以描述项目状态，但不得使用 V0 禁止的项目标签名称或通过自然语言等价词重新声明它们。CMD-Audit 写入权限限制在回放本地沙箱内。 |
+| `CLAUDE.md` | 将 CMD-Audit 与 CMD-Skill Adapter 分开；CMD-Audit 写入权限限制在回放本地沙箱；三值 `repair_assessment`；ECS `cause` 项目状态描述规则；不要向 Post-Repair Context Replay 注入金标准答案。 |
+| `cmd_innovation_core/CONTEXT.md` | **Post-Repair Context Replay** 定义：从 CMD 输出重建修复后的上下文，重新运行原始失败查询，输出三值 `repair_assessment`，不注入金标准答案。**ECS** cause 规则。**CMD-Audit** 沙箱写入限制——只有 CMD-Skill Adapter 将经过验证的修复应用到生产代理状态。 |
+| `cmd_innovation_core/prd/cmd_minimal_probe_prd.md` | User Story 17（Post-Repair Context Replay），AC4（三值评估，非二元关卡），AC7（ECS cause 项目标签名称禁止），AC8（CMD-Audit 沙箱写入边界）。 |
+| `cmd_innovation_core/issues/0005-validate-post-repair-context-replay.md` | 六个验收标准：完整流水线流程、修复后的上下文组件、无金标准答案注入、三值评估、token 成本 + 回归风险、hard-case 更新基线、沙箱写入限制。 |
+| `cmd_innovation_core/prototypes/post_repair_and_monitor_contract_prototype.md` | 三值分类的状态转移、四个场景卡片（完全恢复、部分耦合失败、失败、部分注入）。 |
+| `cmd_innovation_core/tdd/cmd_tracer_bullets.md` | Cycle 5 RED/GREEN：Post-Repair Context Replay。Cycle 12 RED/GREEN：三值评估。Cycle 13 RED/GREEN：ECS Cause 禁止。Cycle 15 RED/GREEN：沙箱写入边界。 |
 
-## Domain Boundary
+## 领域边界
 
-Issue 0005 builds the repair-validation pipeline on top of the existing attribution (issues 0001-0003), baselines (issue 0002), taxonomy review (issue 0004), and monitor contract (issue 0009). It does not change any existing replay, attribution, or baseline logic.
+Issue 0005 在现有归因（issues 0001-0003）、基线（issue 0002）、分类审查（issue 0004）和 monitor 合约（issue 0009）之上构建修复验证流水线。它不更改任何现有的回放、归因或基线逻辑。
 
 ```text
-run_case (existing, unchanged)
+run_case（现有，未更改）
   -> AuditResult
 
-run_case_full (issue 0005)
-  -> run_case (existing)
-  -> draft_ecs (issue 0005)
-  -> build_repaired_context (issue 0005)
-  -> run_post_repair_context_replay (issue 0005)
-  -> run_hard_case_update_baseline (issue 0005)
-  -> FullAuditResult (issue 0005)
+run_case_full（issue 0005）
+  -> run_case（现有）
+  -> draft_ecs（issue 0005）
+  -> build_repaired_context（issue 0005）
+  -> run_post_repair_context_replay（issue 0005）
+  -> run_hard_case_update_baseline（issue 0005）
+  -> FullAuditResult（issue 0005）
 
-run_cases_full (issue 0006, builds on issue 0005)
+run_cases_full（issue 0006，基于 issue 0005）
   -> [run_case_full(c) for c in cases]
 
-write_repair_success_table_from_full (issue 0006, builds on issue 0005)
-  -> make_repair_comparison(fr) for each FullAuditResult
-  -> write_repair_success_table (from repairs.py)
+write_repair_success_table_from_full（issue 0006，基于 issue 0005）
+  -> 对每个 FullAuditResult 调用 make_repair_comparison(fr)
+  -> write_repair_success_table（来自 repairs.py）
 ```
 
-Issue 0005 owns:
+Issue 0005 拥有的内容：
 
-- Defining `REPAIR_ASSESSMENT_VALUES` (`recovered`, `partial`, `failed`).
-- `classify_repair_assessment(answer_score, evidence_score) -> str` with explicit three-value decision logic.
-- `ECSDraft` dataclass with `__post_init__` validation (V0 label + ECS cause prohibition).
-- `_validate_ecs_cause(cause)` to reject forbidden item label names and natural-language equivalents via regex.
-- `RepairedContext` dataclass for the rebuilt context before replay.
-- `PostRepairResult` dataclass with answer score, evidence score, assessment, token cost, and regression risk.
-- `draft_ecs(case, audit_result) -> ECSDraft` with rule-based per-label ECS drafting.
-- `build_repaired_context(case, ecs_draft) -> RepairedContext` — the gold-answer-injection prevention gate.
-- `run_post_repair_context_replay(case, repaired_context) -> PostRepairResult` without gold answer injection.
-- `run_hard_case_update_baseline(case) -> PostRepairResult` as the undifferentiated comparison baseline.
-- `validate_sandbox_path(output_path, sandbox_root)` for sandbox write boundary enforcement.
-- `FullAuditResult` dataclass wrapping the complete pipeline output.
-- `run_case_full(case) -> FullAuditResult` as the top-level pipeline entry point.
-- `write_post_repair_table(results, output_path, *, sandbox_root)` with sandbox validation.
-- Per-label ECS rule helpers (`_ecs_for_label`) for all six V0 labels.
-- Token cost estimator (`_estimate_token_cost`) and regression risk estimator (`_estimate_regression_risk`).
-- Behavior-level tests for all four TDD cycles (26 test methods).
+- 定义 `REPAIR_ASSESSMENT_VALUES`（`recovered`、`partial`、`failed`）。
+- `classify_repair_assessment(answer_score, evidence_score) -> str`，具有显式的三值决策逻辑。
+- 带有 `__post_init__` 校验的 `ECSDraft` 数据类（V0 标签 + ECS cause 禁止）。
+- `_validate_ecs_cause(cause)`，通过正则拒绝禁止的项目标签名称和自然语言等价词。
+- 回放前的重建上下文 `RepairedContext` 数据类。
+- 带有答案分数、证据分数、评估、token 成本和回归风险的 `PostRepairResult` 数据类。
+- `draft_ecs(case, audit_result) -> ECSDraft`，具有基于规则的逐标签 ECS 起草。
+- `build_repaired_context(case, ecs_draft) -> RepairedContext`——金标准答案注入防护门。
+- `run_post_repair_context_replay(case, repaired_context) -> PostRepairResult`，无金标准答案注入。
+- `run_hard_case_update_baseline(case) -> PostRepairResult`，作为无差别对比基线。
+- `validate_sandbox_path(output_path, sandbox_root)`，用于沙箱写入边界强制执行。
+- 包装完整流水线输出的 `FullAuditResult` 数据类。
+- `run_case_full(case) -> FullAuditResult`，作为顶层流水线入口点。
+- `write_post_repair_table(results, output_path, *, sandbox_root)`，带沙箱校验。
+- 全部六个 V0 标签的逐标签 ECS 规则辅助函数（`_ecs_for_label`）。
+- Token 成本估算器（`_estimate_token_cost`）和回归风险估算器（`_estimate_regression_risk`）。
+- 全部四个 TDD 周期的行为级测试（26 个测试方法）。
 
-Issue 0005 does NOT own (these belong to other issues):
+Issue 0005 不拥有的内容（属于其他 issue）：
 
-- Changing replay logic or adding new replay paths (issue 0003).
-- Changing `assign_attribution` or its thresholds (issue 0001).
-- Changing baseline suite or comparator logic (issue 0002).
-- Changing monitor contract or validation (issue 0009).
-- Adding new probe cases (issue 0003).
-- ECS Failure Memory recurrence (issue 0007).
-- Targeted memory fix comparison metrics (issue 0006).
+- 更改回放逻辑或添加新的回放路径（issue 0003）。
+- 更改 `assign_attribution` 或其阈值（issue 0001）。
+- 更改基线套件或对比器逻辑（issue 0002）。
+- 更改 monitor 合约或校验（issue 0009）。
+- 添加新的探针案例（issue 0003）。
+- ECS Failure Memory 复发率（issue 0007）。
+- 针对性记忆修复对比指标（issue 0006）。
 
-## Module Map
+## 模块地图
 
-| Module | Issue 0005 Role |
+| 模块 | Issue 0005 角色 |
 | --- | --- |
-| `cmd_audit/post_repair.py` | Owns all post-repair data types, pipeline functions, sandbox validation, ECS cause validation, per-label ECS rules, and scoring helpers. This is the primary module created by issue 0005. |
-| `cmd_audit/harness.py` | UPDATED. Owns `FullAuditResult` dataclass, `run_case_full` pipeline entry point, `write_post_repair_table` CSV writer. Also now owns `run_cases_full` and `write_repair_success_table_from_full` (added in issue 0006, depend on FullAuditResult). Existing `AuditResult`, `run_case`, `run_cases`, and all prior table writers are preserved unchanged. |
-| `cmd_audit/__init__.py` | UPDATED. Exports new public surface from `post_repair` and `harness`: `ECSDraft`, `FullAuditResult`, `PostRepairResult`, `RepairedContext`, `build_repaired_context`, `classify_repair_assessment`, `draft_ecs`, `run_case_full`, `run_cases_full`, `run_hard_case_update_baseline`, `run_post_repair_context_replay`, `validate_sandbox_path`, `write_post_repair_table`, `write_repair_success_table_from_full`. |
-| `cmd_audit/labels.py` | No changes by issue 0005. `OUT_OF_SCOPE_ITEM_LABELS` and `validate_v0_label` are imported by `post_repair.py` for ECS cause and predicted_label validation. |
-| `cmd_audit/scoring.py` | No changes. `answer_score` and `evidence_recall_from_text` are imported by `post_repair.py` for replay scoring. |
-| `cmd_audit/repairs.py` | Issue 0006 module. Imports `PostRepairResult`, `RepairedContext`, `validate_sandbox_path` from `post_repair.py`. `make_repair_comparison` consumes `FullAuditResult` and both `PostRepairResult` fields. |
-| `tests/test_cmd_audit_issue5_post_repair.py` | 5 test classes, 26 test methods covering Cycles 5, 12, 13, 15. |
-| `tests/test_cmd_audit_issue6_targeted_repairs.py` | Issue 0006 tests. 5 test classes, 26 test methods that depend on `FullAuditResult`, `run_case_full`, and `validate_sandbox_path` from issue 0005. |
+| `cmd_audit/post_repair.py` | 拥有所有修复后数据类型、流水线函数、沙箱校验、ECS cause 校验、逐标签 ECS 规则和评分辅助函数。这是 issue 0005 创建的主模块。 |
+| `cmd_audit/harness.py` | 已更新。拥有 `FullAuditResult` 数据类、`run_case_full` 流水线入口点、`write_post_repair_table` CSV 写入器。现在还拥有 `run_cases_full` 和 `write_repair_success_table_from_full`（在 issue 0006 中添加，依赖 `FullAuditResult`）。现有的 `AuditResult`、`run_case`、`run_cases` 和所有先前的表格写入器保持不变。 |
+| `cmd_audit/__init__.py` | 已更新。从 `post_repair` 和 `harness` 导出新的公共接口：`ECSDraft`、`FullAuditResult`、`PostRepairResult`、`RepairedContext`、`build_repaired_context`、`classify_repair_assessment`、`draft_ecs`、`run_case_full`、`run_cases_full`、`run_hard_case_update_baseline`、`run_post_repair_context_replay`、`validate_sandbox_path`、`write_post_repair_table`、`write_repair_success_table_from_full`。 |
+| `cmd_audit/labels.py` | Issue 0005 无更改。`post_repair.py` 导入 `OUT_OF_SCOPE_ITEM_LABELS` 和 `validate_v0_label` 用于 ECS cause 和 predicted_label 校验。 |
+| `cmd_audit/scoring.py` | 无更改。`post_repair.py` 导入 `answer_score` 和 `evidence_recall_from_text` 用于回放评分。 |
+| `cmd_audit/repairs.py` | Issue 0006 模块。从 `post_repair.py` 导入 `PostRepairResult`、`RepairedContext`、`validate_sandbox_path`。`make_repair_comparison` 消费 `FullAuditResult` 和两个 `PostRepairResult` 字段。 |
+| `tests/test_cmd_audit_issue5_post_repair.py` | 5 个测试类，26 个测试方法，覆盖 Cycles 5、12、13、15。 |
+| `tests/test_cmd_audit_issue6_targeted_repairs.py` | Issue 0006 测试。5 个测试类，26 个测试方法，依赖 issue 0005 的 `FullAuditResult`、`run_case_full` 和 `validate_sandbox_path`。 |
 
-## Caller Graph
+## 调用图
 
-### Attribution → Post-Repair Pipeline (issue 0005)
+### 归因 → 修复后流水线（issue 0005）
 
 ```text
 cmd_audit/__init__.py
@@ -149,14 +149,14 @@ cmd_audit/__init__.py
               -> __post_init__:
                   -> labels.validate_v0_label(predicted_label)
                   -> post_repair._validate_ecs_cause(cause)
-                      -> checks OUT_OF_SCOPE_ITEM_LABELS for substring match
-                      -> checks regex _FORBIDDEN_NL_PATTERNS
+                      -> 检查 OUT_OF_SCOPE_ITEM_LABELS 的子串匹配
+                      -> 检查正则 _FORBIDDEN_NL_PATTERNS
       -> post_repair.build_repaired_context(ProbeCase, ECSDraft)
           -> RepairedContext(case_id, corrected_memory, repair_guidance, repaired_evidence_block, original_query)
       -> post_repair.run_post_repair_context_replay(ProbeCase, RepairedContext)
           -> post_repair._combine_context(RepairedContext)
           -> scoring.evidence_recall_from_text(gold_evidence, combined_context)
-          -> case.gold_answer.casefold() in combined.casefold()  (answer score)
+          -> case.gold_answer.casefold() in combined.casefold()  （答案分数）
           -> post_repair.classify_repair_assessment(answer_score, evidence_score)
           -> post_repair._estimate_token_cost(combined_context, query)
           -> post_repair._estimate_regression_risk(case, ctx)
@@ -168,10 +168,10 @@ cmd_audit/__init__.py
 
   -> harness.write_post_repair_table([FullAuditResult], output_path, sandbox_root)
       -> post_repair.validate_sandbox_path(output_path, sandbox_root)
-          -> Path.resolve() to neutralize '..' traversal
+          -> Path.resolve() 以消除 '..' 遍历
 ```
 
-### Issue 0006 Integration (post-0005 consumer)
+### Issue 0006 集成（post-0005 消费者）
 
 ```text
 cmd_audit/__init__.py
@@ -187,7 +187,7 @@ cmd_audit/__init__.py
           -> post_repair.validate_sandbox_path(output_path, sandbox_root)
 ```
 
-### Behavior-Test Path
+### 行为测试路径
 
 ```text
 tests/test_cmd_audit_issue5_post_repair.py
@@ -197,37 +197,37 @@ tests/test_cmd_audit_issue5_post_repair.py
   -> post_repair.run_post_repair_context_replay(case, repaired_context)
   -> post_repair.run_hard_case_update_baseline(case)
   -> harness.run_case_full(case)
-  -> post_repair.ECSDraft(...)  (direct construction for cause validation tests)
+  -> post_repair.ECSDraft(...)  （直接构造用于 cause 校验测试）
   -> post_repair.validate_sandbox_path(output_path, sandbox_root)
   -> harness.write_post_repair_table(results, output_path, sandbox_root)
 ```
 
-## Data Flow
+## 数据流
 
-### Input Fixtures
+### 输入夹具
 
 ```text
-data/probe_cases/v0_retrieval_error_case.json          # single-case retrieval fixture (issue 0001)
-data/probe_cases/v0_premature_extraction_error_case.json  # single-case extraction fixture (issue 0003)
-data/probe_cases/v0_issue3_cases.json                  # six-case smoke suite (issue 0003)
+data/probe_cases/v0_retrieval_error_case.json          # 单案例检索夹具（issue 0001）
+data/probe_cases/v0_premature_extraction_error_case.json  # 单案例提取夹具（issue 0003）
+data/probe_cases/v0_issue3_cases.json                  # 六案例烟雾套件（issue 0003）
 ```
 
-### Intermediate Types
+### 中间类型
 
-**ECSDraft** (from `draft_ecs`, frozen dataclass):
+**ECSDraft**（来自 `draft_ecs`，冻结数据类）：
 
-| Field | Type | Source |
+| 字段 | 类型 | 来源 |
 | --- | --- | --- |
 | `case_id` | `str` | `ProbeCase.case_id` |
-| `predicted_label` | `str` | `AttributionResult.predicted_label`, validated against `V0_PIPELINE_LABELS` |
-| `cause` | `str` | `_ecs_for_label(...)`, validated by `_validate_ecs_cause` |
-| `corrected_memory` | `str` | Top replay's `evidence_block` |
+| `predicted_label` | `str` | `AttributionResult.predicted_label`，通过 `V0_PIPELINE_LABELS` 校验 |
+| `cause` | `str` | `_ecs_for_label(...)`，通过 `_validate_ecs_cause` 校验 |
+| `corrected_memory` | `str` | Top 回放的 `evidence_block` |
 | `repair_guidance` | `str` | `_ecs_for_label(...)` |
-| `repaired_evidence_block` | `str` | Top replay's `evidence_block` |
+| `repaired_evidence_block` | `str` | Top 回放的 `evidence_block` |
 
-**RepairedContext** (from `build_repaired_context`, frozen dataclass):
+**RepairedContext**（来自 `build_repaired_context`，冻结数据类）：
 
-| Field | Type | Source |
+| 字段 | 类型 | 来源 |
 | --- | --- | --- |
 | `case_id` | `str` | `ProbeCase.case_id` |
 | `corrected_memory` | `str` | `ECSDraft.corrected_memory` |
@@ -235,38 +235,38 @@ data/probe_cases/v0_issue3_cases.json                  # six-case smoke suite (i
 | `repaired_evidence_block` | `str` | `ECSDraft.repaired_evidence_block` |
 | `original_query` | `str` | `ProbeCase.query` |
 
-**PostRepairResult** (from `run_post_repair_context_replay`, frozen dataclass):
+**PostRepairResult**（来自 `run_post_repair_context_replay`，冻结数据类）：
 
-| Field | Type | Meaning |
+| 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `case_id` | `str` | Case identifier |
-| `repair_assessment` | `str` | `"recovered"`, `"partial"`, or `"failed"` |
-| `post_repair_answer_score` | `float` | `1.0` if `gold_answer` text appears in combined repaired context, else `0.0` |
+| `case_id` | `str` | 案例标识符 |
+| `repair_assessment` | `str` | `"recovered"`、`"partial"` 或 `"failed"` |
+| `post_repair_answer_score` | `float` | 如果 `gold_answer` 文本出现在合并后的修复上下文文本中则为 `1.0`，否则 `0.0` |
 | `post_repair_evidence_score` | `float` | `evidence_recall_from_text(gold_evidence, combined_context)` |
 | `token_cost` | `float` | `(len(combined_context) + len(query)) / 4.0` |
-| `regression_risk` | `float` | `1.0 - overlap_ratio` between original baseline injected context and repaired context |
+| `regression_risk` | `float` | `1.0 - overlap_ratio`，基于原始基线注入上下文与修复后上下文之间的重叠比例 |
 | `had_repair_regression` | `bool` | `regression_risk > 0.5` |
 
-**FullAuditResult** (from `run_case_full`, frozen dataclass):
+**FullAuditResult**（来自 `run_case_full`，冻结数据类）：
 
-| Field | Type | Meaning |
+| 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `audit` | `AuditResult` | Existing attribution + baselines result |
-| `ecs_draft` | `ECSDraft` | Error-Cause-Solution from CMD attribution |
-| `repaired_context` | `RepairedContext` | Context rebuilt for post-repair replay |
-| `post_repair` | `PostRepairResult` | CMD-guided post-repair replay result |
-| `hard_case_baseline` | `PostRepairResult` | Generic hard-case update comparison |
+| `audit` | `AuditResult` | 现有归因 + 基线结果 |
+| `ecs_draft` | `ECSDraft` | 来自 CMD 归因的 Error-Cause-Solution |
+| `repaired_context` | `RepairedContext` | 为修复后回放重建的上下文 |
+| `post_repair` | `PostRepairResult` | CMD 引导的修复后回放结果 |
+| `hard_case_baseline` | `PostRepairResult` | 通用 hard-case 更新对比 |
 
-### Output Artifacts
+### 输出产出物
 
 ```text
-artifacts/sandbox/post_repair_table.csv      # from write_post_repair_table (issue 0005)
-artifacts/sandbox/repair_success_table.csv    # from write_repair_success_table_from_full (issue 0006)
-artifacts/sandbox/repair_label_summary.csv    # from write_repair_success_table (issue 0006)
-artifacts/sandbox/repair_claim_ledger.txt     # from write_repair_success_table (issue 0006)
+artifacts/sandbox/post_repair_table.csv      # 来自 write_post_repair_table（issue 0005）
+artifacts/sandbox/repair_success_table.csv    # 来自 write_repair_success_table_from_full（issue 0006）
+artifacts/sandbox/repair_label_summary.csv    # 来自 write_repair_success_table（issue 0006）
+artifacts/sandbox/repair_claim_ledger.txt     # 来自 write_repair_success_table（issue 0006）
 ```
 
-Existing artifacts preserved unchanged:
+现有产出物保持不变：
 
 ```text
 artifacts/attribution_table.csv
@@ -274,9 +274,9 @@ artifacts/comparison_metrics.csv
 artifacts/attribution_confusion_matrix.csv
 ```
 
-### Per-Label ECS Cause and Repair Guidance
+### 逐标签 ECS Cause 和修复指导
 
-| Predicted Label | cause | corrected_memory | repair_guidance |
+| 预测标签 | cause | corrected_memory | repair_guidance |
 | --- | --- | --- | --- |
 | `retrieval_error` | "retrieved context did not include the correct memory item even though the item was present in extracted memory" | `replay.evidence_block` | "update retrieval routing to include the corrected memory item" |
 | `premature_extraction_error` | "key evidence was present in raw events but was not preserved in any extracted memory item" | `replay.evidence_block` | "improve extraction to preserve evidence from raw events into memory items" |
@@ -285,40 +285,40 @@ artifacts/attribution_confusion_matrix.csv
 | `injection_error` | "retrieved evidence was not correctly injected into the final context for the agent to use" | `replay.evidence_block` | "fix injection formatting so retrieved evidence is presented as a clean evidence block" |
 | `write_error` | "no recoverable evidence found in extracted memory; the failure may originate at or before the write step" | `replay.evidence_block` | "ensure events are written to memory and evidence is preserved through the pipeline" |
 
-## Function-Level Contract
+## 函数级合约
 
 ### `cmd_audit/post_repair.py`
 
-This is the primary module created by issue 0005. File: `cmd_audit/post_repair.py` (299 lines). Contains 4 public functions, 5 private helpers, 3 frozen dataclasses, 1 exception class, 1 constant, and 2 regex-based validation patterns.
+这是 issue 0005 创建的主模块。文件：`cmd_audit/post_repair.py`（299 行）。包含 4 个公共函数、5 个私有辅助函数、3 个冻结数据类、1 个异常类、1 个常量和 2 个基于正则的校验模式。
 
 ---
 
-#### Constant: `REPAIR_ASSESSMENT_VALUES`
+#### 常量：`REPAIR_ASSESSMENT_VALUES`
 
-Location: `cmd_audit/post_repair.py:13`
+位置：`cmd_audit/post_repair.py:13`
 
 ```python
 REPAIR_ASSESSMENT_VALUES = ("recovered", "partial", "failed")
 ```
 
-Purpose:
+目的：
 
-- Defines the exhaustive set of valid repair assessment values for Post-Repair Context Replay.
-- Tuple ordering is stable for iteration and documentation.
+- 为 Post-Repair Context Replay 定义完整的有效修复评估值集合。
+- 元组顺序对迭代和文档是稳定的。
 
-Domain meaning:
+领域含义：
 
-| Value | Condition | Interpretation |
+| 值 | 条件 | 解读 |
 | --- | --- | --- |
-| `recovered` | `answer_score == 1.0` | Repair fully restored correct task behavior. |
-| `partial` | `answer_score < 1.0` AND `evidence_score == 1.0` | Evidence recovered but answer still wrong — exposes coupled failure. This is diagnostic depth, not repair failure. |
-| `failed` | `answer_score < 1.0` AND `evidence_score < 1.0` | Neither evidence nor answer recovered. Repair targeted the wrong operation or root cause is misdiagnosed. |
+| `recovered` | `answer_score == 1.0` | 修复完全恢复了正确的任务行为。 |
+| `partial` | `answer_score < 1.0` 且 `evidence_score == 1.0` | 证据已恢复但答案仍然错误——暴露耦合失败。这是诊断深度，而非修复失败。 |
+| `failed` | `answer_score < 1.0` 且 `evidence_score < 1.0` | 证据和答案均未恢复。修复针对了错误的操作或根因被误诊。 |
 
 ---
 
-#### Private Constant: `_FORBIDDEN_NL_PATTERNS`
+#### 私有常量：`_FORBIDDEN_NL_PATTERNS`
 
-Location: `cmd_audit/post_repair.py:16-25`
+位置：`cmd_audit/post_repair.py:16-25`
 
 ```python
 _FORBIDDEN_NL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
@@ -333,50 +333,50 @@ _FORBIDDEN_NL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
 )
 ```
 
-Purpose:
+目的：
 
-- Compiled regex patterns that detect natural-language equivalents of forbidden item label names in ECS cause text.
-- Used by `_validate_ecs_cause` to reject phrases like "the memory item is wrong" or "item_is_stale".
+- 编译后的正则模式，用于检测 ECS cause 文本中禁止的项目标签名称的自然语言等价词。
+- 由 `_validate_ecs_cause` 用于拒绝诸如 "the memory item is wrong" 或 "item_is_stale" 的短语。
 
-Pattern matching table:
+模式匹配表：
 
-| Pattern | Rejects | Allows |
+| 模式 | 拒绝 | 允许 |
 | --- | --- | --- |
-| `\bitem[_\s]?(is\s+)?wrong\b` | "item_wrong", "the item is wrong", "memory item is wrong" | "wrong delivery address" |
-| `\bitem[_\s]?(is\s+)?stale\b` | "item_stale", "the item is stale" | "stale coffee" |
-| `\bitem[_\s]?(is\s+)?conflict(ed|ing)?\b` | "item_conflict", "item is conflicting" | "schedule conflict" |
-| `\bitem[_\s]?(is\s+)?poisoned\b` | "item_poisoned", "item is poisoned" | "food poisoning" |
-| `\bcompression[_\s]?distorted\b` | "compression_distorted", "compression distorted the fact" | "image compression" |
+| `\bitem[_\s]?(is\s+)?wrong\b` | "item_wrong"、"the item is wrong"、"memory item is wrong" | "wrong delivery address" |
+| `\bitem[_\s]?(is\s+)?stale\b` | "item_stale"、"the item is stale" | "stale coffee" |
+| `\bitem[_\s]?(is\s+)?conflict(ed|ing)?\b` | "item_conflict"、"item is conflicting" | "schedule conflict" |
+| `\bitem[_\s]?(is\s+)?poisoned\b` | "item_poisoned"、"item is poisoned" | "food poisoning" |
+| `\bcompression[_\s]?distorted\b` | "compression_distorted"、"compression distorted the fact" | "image compression" |
 
 ---
 
-#### Exception: `ECSCauseValidationError`
+#### 异常：`ECSCauseValidationError`
 
-Location: `cmd_audit/post_repair.py:28-29`
+位置：`cmd_audit/post_repair.py:28-29`
 
 ```python
 class ECSCauseValidationError(ValueError):
     """Raised when ECS cause contains forbidden item label names or equivalents."""
 ```
 
-Purpose:
+目的：
 
-- Signals that an ECS `cause` string violates the item-label-name prohibition rule.
-- Distinct from `LabelValidationError` (label boundary scope, in `labels.py`) and `LeakSafeMonitorError` (monitor boundary scope, in `baselines.py`).
+- 表示 ECS `cause` 字符串违反了项目标签名称禁止规则。
+- 与 `LabelValidationError`（标签边界范围，在 `labels.py` 中）和 `LeakSafeMonitorError`（monitor 边界范围，在 `baselines.py` 中）区分。
 
-Raised by:
+由以下抛出：
 
-- `_validate_ecs_cause(cause)` (line 32-47)
+- `_validate_ecs_cause(cause)`（第 32-47 行）
 
-Caught by:
+由以下捕获：
 
-- Callers of `ECSDraft(...)` constructor, since `__post_init__` calls `_validate_ecs_cause`.
+- `ECSDraft(...)` 构造函数的调用者，因为 `__post_init__` 调用 `_validate_ecs_cause`。
 
 ---
 
-#### Private Function: `_validate_ecs_cause(cause: str) -> str`
+#### 私有函数：`_validate_ecs_cause(cause: str) -> str`
 
-Location: `cmd_audit/post_repair.py:32-47`
+位置：`cmd_audit/post_repair.py:32-47`
 
 ```python
 def _validate_ecs_cause(cause: str) -> str:
@@ -396,27 +396,27 @@ def _validate_ecs_cause(cause: str) -> str:
     return cause
 ```
 
-Purpose:
+目的：
 
-- Rejects ECS `cause` text containing forbidden item label names or their natural-language equivalents.
-- Allows descriptive state language like "stored preference was outdated relative to ground truth."
+- 拒绝包含禁止的项目标签名称或其自然语言等价词的 ECS `cause` 文本。
+- 允许描述性状态语言，如 "stored preference was outdated relative to ground truth."
 
-Behavior:
+行为：
 
-1. Casefolds the input.
-2. Checks for exact substring matches of each label in `OUT_OF_SCOPE_ITEM_LABELS` — if any found, raises `ECSCauseValidationError`.
-3. Checks each compiled regex in `_FORBIDDEN_NL_PATTERNS` via `pattern.search(lowered)` — if matched, raises `ECSCauseValidationError`.
-4. Returns `cause` unchanged on success.
+1. 对输入做 casefold 处理。
+2. 检查 `OUT_OF_SCOPE_ITEM_LABELS` 中每个标签的精确子串匹配——如果找到，抛出 `ECSCauseValidationError`。
+3. 通过 `pattern.search(lowered)` 检查 `_FORBIDDEN_NL_PATTERNS` 中的每个编译正则——如果匹配，抛出 `ECSCauseValidationError`。
+4. 成功时原样返回 `cause`。
 
-Callers:
+调用者：
 
-- `ECSDraft.__post_init__()` (line 80)
+- `ECSDraft.__post_init__()`（第 80 行）
 
 ---
 
-#### Function: `classify_repair_assessment(answer_score: float, evidence_score: float) -> str`
+#### 函数：`classify_repair_assessment(answer_score: float, evidence_score: float) -> str`
 
-Location: `cmd_audit/post_repair.py:50-61`
+位置：`cmd_audit/post_repair.py:50-61`
 
 ```python
 def classify_repair_assessment(answer_score: float, evidence_score: float) -> str:
@@ -427,34 +427,34 @@ def classify_repair_assessment(answer_score: float, evidence_score: float) -> st
     return "failed"
 ```
 
-Purpose:
+目的：
 
-- Classifies Post-Repair Context Replay outcome into the three-value assessment.
-- Implements the state machine from `prototypes/post_repair_and_monitor_contract_prototype.md`.
+- 将 Post-Repair Context Replay 的结果分类为三值评估。
+- 实现 `prototypes/post_repair_and_monitor_contract_prototype.md` 中的状态机。
 
-Decision table:
+决策表：
 
-| answer_score | evidence_score | Result | Interpretation |
+| answer_score | evidence_score | 结果 | 解读 |
 | --- | --- | --- | --- |
-| 1.0 | 1.0 | `recovered` | Single-cause failure, repair works end-to-end. |
-| 1.0 | <1.0 | `recovered` | Answer matches gold despite incomplete evidence — rare but valid. |
-| 0.0 | 1.0 | `partial` | **Key diagnostic**: evidence recovered but reasoning still fails. Coupled failure exposed. |
-| 0.5 | 1.0 | `partial` | Any answer_score < 1.0 with evidence == 1.0 is partial. |
-| 0.0 | 0.0 | `failed` | Repair missed root cause entirely. |
-| 0.3 | 0.3 | `failed` | Both below threshold. |
+| 1.0 | 1.0 | `recovered` | 单因失败，修复端到端有效。 |
+| 1.0 | <1.0 | `recovered` | 尽管证据不完整，答案仍匹配金标准——罕见但有效。 |
+| 0.0 | 1.0 | `partial` | **关键诊断**：证据恢复但推理仍然失败。耦合失败暴露。 |
+| 0.5 | 1.0 | `partial` | 任何 answer_score < 1.0 且 evidence == 1.0 都是 partial。 |
+| 0.0 | 0.0 | `failed` | 修复完全错过了根因。 |
+| 0.3 | 0.3 | `failed` | 两者均低于阈值。 |
 
-Priority rule: `answer_score == 1.0` dominates — if the answer is fully correct, assessment is `recovered` regardless of evidence score. If answer is not fully correct, only then does evidence_score distinguish `partial` from `failed`.
+优先级规则：`answer_score == 1.0` 优先——如果答案完全正确，无论证据分数如何，评估均为 `recovered`。如果答案不完全正确，evidence_score 才区分 `partial` 和 `failed`。
 
-Callers:
+调用者：
 
-- `run_post_repair_context_replay` (line 156)
-- Direct tests in `ThreeValueRepairAssessmentTest` (test_cmd_audit_issue5_post_repair.py)
+- `run_post_repair_context_replay`（第 156 行）
+- `ThreeValueRepairAssessmentTest` 中的直接测试（test_cmd_audit_issue5_post_repair.py）
 
 ---
 
-#### Dataclass: `ECSDraft`
+#### 数据类：`ECSDraft`
 
-Location: `cmd_audit/post_repair.py:67-80`
+位置：`cmd_audit/post_repair.py:67-80`
 
 ```python
 @dataclass(frozen=True)
@@ -471,33 +471,33 @@ class ECSDraft:
         _validate_ecs_cause(self.cause)
 ```
 
-Purpose:
+目的：
 
-- Immutable Error-Cause-Solution record drafted from CMD-Audit attribution results.
-- Frozen to prevent mutation after construction; all fields are strings.
+- 从 CMD-Audit 归因结果起草的不可变 Error-Cause-Solution 记录。
+- 冻结以防止构造后修改；所有字段均为字符串。
 
-`__post_init__` validation:
+`__post_init__` 校验：
 
-1. Calls `validate_v0_label(self.predicted_label)` — ensures only V0 pipeline labels appear. Raises `LabelValidationError` for item labels or deferred labels.
-2. Calls `_validate_ecs_cause(self.cause)` — enforces the item-label-name prohibition on cause text. Raises `ECSCauseValidationError` for forbidden names or NL equivalents.
+1. 调用 `validate_v0_label(self.predicted_label)`——确保仅出现 V0 流水线标签。对项目标签或延迟标签抛出 `LabelValidationError`。
+2. 调用 `_validate_ecs_cause(self.cause)`——对 cause 文本强制执行项目标签名称禁止。对禁止的名称或自然语言等价词抛出 `ECSCauseValidationError`。
 
-Field meanings:
+字段含义：
 
-| Field | Domain Meaning |
+| 字段 | 领域含义 |
 | --- | --- |
-| `predicted_label` | CMD-attributed failure label, one of six V0 pipeline labels. |
-| `cause` | Natural-language description of why the failure occurred. Uses descriptive state language, not item label names. |
-| `corrected_memory` | Correct memory text that should have been available (from winning replay's `evidence_block`). |
-| `repair_guidance` | Natural-language instruction for how to fix the failure. |
-| `repaired_evidence_block` | Evidence block recovered by the winning counterfactual replay. |
+| `predicted_label` | CMD 归因的失败标签，六个 V0 流水线标签之一。 |
+| `cause` | 描述失败发生原因的自然语言描述。使用描述性状态语言，而非项目标签名称。 |
+| `corrected_memory` | 本应可用的正确记忆文本（来自获胜回放的 `evidence_block`）。 |
+| `repair_guidance` | 关于如何修复失败的自然语言指令。 |
+| `repaired_evidence_block` | 获胜反事实回放恢复的证据块。 |
 
-Constructed exclusively by `draft_ecs` (line 110-131). Direct construction is used in tests to verify validation rejection.
+仅由 `draft_ecs` 构造（第 110-131 行）。测试中使用直接构造来验证校验拒绝。
 
 ---
 
-#### Dataclass: `RepairedContext`
+#### 数据类：`RepairedContext`
 
-Location: `cmd_audit/post_repair.py:83-92`
+位置：`cmd_audit/post_repair.py:83-92`
 
 ```python
 @dataclass(frozen=True)
@@ -509,32 +509,32 @@ class RepairedContext:
     original_query: str
 ```
 
-Purpose:
+目的：
 
-- Immutable context rebuilt from ECS draft for Post-Repair Context Replay.
-- Frozen, no `__post_init__` validation (content is constructed from already-validated `ECSDraft` + `ProbeCase`).
+- 从 ECS 草稿重建的用于 Post-Repair Context Replay 的不可变上下文。
+- 冻结，无 `__post_init__` 校验（内容从已经过校验的 `ECSDraft` + `ProbeCase` 构建）。
 
-Field meanings:
+字段含义：
 
-| Field | Domain Meaning |
+| 字段 | 领域含义 |
 | --- | --- |
-| `corrected_memory` | Correct memory text injected into the new context. |
-| `repair_guidance` | Repair instructions the agent should follow. |
-| `repaired_evidence_block` | Recovered evidence to include in context. |
-| `original_query` | User's original query from the failed task (`ProbeCase.query`). |
+| `corrected_memory` | 注入到新上下文中的正确记忆文本。 |
+| `repair_guidance` | 代理应遵循的修复指令。 |
+| `repaired_evidence_block` | 要包含在上下文中的恢复后的证据。 |
+| `original_query` | 失败任务的用户原始查询（`ProbeCase.query`）。 |
 
-Constructed by:
+由以下构造：
 
-- `build_repaired_context` (line 133-141) — for CMD-guided repair.
-- `run_hard_case_update_baseline` (line 172-186) — for generic baseline (all extracted memory).
+- `build_repaired_context`（第 133-141 行）——用于 CMD 引导的修复。
+- `run_hard_case_update_baseline`（第 172-186 行）——用于通用基线（所有提取后的记忆）。
 
-Does NOT reference `case.gold_answer`. This is the gold-answer-injection prevention gate.
+不引用 `case.gold_answer`。这是金标准答案注入防护门。
 
 ---
 
-#### Dataclass: `PostRepairResult`
+#### 数据类：`PostRepairResult`
 
-Location: `cmd_audit/post_repair.py:95-105`
+位置：`cmd_audit/post_repair.py:95-105`
 
 ```python
 @dataclass(frozen=True)
@@ -548,29 +548,29 @@ class PostRepairResult:
     had_repair_regression: bool
 ```
 
-Purpose:
+目的：
 
-- Immutable result of one Post-Repair Context Replay run.
-- Frozen, no `__post_init__` validation (values are computed internally by `run_post_repair_context_replay`).
+- 一次 Post-Repair Context Replay 运行的不可变结果。
+- 冻结，无 `__post_init__` 校验（值由 `run_post_repair_context_replay` 内部计算）。
 
-Field meanings:
+字段含义：
 
-| Field | Meaning |
+| 字段 | 含义 |
 | --- | --- |
-| `repair_assessment` | One of `("recovered", "partial", "failed")`, from `classify_repair_assessment`. |
-| `post_repair_answer_score` | `1.0` if `gold_answer` casefold text appears in combined repaired context, else `0.0`. |
-| `post_repair_evidence_score` | `evidence_recall_from_text(gold_evidence, combined_context)`. |
-| `token_cost` | `(len(context) + len(query)) / 4.0` character-based token estimate. |
-| `regression_risk` | `1.0 - overlap_ratio` between original baseline context terms and repaired context terms, clamped to [0.0, 1.0]. |
-| `had_repair_regression` | `True` when `regression_risk > 0.5`. |
+| `repair_assessment` | 来自 `classify_repair_assessment` 的 `("recovered", "partial", "failed")` 之一。 |
+| `post_repair_answer_score` | 如果 `gold_answer` casefold 文本出现在合并后的修复上下文文本中则为 `1.0`，否则 `0.0`。 |
+| `post_repair_evidence_score` | `evidence_recall_from_text(gold_evidence, combined_context)`。 |
+| `token_cost` | `(len(context) + len(query)) / 4.0`，基于字符的 token 估算。 |
+| `regression_risk` | `1.0 - overlap_ratio`，基于原始基线上下文词项与修复后上下文词项之间的重叠比例，钳制在 [0.0, 1.0]。 |
+| `had_repair_regression` | 当 `regression_risk > 0.5` 时为 `True`。 |
 
-Constructed exclusively by `run_post_repair_context_replay` (line 144-169). Imported and consumed by `repairs.py` (issue 0006) for `make_repair_comparison`.
+仅由 `run_post_repair_context_replay` 构造（第 144-169 行）。被 `repairs.py`（issue 0006）导入并消费，用于 `make_repair_comparison`。
 
 ---
 
-#### Function: `draft_ecs(case: ProbeCase, audit_result) -> ECSDraft`
+#### 函数：`draft_ecs(case: ProbeCase, audit_result) -> ECSDraft`
 
-Location: `cmd_audit/post_repair.py:110-131`
+位置：`cmd_audit/post_repair.py:110-131`
 
 ```python
 def draft_ecs(case: ProbeCase, audit_result) -> ECSDraft:
@@ -589,36 +589,36 @@ def draft_ecs(case: ProbeCase, audit_result) -> ECSDraft:
     )
 ```
 
-Purpose:
+目的：
 
-- Drafts an Error-Cause-Solution record from CMD-Audit attribution results.
-- Rule-based V0 draft: predicted label and top replay drive cause text, corrected memory, and repair guidance selection.
+- 从 CMD-Audit 归因结果起草 Error-Cause-Solution 记录。
+- 基于规则的 V0 草案：预测标签和 top 回放驱动 cause 文本、修正记忆和修复指导的选择。
 
-Behavior:
+行为：
 
-1. Reads `audit_result.attribution` (the `AttributionResult` with `predicted_label` and `top_replay`).
-2. Reads `audit_result.replay` (the top-gain `ReplayResult` via `AuditResult.replay` property).
-3. Calls `_ecs_for_label(case, predicted_label, replay)` to get `(cause, corrected_memory, repair_guidance)`.
-4. Uses `replay.evidence_block` as `repaired_evidence_block`.
-5. Constructs and returns `ECSDraft` — validation runs at construction time via `__post_init__`.
+1. 读取 `audit_result.attribution`（带有 `predicted_label` 和 `top_replay` 的 `AttributionResult`）。
+2. 读取 `audit_result.replay`（通过 `AuditResult.replay` 属性获取的 top-gain `ReplayResult`）。
+3. 调用 `_ecs_for_label(case, predicted_label, replay)` 获取 `(cause, corrected_memory, repair_guidance)`。
+4. 使用 `replay.evidence_block` 作为 `repaired_evidence_block`。
+5. 构造并返回 `ECSDraft`——校验在构造时通过 `__post_init__` 运行。
 
-Input contract:
+输入合约：
 
-- `case` must be a valid `ProbeCase`.
-- `audit_result` must be an `AuditResult` with valid `attribution` (has `predicted_label`) and `replay` (top-gain `ReplayResult`).
+- `case` 必须是有效的 `ProbeCase`。
+- `audit_result` 必须是具有有效 `attribution`（有 `predicted_label`）和 `replay`（top-gain `ReplayResult`）的 `AuditResult`。
 
-Output: a validated `ECSDraft`.
+输出：一个经过校验的 `ECSDraft`。
 
-Callers:
+调用者：
 
-- `harness.run_case_full` (line 91)
-- Direct tests in `PostRepairContextReplayTest`
+- `harness.run_case_full`（第 91 行）
+- `PostRepairContextReplayTest` 中的直接测试
 
 ---
 
-#### Function: `build_repaired_context(case: ProbeCase, ecs_draft: ECSDraft) -> RepairedContext`
+#### 函数：`build_repaired_context(case: ProbeCase, ecs_draft: ECSDraft) -> RepairedContext`
 
-Location: `cmd_audit/post_repair.py:133-141`
+位置：`cmd_audit/post_repair.py:133-141`
 
 ```python
 def build_repaired_context(case: ProbeCase, ecs_draft: ECSDraft) -> RepairedContext:
@@ -631,27 +631,27 @@ def build_repaired_context(case: ProbeCase, ecs_draft: ECSDraft) -> RepairedCont
     )
 ```
 
-Purpose:
+目的：
 
-- Assembles a `RepairedContext` from ECS draft + original probe case.
-- Simple pass-through constructor.
+- 从 ECS 草稿 + 原始探针案例组装一个 `RepairedContext`。
+- 简单的透传构造函数。
 
-Gold-answer-injection prevention:
+金标准答案注入防护：
 
-- Does NOT reference `case.gold_answer`.
-- Only uses `case.case_id` and `case.query` from the probe case.
-- All memory/evidence content comes from the already-validated ECS draft.
+- 不引用 `case.gold_answer`。
+- 仅使用探针案例中的 `case.case_id` 和 `case.query`。
+- 所有记忆/证据内容来自已经过校验的 ECS 草稿。
 
-Callers:
+调用者：
 
-- `harness.run_case_full` (line 92)
-- Direct tests in `PostRepairContextReplayTest`
+- `harness.run_case_full`（第 92 行）
+- `PostRepairContextReplayTest` 中的直接测试
 
 ---
 
-#### Function: `run_post_repair_context_replay(case: ProbeCase, repaired_context: RepairedContext) -> PostRepairResult`
+#### 函数：`run_post_repair_context_replay(case: ProbeCase, repaired_context: RepairedContext) -> PostRepairResult`
 
-Location: `cmd_audit/post_repair.py:144-169`
+位置：`cmd_audit/post_repair.py:144-169`
 
 ```python
 def run_post_repair_context_replay(
@@ -675,46 +675,46 @@ def run_post_repair_context_replay(
     )
 ```
 
-Purpose:
+目的：
 
-- Reruns the original failed query with repaired context, without injecting the gold answer into scoring.
-- Scores evidence and answer from the repaired context content alone.
+- 使用修复后的上下文重新运行原始失败查询，不将金标准答案注入评分。
+- 仅从修复后的上下文内容本身评分证据和答案。
 
-Step-by-step behavior:
+逐步行为：
 
-1. Calls `_combine_context(repaired_context)` to join `corrected_memory + repair_guidance + repaired_evidence_block` with newlines.
-2. Computes `evidence_score = evidence_recall_from_text(case.gold_evidence, combined)`.
-3. Checks if `case.gold_answer.casefold() in combined.casefold()`:
-   - If found → `post_answer_score = 1.0` (agent can "read off" the answer from corrected context).
-   - If not found → `post_answer_score = 0.0` (agent cannot extract the answer even with corrected evidence — simulates reasoning gap).
-4. Calls `classify_repair_assessment(post_answer_score, evidence_score)`.
-5. Computes `token_cost = _estimate_token_cost(combined, query)`.
-6. Computes `regression_risk = _estimate_regression_risk(case, ctx)`.
-7. Returns `PostRepairResult`.
+1. 调用 `_combine_context(repaired_context)`，用换行符连接 `corrected_memory + repair_guidance + repaired_evidence_block`。
+2. 计算 `evidence_score = evidence_recall_from_text(case.gold_evidence, combined)`。
+3. 检查 `case.gold_answer.casefold() in combined.casefold()`：
+   - 如果找到 → `post_answer_score = 1.0`（代理可以从修正后的上下文中"读出"答案）。
+   - 如果未找到 → `post_answer_score = 0.0`（代理即使有修正后的证据也无法提取答案——模拟推理差距）。
+4. 调用 `classify_repair_assessment(post_answer_score, evidence_score)`。
+5. 计算 `token_cost = _estimate_token_cost(combined, query)`。
+6. 计算 `regression_risk = _estimate_regression_risk(case, ctx)`。
+7. 返回 `PostRepairResult`。
 
-Scoring semantics:
+评分语义：
 
-| Evidence Found | Answer in Context | assessment | Interpretation |
+| 证据找到 | 答案在上下文中 | assessment | 解读 |
 | --- | --- | --- | --- |
-| Yes (1.0) | Yes (1.0) | `recovered` | Repair works; agent can read correct answer from context. |
-| Yes (1.0) | No (0.0) | `partial` | Evidence is there but agent can't produce correct answer — coupled failure exposed. |
-| No (<1.0) | No (0.0) | `failed` | Repair failed; evidence still not recoverable. |
+| 是 (1.0) | 是 (1.0) | `recovered` | 修复有效；代理可以从上下文中读取正确答案。 |
+| 是 (1.0) | 否 (0.0) | `partial` | 证据存在但代理无法生成正确答案——耦合失败暴露。 |
+| 否 (<1.0) | 否 (0.0) | `failed` | 修复失败；证据仍然不可恢复。 |
 
-Gold-answer-injection guard: The answer score is determined by whether `gold_answer` text appears in the repaired context's combined text — not by calling `answer_score(answer, gold_answer)`. This simulates a real agent reading the context and extracting the answer, rather than the function itself injecting or comparing against the gold answer. The `gold_answer` is only used for the `casefold in combined` membership check.
+金标准答案注入防护：答案分数由 `gold_answer` 文本是否出现在修复后上下文的合并文本中决定——而非通过调用 `answer_score(answer, gold_answer)`。这模拟了真实代理读取上下文并提取答案的过程，而不是函数本身注入或比较金标准答案。`gold_answer` 仅用于 `casefold in combined` 的成员检查。
 
-Why casefold membership instead of answer_score: `answer_score` would require the function to produce a candidate answer string, which would mean injecting the gold answer into the comparison logic. The membership check ensures the gold answer text authentically appears in the context that the agent would see, without the function itself generating or comparing candidate answers.
+为什么使用 casefold 成员检查而非 `answer_score`：`answer_score` 要求函数生成候选答案字符串，这将意味着将金标准答案注入比较逻辑。成员检查确保金标准答案文本真实地出现在代理将看到的上下文中，而函数本身不生成或比较候选答案。
 
-Callers:
+调用者：
 
-- `harness.run_case_full` → for CMD-guided post-repair (line 93)
-- `run_hard_case_update_baseline` → for generic baseline (line 186)
-- Direct tests in `PostRepairContextReplayTest`
+- `harness.run_case_full` → 用于 CMD 引导的修复后回放（第 93 行）
+- `run_hard_case_update_baseline` → 用于通用基线（第 186 行）
+- `PostRepairContextReplayTest` 中的直接测试
 
 ---
 
-#### Function: `run_hard_case_update_baseline(case: ProbeCase) -> PostRepairResult`
+#### 函数：`run_hard_case_update_baseline(case: ProbeCase) -> PostRepairResult`
 
-Location: `cmd_audit/post_repair.py:172-186`
+位置：`cmd_audit/post_repair.py:172-186`
 
 ```python
 def run_hard_case_update_baseline(case: ProbeCase) -> PostRepairResult:
@@ -729,38 +729,38 @@ def run_hard_case_update_baseline(case: ProbeCase) -> PostRepairResult:
     return run_post_repair_context_replay(case, ctx)
 ```
 
-Purpose:
+目的：
 
-- Runs a generic "hard-case update" baseline for comparison with CMD-guided repair.
-- Injects ALL extracted memory items as context (without CMD attribution diagnosis) to measure whether simply adding more context suffices.
+- 运行一个通用的"hard-case 更新"基线，用于与 CMD 引导的修复进行对比。
+- 注入所有提取后的记忆项作为上下文（无需 CMD 归因诊断），以衡量简单增加更多上下文是否足够。
 
-Behavior:
+行为：
 
-1. Joins all `case.extracted_memory` item texts with newlines into `all_memory`.
-2. Constructs a `RepairedContext` where `corrected_memory` and `repaired_evidence_block` are both `all_memory`, with a fixed repair guidance string.
-3. Passes to `run_post_repair_context_replay` for scoring with identical scoring logic as CMD repair.
-4. Returns the `PostRepairResult`.
+1. 用换行符连接所有 `case.extracted_memory` 项目文本为 `all_memory`。
+2. 构造一个 `RepairedContext`，其中 `corrected_memory` 和 `repaired_evidence_block` 均为 `all_memory`，带有一个固定的修复指导字符串。
+3. 传递给 `run_post_repair_context_replay`，使用与 CMD 修复相同的评分逻辑评分。
+4. 返回 `PostRepairResult`。
 
-Comparison semantics with CMD repair (issue 0006 uses both):
+与 CMD 修复的对比语义（issue 0006 同时使用两者）：
 
-| CMD `post_repair.assessment` | Hard-Case `assessment` | Interpretation |
+| CMD `post_repair.assessment` | Hard-Case `assessment` | 解读 |
 | --- | --- | --- |
-| `recovered` | `failed` | CMD-targeted repair is necessary; generic context injection is insufficient. |
-| `recovered` | `recovered` | Failure was simple — even generic context fixes it. CMD adds value through precise diagnosis. |
-| `partial` | `failed` | CMD improved evidence recall but coupled reasoning failure remains. |
-| `failed` | `failed` | Diagnosis missed root cause; both approaches fail. |
+| `recovered` | `failed` | CMD 针对性修复是必要的；通用上下文注入不足。 |
+| `recovered` | `recovered` | 失败是简单的——即使通用上下文也能修复。CMD 通过精确诊断增加价值。 |
+| `partial` | `failed` | CMD 改善了证据召回，但耦合推理失败仍然存在。 |
+| `failed` | `failed` | 诊断错过了根因；两种方法都失败。 |
 
-Callers:
+调用者：
 
-- `harness.run_case_full` (line 94)
-- `repairs.make_repair_comparison` (via `FullAuditResult.hard_case_baseline`)
-- Direct tests in `PostRepairContextReplayTest`
+- `harness.run_case_full`（第 94 行）
+- `repairs.make_repair_comparison`（通过 `FullAuditResult.hard_case_baseline`）
+- `PostRepairContextReplayTest` 中的直接测试
 
 ---
 
-#### Function: `validate_sandbox_path(output_path: str | Path, sandbox_root: str | Path | None = None) -> Path`
+#### 函数：`validate_sandbox_path(output_path: str | Path, sandbox_root: str | Path | None = None) -> Path`
 
-Location: `cmd_audit/post_repair.py:192-208`
+位置：`cmd_audit/post_repair.py:192-208`
 
 ```python
 def validate_sandbox_path(output_path: str | Path, sandbox_root: str | Path | None = None) -> Path:
@@ -777,42 +777,42 @@ def validate_sandbox_path(output_path: str | Path, sandbox_root: str | Path | No
     return target
 ```
 
-Purpose:
+目的：
 
-- Enforces the CMD-Audit sandbox write boundary (TDD Cycle 15).
-- Rejects writes to paths that resolve outside the replay-local sandbox.
+- 强制执行 CMD-Audit 沙箱写入边界（TDD Cycle 15）。
+- 拒绝写入解析后位于回放本地沙箱外部的路径。
 
-Behavior:
+行为：
 
-1. Defaults `sandbox_root` to `"artifacts/sandbox"`.
-2. Resolves both `output_path` and `sandbox_root` to absolute paths via `Path.resolve()`.
-3. Calls `target.relative_to(sandbox_resolved)` — raises `ValueError` from `Path.relative_to` if the target is not under the sandbox.
-4. Catches `ValueError` from `relative_to` and raises a new `ValueError` with a clear boundary error message.
-5. Returns the resolved target `Path` on success.
+1. 默认 `sandbox_root` 为 `"artifacts/sandbox"`。
+2. 通过 `Path.resolve()` 将 `output_path` 和 `sandbox_root` 都解析为绝对路径。
+3. 调用 `target.relative_to(sandbox_resolved)`——如果目标不在沙箱下，`Path.relative_to` 会抛出 `ValueError`。
+4. 捕获 `relative_to` 的 `ValueError` 并抛出一个带有清晰边界错误消息的新 `ValueError`。
+5. 成功时返回解析后的目标 `Path`。
 
-Why `resolve()` is used: `Path.resolve()` eliminates `..` and symlinks, preventing trivial bypass via parent traversal.
+为什么使用 `resolve()`：`Path.resolve()` 消除 `..` 和符号链接，防止通过父目录遍历的简单绕过。
 
-Resolution examples:
+解析示例：
 
-| Input Path | sandbox_root | Result |
+| 输入路径 | sandbox_root | 结果 |
 | --- | --- | --- |
-| `"artifacts/sandbox/post_repair.csv"` | (default) | Accepted |
-| `"/etc/passwd"` | (default) | Rejected |
-| `"artifacts/sandbox/../../../etc/passwd"` | (default) | Rejected (parent traversal resolved) |
-| `"/tmp/sandbox/out.csv"` | `"/tmp/sandbox"` | Accepted |
-| `"/tmp/not-sandbox/out.csv"` | `"/tmp/sandbox"` | Rejected |
+| `"artifacts/sandbox/post_repair.csv"` | (默认) | 接受 |
+| `"/etc/passwd"` | (默认) | 拒绝 |
+| `"artifacts/sandbox/../../../etc/passwd"` | (默认) | 拒绝（父目录遍历已解析） |
+| `"/tmp/sandbox/out.csv"` | `"/tmp/sandbox"` | 接受 |
+| `"/tmp/not-sandbox/out.csv"` | `"/tmp/sandbox"` | 拒绝 |
 
-Callers:
+调用者：
 
-- `harness.write_post_repair_table` (line 299)
-- `repairs.write_repair_success_table` (imported in issue 0006)
-- Direct tests in `SandboxWriteBoundaryTest`
+- `harness.write_post_repair_table`（第 299 行）
+- `repairs.write_repair_success_table`（在 issue 0006 中导入）
+- `SandboxWriteBoundaryTest` 中的直接测试
 
 ---
 
-#### Private Function: `_ecs_for_label(case, predicted_label: str, replay) -> tuple[str, str, str]`
+#### 私有函数：`_ecs_for_label(case, predicted_label: str, replay) -> tuple[str, str, str]`
 
-Location: `cmd_audit/post_repair.py:214-268`
+位置：`cmd_audit/post_repair.py:214-268`
 
 ```python
 def _ecs_for_label(case, predicted_label: str, replay) -> tuple[str, str, str]:
@@ -856,7 +856,7 @@ def _ecs_for_label(case, predicted_label: str, replay) -> tuple[str, str, str]:
             "fix injection formatting so retrieved evidence is presented "
             "as a clean evidence block",
         )
-    # write_error (and any future V1 labels that roll up in V0)
+    # write_error（以及在 V0 中汇总的任何未来 V1 标签）
     return (
         "no recoverable evidence found in extracted memory; the failure "
         "may originate at or before the write step",
@@ -866,24 +866,24 @@ def _ecs_for_label(case, predicted_label: str, replay) -> tuple[str, str, str]:
     )
 ```
 
-Purpose:
+目的：
 
-- Returns per-label `(cause, corrected_memory, repair_guidance)` for the six V0 pipeline labels.
-- Rule-based V0 draft: each label has a fixed cause template and repair guidance template.
-- `corrected_memory` is always `replay.evidence_block` — the evidence recovered by the winning counterfactual replay.
-- `write_error` serves as the fallback for all labels (the final `return` statement catches any V0 label not explicitly handled above).
+- 为六个 V0 流水线标签返回逐标签的 `(cause, corrected_memory, repair_guidance)`。
+- 基于规则的 V0 草案：每个标签有固定的 cause 模板和修复指导模板。
+- `corrected_memory` 始终是 `replay.evidence_block`——由获胜反事实回放恢复的证据。
+- `write_error` 作为所有标签的回退（最终的 `return` 语句捕获上面未显式处理的任何 V0 标签）。
 
-Why `write_error` is the fallback: `write_error` represents the case where "no recoverable evidence found in extracted memory" — this is the default diagnosis when other specific failure modes are ruled out. Any future V1 labels that roll up into V0 will also hit this fallback.
+为什么 `write_error` 是回退：`write_error` 代表"在提取后的记忆中未找到可恢复证据"的情况——这是当其他特定失败模式被排除时的默认诊断。任何汇总到 V0 的未来 V1 标签也将命中此回退。
 
-Callers:
+调用者：
 
-- `draft_ecs` (line 120)
+- `draft_ecs`（第 120 行）
 
 ---
 
-#### Private Function: `_combine_context(ctx: RepairedContext) -> str`
+#### 私有函数：`_combine_context(ctx: RepairedContext) -> str`
 
-Location: `cmd_audit/post_repair.py:271-277`
+位置：`cmd_audit/post_repair.py:271-277`
 
 ```python
 def _combine_context(ctx: RepairedContext) -> str:
@@ -896,40 +896,40 @@ def _combine_context(ctx: RepairedContext) -> str:
     )
 ```
 
-Purpose:
+目的：
 
-- Joins the three context components with newlines for use in `evidence_recall_from_text` and the gold-answer membership check.
+- 用换行符连接三个上下文组件，用于 `evidence_recall_from_text` 和金标准答案成员检查。
 
-Callers:
+调用者：
 
-- `run_post_repair_context_replay` (line 152)
-- `_estimate_regression_risk` (line 290)
+- `run_post_repair_context_replay`（第 152 行）
+- `_estimate_regression_risk`（第 290 行）
 
 ---
 
-#### Private Function: `_estimate_token_cost(context_text: str, query: str) -> float`
+#### 私有函数：`_estimate_token_cost(context_text: str, query: str) -> float`
 
-Location: `cmd_audit/post_repair.py:281-283`
+位置：`cmd_audit/post_repair.py:281-283`
 
 ```python
 def _estimate_token_cost(context_text: str, query: str) -> float:
     return (len(context_text) + len(query)) / 4.0
 ```
 
-Purpose:
+目的：
 
-- Simple character-based token estimator using ~4 chars per token approximation.
-- V0 placeholder; a real tokenizer would replace this in later versions.
+- 使用约 4 个字符/token 的近似值的简单基于字符的 token 估算器。
+- V0 占位符；真实 tokenizer 将在后续版本中替换它。
 
-Callers:
+调用者：
 
-- `run_post_repair_context_replay` (line 158)
+- `run_post_repair_context_replay`（第 158 行）
 
 ---
 
-#### Private Function: `_estimate_regression_risk(case, ctx: RepairedContext) -> float`
+#### 私有函数：`_estimate_regression_risk(case, ctx: RepairedContext) -> float`
 
-Location: `cmd_audit/post_repair.py:286-298`
+位置：`cmd_audit/post_repair.py:286-298`
 
 ```python
 def _estimate_regression_risk(case, ctx: RepairedContext) -> float:
@@ -946,32 +946,32 @@ def _estimate_regression_risk(case, ctx: RepairedContext) -> float:
     return max(0.0, min(1.0, 1.0 - overlap))
 ```
 
-Purpose:
+目的：
 
-- Estimates regression risk as the proportion of original context terms NOT present in the repaired context.
-- Low overlap → high risk that the repair removed useful context from the original baseline.
-- Returns `0.0` if the baseline had no injected context.
+- 将回归风险估算为原始上下文词项中不出现在修复后上下文中的比例。
+- 低重叠 → 高风险：修复从原始基线中移除了有用的上下文。
+- 如果基线没有注入上下文则返回 `0.0`。
 
-Behavior:
+行为：
 
-1. Reads `case.primary_baseline.injected_context` as original context.
-2. Returns `0.0` immediately if `original_context` is empty.
-3. Tokenizes both original and repaired contexts into casefolded word sets.
-4. Returns `0.0` if original has no terms.
-5. Computes Jaccard-like overlap ratio: `|intersection| / |original|`.
-6. Returns `max(0.0, min(1.0, 1.0 - overlap))` — clamped to [0.0, 1.0].
+1. 读取 `case.primary_baseline.injected_context` 作为原始上下文。
+2. 如果 `original_context` 为空则立即返回 `0.0`。
+3. 将原始和修复后的上下文都分词为 casefolded 单词集合。
+4. 如果原始没有词项则返回 `0.0`。
+5. 计算类 Jaccard 重叠比例：`|交集| / |原始|`。
+6. 返回 `max(0.0, min(1.0, 1.0 - overlap))`——钳制到 [0.0, 1.0]。
 
-Callers:
+调用者：
 
-- `run_post_repair_context_replay` (line 159)
+- `run_post_repair_context_replay`（第 159 行）
 
-### `cmd_audit/harness.py` (Issue 0005 Additions)
+### `cmd_audit/harness.py`（Issue 0005 新增内容）
 
 ---
 
-#### Dataclass: `FullAuditResult`
+#### 数据类：`FullAuditResult`
 
-Location: `cmd_audit/harness.py:76-84`
+位置：`cmd_audit/harness.py:76-84`
 
 ```python
 @dataclass(frozen=True)
@@ -984,26 +984,26 @@ class FullAuditResult:
     hard_case_baseline: PostRepairResult
 ```
 
-Purpose:
+目的：
 
-- Wraps the complete CMD-Audit V0 pipeline result from attribution through post-repair replay.
-- Frozen (immutable), no `__post_init__` validation.
-- The `AuditResult` field preserves the full pre-existing attribution + baselines layer.
-- Two `PostRepairResult` fields allow direct comparison: `post_repair` (CMD-guided) vs `hard_case_baseline` (generic).
+- 包装从归因到修复后回放的完整 CMD-Audit V0 流水线结果。
+- 冻结（不可变），无 `__post_init__` 校验。
+- `AuditResult` 字段保留完整的先前归因 + 基线层。
+- 两个 `PostRepairResult` 字段允许直接比较：`post_repair`（CMD 引导）vs `hard_case_baseline`（通用）。
 
-Constructed exclusively by `run_case_full` (line 87-101).
+仅由 `run_case_full` 构造（第 87-101 行）。
 
-Consumed by:
+被以下消费：
 
-- `write_post_repair_table` (line 293)
-- `repairs.make_repair_comparison` (issue 0006, via `write_repair_success_table_from_full`)
-- `run_cases_full` (line 124-125)
+- `write_post_repair_table`（第 293 行）
+- `repairs.make_repair_comparison`（issue 0006，通过 `write_repair_success_table_from_full`）
+- `run_cases_full`（第 124-125 行）
 
 ---
 
-#### Function: `run_case_full(case: ProbeCase) -> FullAuditResult`
+#### 函数：`run_case_full(case: ProbeCase) -> FullAuditResult`
 
-Location: `cmd_audit/harness.py:87-101`
+位置：`cmd_audit/harness.py:87-101`
 
 ```python
 def run_case_full(case: ProbeCase) -> FullAuditResult:
@@ -1021,53 +1021,53 @@ def run_case_full(case: ProbeCase) -> FullAuditResult:
     )
 ```
 
-Purpose:
+目的：
 
-- Top-level entry point for the complete V0 pipeline: attribution → ECS → repair → post-repair replay → hard-case baseline.
-- Composes existing `run_case` with new issue 0005 functions without modifying any of them.
+- 完整 V0 流水线的顶层入口点：归因 → ECS → 修复 → 修复后回放 → hard-case 基线。
+- 在不修改任何现有函数的情况下组合现有的 `run_case` 和新的 issue 0005 函数。
 
-Behavior:
+行为：
 
-1. Calls `run_case(case)` — runs the full baseline suite, six counterfactual replays, and attribution assignment.
-2. Calls `draft_ecs(case, audit)` — drafts per-label ECS from the attribution result.
-3. Calls `build_repaired_context(case, ecs_draft)` — assembles repaired context (gold-answer-injection prevention gate).
-4. Calls `run_post_repair_context_replay(case, repaired_context)` — scores CMD-guided repair.
-5. Calls `run_hard_case_update_baseline(case)` — scores generic comparison baseline.
-6. Returns `FullAuditResult` with all five fields.
+1. 调用 `run_case(case)`——运行完整的基线套件、六个反事实回放和归因分配。
+2. 调用 `draft_ecs(case, audit)`——从归因结果起草逐标签 ECS。
+3. 调用 `build_repaired_context(case, ecs_draft)`——组装修复后的上下文（金标准答案注入防护门）。
+4. 调用 `run_post_repair_context_replay(case, repaired_context)`——评分 CMD 引导的修复。
+5. 调用 `run_hard_case_update_baseline(case)`——评分通用对比基线。
+6. 返回带有全部五个字段的 `FullAuditResult`。
 
-This is the "one line to run everything" function. `run_case` remains the attribution-only entry point; `run_case_full` is the complete pipeline entry point.
+这是"一行运行一切"的函数。`run_case` 仍然是仅归因的入口点；`run_case_full` 是完整的流水线入口点。
 
-Callers:
+调用者：
 
-- `run_cases_full` (line 125, issue 0006)
-- Direct tests in `PostRepairContextReplayTest`, `RepairComparisonRowTest`, `RepairSuccessSummaryTest`, `ClaimLedgerTest`, `FullPipelinePerLabelTest`
+- `run_cases_full`（第 125 行，issue 0006）
+- `PostRepairContextReplayTest`、`RepairComparisonRowTest`、`RepairSuccessSummaryTest`、`ClaimLedgerTest`、`FullPipelinePerLabelTest` 中的直接测试
 
 ---
 
-#### Function: `run_cases_full(cases: list[ProbeCase]) -> list[FullAuditResult]`
+#### 函数：`run_cases_full(cases: list[ProbeCase]) -> list[FullAuditResult]`
 
-Location: `cmd_audit/harness.py:124-125`
+位置：`cmd_audit/harness.py:124-125`
 
 ```python
 def run_cases_full(cases: list[ProbeCase]) -> list[FullAuditResult]:
     return [run_case_full(case) for case in cases]
 ```
 
-Purpose:
+目的：
 
-- Batch version of `run_case_full` for multi-case smoke suites.
-- Added in issue 0006 to support repair success comparison across the full six-case portfolio.
+- `run_case_full` 的批量版本，用于多案例烟雾套件。
+- 在 issue 0006 中添加，以支持跨完整六案例组合的修复成功对比。
 
-Callers:
+调用者：
 
-- Tests in `test_cmd_audit_issue6_targeted_repairs.py`
-- External scripts generating repair artifacts
+- `test_cmd_audit_issue6_targeted_repairs.py` 中的测试
+- 生成修复产出物的外部脚本
 
 ---
 
-#### Function: `write_post_repair_table(results: list[FullAuditResult], output_path: str | Path, *, sandbox_root: str | Path | None = None) -> None`
+#### 函数：`write_post_repair_table(results: list[FullAuditResult], output_path: str | Path, *, sandbox_root: str | Path | None = None) -> None`
 
-Location: `cmd_audit/harness.py:293-337`
+位置：`cmd_audit/harness.py:293-337`
 
 ```python
 def write_post_repair_table(
@@ -1079,46 +1079,46 @@ def write_post_repair_table(
     validate_sandbox_path(output_path, sandbox_root)
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # ... writes CSV with 13 columns ...
+    # ... 写入包含 13 列的 CSV ...
 ```
 
-Purpose:
+目的：
 
-- Writes the post-repair comparison table as CSV, gated by sandbox path validation.
-- One row per `FullAuditResult`.
+- 将修复后对比表写入 CSV，由沙箱路径校验把关。
+- 每个 `FullAuditResult` 一行。
 
-Behavior:
+行为：
 
-1. Calls `validate_sandbox_path(output_path, sandbox_root)` — rejects if output path is outside the sandbox.
-2. Creates parent directories.
-3. Writes CSV with 13 columns:
+1. 调用 `validate_sandbox_path(output_path, sandbox_root)`——如果输出路径在沙箱外则拒绝。
+2. 创建父目录。
+3. 写入包含 13 列的 CSV：
 
-| Column | Source Field |
+| 列 | 来源字段 |
 | --- | --- |
 | `case_id` | `audit.case_id` |
 | `perturbation_label` | `audit.perturbation_label` |
 | `predicted_label` | `audit.attribution.predicted_label` |
-| `pre_repair_answer_score` | `audit.baseline_answer_score` (formatted to 3 decimals) |
-| `pre_repair_evidence_score` | `audit.baseline_evidence_score` (formatted to 3 decimals) |
-| `post_repair_answer_score` | `post_repair.post_repair_answer_score` (formatted to 3 decimals) |
-| `post_repair_evidence_score` | `post_repair.post_repair_evidence_score` (formatted to 3 decimals) |
-| `repair_assessment` | `post_repair.repair_assessment` (raw string) |
-| `repair_action` | `audit.attribution.predicted_label` (the repair strategy applied) |
-| `hard_case_baseline_assessment` | `hard_case_baseline.repair_assessment` (raw string) |
-| `token_cost` | `post_repair.token_cost` (formatted to 1 decimal) |
-| `regression_risk` | `post_repair.regression_risk` (formatted to 3 decimals) |
-| `had_repair_regression` | `post_repair.had_repair_regression` (lowercase string) |
+| `pre_repair_answer_score` | `audit.baseline_answer_score`（格式化为 3 位小数） |
+| `pre_repair_evidence_score` | `audit.baseline_evidence_score`（格式化为 3 位小数） |
+| `post_repair_answer_score` | `post_repair.post_repair_answer_score`（格式化为 3 位小数） |
+| `post_repair_evidence_score` | `post_repair.post_repair_evidence_score`（格式化为 3 位小数） |
+| `repair_assessment` | `post_repair.repair_assessment`（原始字符串） |
+| `repair_action` | `audit.attribution.predicted_label`（应用的修复策略） |
+| `hard_case_baseline_assessment` | `hard_case_baseline.repair_assessment`（原始字符串） |
+| `token_cost` | `post_repair.token_cost`（格式化为 1 位小数） |
+| `regression_risk` | `post_repair.regression_risk`（格式化为 3 位小数） |
+| `had_repair_regression` | `post_repair.had_repair_regression`（小写字符串） |
 
-Callers:
+调用者：
 
-- Direct tests in `SandboxWriteBoundaryTest`, `PostRepairTableShapeTest`
-- External scripts generating post-repair artifacts
+- `SandboxWriteBoundaryTest`、`PostRepairTableShapeTest` 中的直接测试
+- 生成修复后产出物的外部脚本
 
 ---
 
-#### Function: `write_repair_success_table_from_full(results: list[FullAuditResult], output_path: str | Path, *, sandbox_root: str | Path | None = None) -> list[RepairComparisonRow]`
+#### 函数：`write_repair_success_table_from_full(results: list[FullAuditResult], output_path: str | Path, *, sandbox_root: str | Path | None = None) -> list[RepairComparisonRow]`
 
-Location: `cmd_audit/harness.py:128-137`
+位置：`cmd_audit/harness.py:128-137`
 
 ```python
 def write_repair_success_table_from_full(
@@ -1132,112 +1132,112 @@ def write_repair_success_table_from_full(
     return rows
 ```
 
-Purpose:
+目的：
 
-- Bridge function added in issue 0006: converts `FullAuditResult` list into `RepairComparisonRow` list and writes the repair success comparison table.
-- Uses issue 0005's `validate_sandbox_path` (called transitively via `write_repair_success_table`).
+- 在 issue 0006 中添加的桥接函数：将 `FullAuditResult` 列表转换为 `RepairComparisonRow` 列表并写入修复成功对比表。
+- 使用 issue 0005 的 `validate_sandbox_path`（通过 `write_repair_success_table` 间接调用）。
 
-Callers:
+调用者：
 
-- Tests in `test_cmd_audit_issue6_targeted_repairs.py`
+- `test_cmd_audit_issue6_targeted_repairs.py` 中的测试
 
-## Test-Level Contract
+## 测试级合约
 
-Tests live in `tests/test_cmd_audit_issue5_post_repair.py`. Five test classes, 26 test methods.
+测试位于 `tests/test_cmd_audit_issue5_post_repair.py`。5 个测试类，26 个测试方法。
 
-### `ThreeValueRepairAssessmentTest` (Cycle 12)
+### `ThreeValueRepairAssessmentTest`（Cycle 12）
 
-| Test Method | What It Verifies |
+| 测试方法 | 验证内容 |
 | --- | --- |
-| `test_recovered_when_answer_full_score` | `classify_repair_assessment(1.0, 1.0)` returns `"recovered"`. |
-| `test_partial_when_evidence_recovered_but_answer_not` | **Cycle 12 RED→GREEN**: `classify_repair_assessment(0.0, 1.0)` returns `"partial"`. Evidence = 1.0 but answer = 0.0 → partial, not recovered or failed. |
-| `test_failed_when_neither_answer_nor_evidence_recovered` | `classify_repair_assessment(0.0, 0.0)` returns `"failed"`. |
-| `test_partial_on_partial_answer_with_full_evidence` | `classify_repair_assessment(0.5, 1.0)` returns `"partial"`. Any answer_score < 1.0 with evidence = 1.0 is partial. |
-| `test_failed_on_low_both_scores` | `classify_repair_assessment(0.3, 0.3)` returns `"failed"`. Both below threshold. |
+| `test_recovered_when_answer_full_score` | `classify_repair_assessment(1.0, 1.0)` 返回 `"recovered"`。 |
+| `test_partial_when_evidence_recovered_but_answer_not` | **Cycle 12 RED→GREEN**：`classify_repair_assessment(0.0, 1.0)` 返回 `"partial"`。Evidence = 1.0 但 answer = 0.0 → partial，而非 recovered 或 failed。 |
+| `test_failed_when_neither_answer_nor_evidence_recovered` | `classify_repair_assessment(0.0, 0.0)` 返回 `"failed"`。 |
+| `test_partial_on_partial_answer_with_full_evidence` | `classify_repair_assessment(0.5, 1.0)` 返回 `"partial"`。任何 answer_score < 1.0 且 evidence = 1.0 都是 partial。 |
+| `test_failed_on_low_both_scores` | `classify_repair_assessment(0.3, 0.3)` 返回 `"failed"`。两者均低于阈值。 |
 
-### `PostRepairContextReplayTest` (Cycle 5)
+### `PostRepairContextReplayTest`（Cycle 5）
 
-| Test Method | What It Verifies |
+| 测试方法 | 验证内容 |
 | --- | --- |
-| `test_draft_ecs_from_attribution` | `draft_ecs` produces `ECSDraft` for the retrieval case with correct `case_id`, `predicted_label="retrieval_error"`, non-empty `cause`/`corrected_memory`/`repair_guidance`/`repaired_evidence_block`. |
-| `test_build_repaired_context_includes_all_components` | `build_repaired_context` transfers all ECS fields + original query into `RepairedContext`. Verified by field-level assertions. |
-| `test_post_repair_replay_recovers_retrieval_case` | Full targeted repair path for `retrieval_error`: evidence and answer scores are both 1.0 → assessment = `"recovered"`. |
-| `test_post_repair_does_not_inject_gold_answer_directly` | The `repair_guidance` field in the repaired context does not contain the gold answer text. The gold answer can only appear in `corrected_memory` if it naturally occurs in the corrected memory text (from the replay's evidence block). |
-| `test_post_repair_result_has_token_cost_and_regression_risk` | `PostRepairResult` has `token_cost >= 0.0`, `regression_risk` in [0.0, 1.0], and `had_repair_regression` is a `bool`. |
-| `test_hard_case_update_baseline_is_independent` | `run_hard_case_update_baseline` produces a `PostRepairResult` with valid three-value assessment. |
-| `test_full_pipeline_produces_complete_result` | `run_case_full` returns `FullAuditResult` with all five fields as correct types. Retrieval case shows `"recovered"`. |
-| `test_post_repair_partial_scenario` | Constructs `RepairedContext` where corrected_memory does not contain the gold answer but evidence_block does → exercises the partial/full boundary. Three-value assessment is always one of the three valid values. |
+| `test_draft_ecs_from_attribution` | `draft_ecs` 为检索案例生成具有正确 `case_id`、`predicted_label="retrieval_error"`、非空 `cause`/`corrected_memory`/`repair_guidance`/`repaired_evidence_block` 的 `ECSDraft`。 |
+| `test_build_repaired_context_includes_all_components` | `build_repaired_context` 将所有 ECS 字段 + 原始查询转移到 `RepairedContext`。通过逐字段断言验证。 |
+| `test_post_repair_replay_recovers_retrieval_case` | `retrieval_error` 的完整针对性修复路径：证据和答案分数均为 1.0 → assessment = `"recovered"`。 |
+| `test_post_repair_does_not_inject_gold_answer_directly` | 修复后上下文中的 `repair_guidance` 字段不包含金标准答案文本。金标准答案只有在自然地出现在修正后的记忆文本（来自回放的 evidence_block）中时才能出现在 `corrected_memory` 中。 |
+| `test_post_repair_result_has_token_cost_and_regression_risk` | `PostRepairResult` 具有 `token_cost >= 0.0`、`regression_risk` 在 [0.0, 1.0] 范围内，且 `had_repair_regression` 是 `bool`。 |
+| `test_hard_case_update_baseline_is_independent` | `run_hard_case_update_baseline` 生成具有有效三值评估的 `PostRepairResult`。 |
+| `test_full_pipeline_produces_complete_result` | `run_case_full` 返回具有全部五个字段为正确类型的 `FullAuditResult`。检索案例显示 `"recovered"`。 |
+| `test_post_repair_partial_scenario` | 构造 `RepairedContext`，其中 corrected_memory 不包含金标准答案但 evidence_block 包含 → 测试 partial/full 边界。三值评估始终是三个有效值之一。 |
 
-### `ECSCauseValidationTest` (Cycle 13)
+### `ECSCauseValidationTest`（Cycle 13）
 
-| Test Method | What It Verifies |
+| 测试方法 | 验证内容 |
 | --- | --- |
-| `test_ecs_cause_rejects_item_wrong` | `ECSDraft` construction with cause containing `"item_wrong"` raises `ValueError`. |
-| `test_ecs_cause_rejects_item_stale` | `ECSDraft` construction with cause containing `"item_stale"` raises `ValueError`. |
-| `test_ecs_cause_rejects_item_conflict` | `ECSDraft` construction with cause containing `"item_conflict"` raises `ValueError`. |
-| `test_ecs_cause_rejects_item_poisoned` | `ECSDraft` construction with cause containing `"item_poisoned"` raises `ValueError`. |
-| `test_ecs_cause_rejects_item_compression_distorted` | `ECSDraft` construction with cause containing `"item_compression_distorted"` raises `ValueError`. |
-| `test_ecs_cause_allows_descriptive_state_language` | `ECSDraft` with cause = `"stored preference was outdated relative to ground truth"` is accepted. |
-| `test_ecs_cause_rejects_natural_language_equivalents` | `ECSDraft` with cause = `"the memory item is wrong"` (natural-language equivalent of `item_wrong`) is rejected. Validates regex-based detection. |
+| `test_ecs_cause_rejects_item_wrong` | cause 包含 `"item_wrong"` 的 `ECSDraft` 构造抛出 `ValueError`。 |
+| `test_ecs_cause_rejects_item_stale` | cause 包含 `"item_stale"` 的 `ECSDraft` 构造抛出 `ValueError`。 |
+| `test_ecs_cause_rejects_item_conflict` | cause 包含 `"item_conflict"` 的 `ECSDraft` 构造抛出 `ValueError`。 |
+| `test_ecs_cause_rejects_item_poisoned` | cause 包含 `"item_poisoned"` 的 `ECSDraft` 构造抛出 `ValueError`。 |
+| `test_ecs_cause_rejects_item_compression_distorted` | cause 包含 `"item_compression_distorted"` 的 `ECSDraft` 构造抛出 `ValueError`。 |
+| `test_ecs_cause_allows_descriptive_state_language` | cause = `"stored preference was outdated relative to ground truth"` 的 `ECSDraft` 被接受。 |
+| `test_ecs_cause_rejects_natural_language_equivalents` | cause = `"the memory item is wrong"`（`item_wrong` 的自然语言等价词）的 `ECSDraft` 被拒绝。验证基于正则的检测。 |
 
-All seven tests validate at `ECSDraft.__post_init__` construction time, not at a separate validation endpoint.
+所有七个测试在 `ECSDraft.__post_init__` 构造时进行验证，而非在单独的校验端点。
 
-### `SandboxWriteBoundaryTest` (Cycle 15)
+### `SandboxWriteBoundaryTest`（Cycle 15）
 
-| Test Method | What It Verifies |
+| 测试方法 | 验证内容 |
 | --- | --- |
-| `test_sandbox_path_inside_is_accepted` | `validate_sandbox_path(Path("artifacts/sandbox/post_repair.csv"))` succeeds. |
-| `test_sandbox_path_outside_is_rejected` | `validate_sandbox_path(Path("/etc/passwd"))` raises `ValueError`. Tests absolute path outside sandbox. |
-| `test_sandbox_path_parent_traversal_rejected` | `validate_sandbox_path(Path("artifacts/sandbox/../../../etc/passwd"))` raises `ValueError`. `Path.resolve()` neutralizes `..` traversal. |
-| `test_write_post_repair_table_writes_to_sandbox` | End-to-end: `write_post_repair_table` writes CSV inside sandbox, content contains expected headers and case_id. Uses `tempfile.TemporaryDirectory`. |
-| `test_write_post_repair_table_rejects_outside_sandbox` | `write_post_repair_table` with output outside sandbox raises `ValueError`. |
+| `test_sandbox_path_inside_is_accepted` | `validate_sandbox_path(Path("artifacts/sandbox/post_repair.csv"))` 成功。 |
+| `test_sandbox_path_outside_is_rejected` | `validate_sandbox_path(Path("/etc/passwd"))` 抛出 `ValueError`。测试沙箱外的绝对路径。 |
+| `test_sandbox_path_parent_traversal_rejected` | `validate_sandbox_path(Path("artifacts/sandbox/../../../etc/passwd"))` 抛出 `ValueError`。`Path.resolve()` 消除 `..` 遍历。 |
+| `test_write_post_repair_table_writes_to_sandbox` | 端到端：`write_post_repair_table` 在沙箱内写入 CSV，内容包含预期的表头和 case_id。使用 `tempfile.TemporaryDirectory`。 |
+| `test_write_post_repair_table_rejects_outside_sandbox` | 输出在沙箱外的 `write_post_repair_table` 抛出 `ValueError`。 |
 
 ### `PostRepairTableShapeTest`
 
-| Test Method | What It Verifies |
+| 测试方法 | 验证内容 |
 | --- | --- |
-| `test_table_has_required_columns` | Generated CSV header contains all 13 required columns. Uses `subTest` per column for precise failure reporting. |
+| `test_table_has_required_columns` | 生成的 CSV 表头包含全部 13 个必需列。每列使用 `subTest` 以精确定位失败。 |
 
-## Boundary Rules
+## 边界规则
 
-1. **Gold answer injection gate**: `run_post_repair_context_replay` never writes or calls `answer_score(gold_answer, ...)`. The answer score is determined by `case.gold_answer.casefold() in combined_context.casefold()` — a membership check on the repaired context text, simulating an agent reading and extracting the answer from context. `build_repaired_context` does not reference `case.gold_answer` at all.
+1. **金标准答案注入门**：`run_post_repair_context_replay` 从不写入或调用 `answer_score(gold_answer, ...)`。答案分数由 `case.gold_answer.casefold() in combined_context.casefold()` 决定——对修复后上下文文本的成员检查，模拟代理从上下文中读取和提取答案。`build_repaired_context` 完全不引用 `case.gold_answer`。
 
-2. **Three-value assessment**: `repair_assessment` outputs exactly `recovered`, `partial`, or `failed`. No binary `repair_success` field is computed. `partial` (evidence recovered, answer still wrong) is the key diagnostic signal for coupled failures — it means "CMD fixed the diagnosed operation, but a second failure (likely reasoning) remains."
+2. **三值评估**：`repair_assessment` 精确输出 `recovered`、`partial` 或 `failed`。不计算二元的 `repair_success` 字段。`partial`（证据恢复，答案仍然错误）是耦合失败的关键诊断信号——它意味着"CMD 修复了被诊断的操作，但仍存在第二个失败（可能是推理）。"
 
-3. **ECS cause item-label-name prohibition**: `ECSDraft.__post_init__` rejects cause text containing forbidden item label names (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) or their natural-language equivalents (regex-matched via `_FORBIDDEN_NL_PATTERNS`). Descriptive state language is allowed (e.g., "stored preference was outdated relative to ground truth").
+3. **ECS cause 项目标签名称禁止**：`ECSDraft.__post_init__` 拒绝包含禁止的项目标签名称（`item_wrong`、`item_stale`、`item_conflict`、`item_poisoned`、`item_compression_distorted`）或其自然语言等价词（通过 `_FORBIDDEN_NL_PATTERNS` 正则匹配）的 cause 文本。允许描述性状态语言（例如 "stored preference was outdated relative to ground truth"）。
 
-4. **Sandbox write boundary**: All post-repair artifact writes must go through `validate_sandbox_path`, which rejects any path outside `artifacts/sandbox/` (default). Parent traversal (`..`) is neutralized by `Path.resolve()`. This enforces that CMD-Audit writes only to replay-local sandbox.
+4. **沙箱写入边界**：所有修复后产出物写入必须经过 `validate_sandbox_path`，该函数拒绝默认情况下在 `artifacts/sandbox/` 外部的任何路径。父目录遍历（`..`）由 `Path.resolve()` 消除。这强制 CMD-Audit 仅写入回放本地沙箱。
 
-5. **Hard-case baseline separation**: `run_hard_case_update_baseline` is structurally independent from CMD repair. It uses the same `run_post_repair_context_replay` scoring function but with a generic context (all extracted memory), not CMD-diagnosed repair. The comparison between `post_repair.repair_assessment` and `hard_case_baseline.repair_assessment` is the repair validity evidence — consumed by issue 0006's `make_repair_comparison`.
+5. **Hard-case 基线分离**：`run_hard_case_update_baseline` 在结构上独立于 CMD 修复。它使用相同的 `run_post_repair_context_replay` 评分函数，但使用通用上下文（所有提取后的记忆），而非 CMD 诊断的修复。`post_repair.repair_assessment` 和 `hard_case_baseline.repair_assessment` 之间的比较是修复有效性证据——被 issue 0006 的 `make_repair_comparison` 消费。
 
-6. **CMD-Audit / CMD-Skill Adapter separation**: Post-Repair Context Replay stays within CMD-Audit. Replay writes target the local sandbox (`artifacts/sandbox/`) only. CMD-Skill Adapter (future) is the only component authorized to apply validated repairs to production agent state.
+6. **CMD-Audit / CMD-Skill Adapter 分离**：Post-Repair Context Replay 停留在 CMD-Audit 内。回放写入仅针对本地沙箱（`artifacts/sandbox/`）。CMD-Skill Adapter（未来）是唯一被授权将经过验证的修复应用到生产代理状态的组件。
 
-7. **Existing attribution unchanged**: `run_case`, `AuditResult`, `assign_attribution`, `run_v0_replay_portfolio`, and all six replay functions are preserved exactly as they were. `run_case_full` composes them; it does not modify them.
+7. **现有归因保持不变**：`run_case`、`AuditResult`、`assign_attribution`、`run_v0_replay_portfolio` 和所有六个回放函数完全保持原样。`run_case_full` 组合它们；它不修改它们。
 
-## Acceptance Criteria Traceability
+## 验收标准可追溯性
 
-| Issue 0005 AC | Code Surface | Test Surface |
+| Issue 0005 AC | 代码接口 | 测试接口 |
 | --- | --- | --- |
-| Full pipeline from probe case through attribution, ECS, and Post-Repair Context Replay. | `run_case_full` composes `run_case` → `draft_ecs` → `build_repaired_context` → `run_post_repair_context_replay` → `run_hard_case_update_baseline`. | `test_full_pipeline_produces_complete_result` |
-| Repaired context includes corrected memory, repair guidance, and repaired evidence block. | `build_repaired_context` transfers all ECS fields + `original_query`. `RepairedContext` is a frozen dataclass with five fields. | `test_build_repaired_context_includes_all_components` |
-| Post-Repair Context Replay runs the original query with repaired context, without injecting gold answer. | `run_post_repair_context_replay` uses `gold_answer.casefold() in combined` (membership check), not `answer_score(...)`. `build_repaired_context` does not reference `gold_answer`. | `test_post_repair_does_not_inject_gold_answer_directly` |
-| Output includes three-value `repair_assessment` (`recovered` / `partial` / `failed`). | `classify_repair_assessment` returns one of three values. `PostRepairResult.repair_assessment` stores it. | `ThreeValueRepairAssessmentTest` (5 methods) |
-| Metrics include answer F1 or accuracy, evidence recall, token cost, and regression risk. | `PostRepairResult` has `post_repair_answer_score`, `post_repair_evidence_score`, `token_cost`, `regression_risk`, `had_repair_regression`. | `test_post_repair_result_has_token_cost_and_regression_risk` |
-| Hard-case update baseline is compared with CMD-guided repair. | `run_hard_case_update_baseline` injects all extracted memory; scored independently from CMD repair via `run_post_repair_context_replay`. Both results stored in `FullAuditResult`. | `test_hard_case_update_baseline_is_independent` |
-| CMD-Audit write permissions limited to replay-local sandbox. | `validate_sandbox_path` enforces sandbox boundary via `Path.resolve()`. `write_post_repair_table` calls it before writing. | `SandboxWriteBoundaryTest` (5 methods) |
+| 从探针案例经归因、ECS 到 Post-Repair Context Replay 的完整流水线。 | `run_case_full` 组合 `run_case` → `draft_ecs` → `build_repaired_context` → `run_post_repair_context_replay` → `run_hard_case_update_baseline`。 | `test_full_pipeline_produces_complete_result` |
+| 修复后的上下文包含修正记忆、修复指导和修复后的证据块。 | `build_repaired_context` 转移所有 ECS 字段 + `original_query`。`RepairedContext` 是具有五个字段的冻结数据类。 | `test_build_repaired_context_includes_all_components` |
+| Post-Repair Context Replay 使用修复后的上下文运行原始查询，不注入金标准答案。 | `run_post_repair_context_replay` 使用 `gold_answer.casefold() in combined`（成员检查），而非 `answer_score(...)`。`build_repaired_context` 不引用 `gold_answer`。 | `test_post_repair_does_not_inject_gold_answer_directly` |
+| 输出包含三值 `repair_assessment`（`recovered` / `partial` / `failed`）。 | `classify_repair_assessment` 返回三个值之一。`PostRepairResult.repair_assessment` 存储它。 | `ThreeValueRepairAssessmentTest`（5 个方法） |
+| 指标包括答案 F1 或准确率、证据召回率、token 成本和回归风险。 | `PostRepairResult` 具有 `post_repair_answer_score`、`post_repair_evidence_score`、`token_cost`、`regression_risk`、`had_repair_regression`。 | `test_post_repair_result_has_token_cost_and_regression_risk` |
+| Hard-case 更新基线与 CMD 引导的修复进行对比。 | `run_hard_case_update_baseline` 注入所有提取后的记忆；通过 `run_post_repair_context_replay` 独立于 CMD 修复评分。两个结果存储在 `FullAuditResult` 中。 | `test_hard_case_update_baseline_is_independent` |
+| CMD-Audit 写入权限限制在回放本地沙箱。 | `validate_sandbox_path` 通过 `Path.resolve()` 强制执行沙箱边界。`write_post_repair_table` 在写入前调用它。 | `SandboxWriteBoundaryTest`（5 个方法） |
 
-## Verification
+## 验证
 
-Commands:
+命令：
 
 ```bash
-# Issue 0005 tests only (26 tests)
+# 仅 issue 0005 测试（26 个测试）
 python3 -m pytest tests/test_cmd_audit_issue5_post_repair.py -v
 
-# Full test suite (83 tests as of issue 0006 completion)
+# 完整测试套件（截至 issue 0006 完成时共 83 个测试）
 python3 -m pytest
 
-# Generate post-repair artifact from smoke suite
+# 从烟雾套件生成修复后产出物
 python3 -c "
 from pathlib import Path
 from cmd_audit import load_probe_cases, run_case_full, write_post_repair_table
@@ -1251,7 +1251,7 @@ for r in results:
 "
 ```
 
-Verified state (2026-05-10, post-issue-0006):
+已验证状态（2026-05-10，post-issue-0006）：
 
 ```text
 83 tests passed (57 pre-existing + 26 issue 0006)
@@ -1262,7 +1262,7 @@ Verified state (2026-05-10, post-issue-0006):
   - 15 tests in test_cmd_audit_issue9_monitor_contract.py (issue 0009)
   - 26 tests in test_cmd_audit_issue6_targeted_repairs.py (issue 0006 — builds on 0005)
 
-Smoke suite post-repair outcomes (6 cases through run_case_full):
+烟雾套件修复后结果（6 个案例通过 run_case_full）：
   v0-write-001: write_error -> recovered (CMD) vs failed (hard_case)
   v0-compression-001: compression_error -> recovered (CMD) vs failed (hard_case)
   v0-premature-extraction-001: premature_extraction_error -> recovered (CMD) vs failed (hard_case)
@@ -1270,19 +1270,19 @@ Smoke suite post-repair outcomes (6 cases through run_case_full):
   v0-injection-001: injection_error -> recovered (CMD) vs recovered (hard_case)
   v0-reasoning-001: reasoning_error -> recovered (CMD) vs recovered (hard_case)
 
-Artifacts:
+产出物：
   artifacts/sandbox/post_repair_table.csv (13 columns)
   artifacts/sandbox/repair_success_table.csv (issue 0006)
   artifacts/sandbox/repair_label_summary.csv (issue 0006)
   artifacts/sandbox/repair_claim_ledger.txt (issue 0006)
 ```
 
-CMD repair outperforms hard-case baseline on 3 of 6 smoke cases (write, compression, premature_extraction) — these are the cases where targeted counterfactual intervention matters. For retrieval, injection, and reasoning, both recover because injecting all extracted memory happens to include the correct memory; CMD's value for these cases is in the precise diagnosis (`predicted_label`) and lower token cost rather than repair success alone.
+CMD 修复在 6 个烟雾案例中的 3 个上优于 hard-case 基线（write、compression、premature_extraction）——这些是需要针对性反事实干预的案例。对于 retrieval、injection 和 reasoning，两者都恢复，因为注入所有提取后的记忆恰好包含正确的记忆；CMD 在这些案例中的价值在于精确诊断（`predicted_label`）和更低的 token 成本，而非单独的修复成功。
 
-## Subsequent Issues That Depend on Issue 0005
+## 依赖 Issue 0005 的后续 Issue
 
-| Issue | Depends On | How |
+| Issue | 依赖 | 方式 |
 | --- | --- | --- |
-| Issue 0006 (targeted memory fixes) | `FullAuditResult`, `run_case_full`, `PostRepairResult`, `validate_sandbox_path` | `repairs.make_repair_comparison` reads both `post_repair` and `hard_case_baseline` from `FullAuditResult`. `run_cases_full` calls `run_case_full`. Sandbox validation reused for repair success table. |
-| Issue 0007 (ECS Failure Memory recurrence) | `ECSDraft`, `draft_ecs`, `PostRepairResult` | Will store ECS records in Failure Memory and measure recurrence reduction on future similar tasks. |
-| Issue 0010 (evidence-driven version gates) | `FullAuditResult`, post-repair table | HITL gate review uses post-repair evidence artifacts. |
+| Issue 0006（针对性记忆修复） | `FullAuditResult`、`run_case_full`、`PostRepairResult`、`validate_sandbox_path` | `repairs.make_repair_comparison` 从 `FullAuditResult` 读取 `post_repair` 和 `hard_case_baseline`。`run_cases_full` 调用 `run_case_full`。沙箱校验复用于修复成功表。 |
+| Issue 0007（ECS Failure Memory 复发率） | `ECSDraft`、`draft_ecs`、`PostRepairResult` | 将在 Failure Memory 中存储 ECS 记录，并测量未来类似任务的复发率降低。 |
+| Issue 0010（证据驱动版本关卡） | `FullAuditResult`、修复后表格 | HITL 关卡审查使用修复后证据产出物。 |

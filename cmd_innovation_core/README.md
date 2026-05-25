@@ -81,25 +81,45 @@ failed task
 
 The first paper should not claim a universal memory architecture. It should claim that operation-level counterfactual replay gives more accurate and actionable labels than final-answer scoring, evidence-recall heuristics, or subagent judge explanations.
 
-## Competitive Positioning (2026-05-10 Metabolism)
+## Competitive Positioning (2026-05-19, Day 7 Metabolism)
 
-A broad survey of 27 papers and 10 GitHub repos across arxiv + openalex + GitHub confirms CMD's unique position:
+A sustained survey of 119 papers and 14+ GitHub repos across arxiv + openalex + GitHub confirms CMD's position, but the attribution subfield is crowding rapidly.
 
-| Approach | Evidence Type | Attribution Granularity | Automated |
-|----------|--------------|------------------------|-----------|
-| Subagent Judge | observational (same trace) | free-form explanation | yes |
-| Trajectory-Informed (2603.10600) | observational (execution trace) | decision-level | yes |
-| Peaky Peek (agent_debugger) | interactive (checkpoint + human) | visual debugging | no (HITL) |
-| D-MEM (2603.14597) | RPE signal | binary surprise flag | yes (no attribution) |
-| **CMD (proposed)** | **counterfactual (replay intervention)** | **operation-level (6 labels)** | **yes** |
+### Established Comparators
 
-No existing paper or open-source project does automated counterfactual memory replay for operation-level attribution. The closest tools (Peaky Peek, AgentLens) validate engineering demand but use interactive or observational approaches.
+| Approach | Evidence | Granularity | Automated | Gap vs CMD |
+|----------|----------|-------------|-----------|------------|
+| Subagent Judge | observational | free-form | yes | post-hoc, same trace |
+| Trajectory-Informed (2603.10600) | observational | decision-level | yes | coarser granularity |
+| ErrorProbe (2604.17658) | observational (backward trace) | step-level | yes | agent steps, not memory ops |
+| D-MEM (2603.14597) | RPE signal | binary flag | yes (no attr) | detection only |
+| MEMOREPAIR (2605.07242) | influence provenance | artifact-level | no (manual) | repair only, no auto-detection |
+| Peaky Peek (agent_debugger) | interactive | visual | no (HITL) | human-in-the-loop |
 
-## V0 Scope
+### Day 5-7 New Entrants
+
+| Approach | Evidence | Granularity | Gap vs CMD |
+|----------|----------|-------------|------------|
+| **ShapleyAttr (2605.13077)** | **counterfactual (coalitional)** | **agent-level** | closest formal work; agent not operation granularity |
+| **TraceAudit (github)** | **counterfactual (removal)** | **chunk-level** | chunk not operation; audit not repair |
+| **VerifyMAS (2605.17467)** | **counterfactual (verification)** | **agent-level** | observational verification not causal replay |
+| HolisticEval (2605.14865) | observational (span) | span-level | coarser; no counterfactual evidence |
+| ConformalAttr (2605.06788) | observational (trajectory) | step-level | statistical guarantees but correlational |
+
+### Counterfactual Convergence
+
+3 independent counterfactual systems at different granularities within a 2-week window:
+- **Chunk-level**: TraceAudit (removal-based RAG audit)
+- **Agent-level**: VerifyMAS (hypothesis verification), Shapley (coalitional marginalization)
+- **Operation-level**: CMD (single-operation replay, Recovery Gain)
+
+CMD occupies the operation-level niche exclusively. The convergence validates counterfactual as the right foundation but signals accelerating competition. Paper must differentiate on: (1) operation-level granularity, (2) causal replay evidence, (3) full diagnosis→repair→validate→store loop.
+
+## V0 Scope (LOCKED — HITL approved 2026-05-10)
 
 Use a standalone CMD-Audit harness.
 
-Core labels:
+Core labels (6 pipeline labels):
 
 - `write_error`
 - `compression_error`
@@ -108,12 +128,17 @@ Core labels:
 - `injection_error`
 - `reasoning_error`
 
-Deferred labels:
+## V1 Scope (issues 0011-0015 complete)
 
-- `granularity_error`
-- `route_error`
-- `graph_error`
-- `safety_error`
+Five additional pipeline labels now active (11 total):
+
+- `ingestion_error` (split from `write_error` via `has_ingestion_trace`)
+- `route_error` (tier/store misrouting)
+- `granularity_error` (sub-optimal memory granularity)
+- `graph_error` (graph expansion distractors)
+- `safety_error` (safety filter false-positives)
+
+Bad memory item labels (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) are deferred to V2.
 
 Required V0 gates:
 
@@ -126,21 +151,26 @@ Required V0 gates:
 
 ## Current Active Slice
 
-Issue 0006 (validate targeted memory fixes) is the active slice. Issues 0001-0005 and 0009 are complete. The implementation detail map for the active slice is:
+Issues 0001-0015 are complete. 453 tests pass, 622 subtests pass. V0→V1 gate HITL approved. V0 LOCKED. V1→V2 gate passes with both mem0 and Letta adapters integrated.
 
-- `issues/0006-validate-targeted-memory-fixes.md` — done. Six per-label repair actions complete.
+- V0 evidence chain: structurally complete (issues 0001-0010).
+- V1 label expansion: all 11 pipeline labels active (issues 0011-0012).
+- V1 coupled-failure recalibration + memory-probe baseline: complete (issue 0013).
+- CMD-Skill Adapter: mem0 adapter complete (issue 0014), Letta adapter complete (issue 0015).
+- Next: Issue 0016 (RPE prefilter) and Issue 0017 (provenance tracking).
 
-The V0 CMD-Audit evidence chain is structurally complete through issue 0010. The next work is probe suite scaling (V0→V1 gate prerequisite).
+The active slice is issue 0016: RPE prefilter (evidence-surprise scoring, top-k replay selection).
 
 ## Next Experiment
 
-Build the first attribution table:
+Scale to 596 cases and add RPE prefilter:
 
 ```text
-50-100 CMD probe cases
-  -> fixed-summary / vector-memory baselines
-  -> oracle write / compression / retrieval / raw-event / injection / reasoning replays
-  -> attribution_table.csv
-  -> confusion matrix against known perturbation labels
-  -> repair_success table after Post-Repair Context Replay
+596 CMD probe cases
+  → RPE prefilter (evidence-surprise scoring; skip low-surprise replays)
+  → 10-replay V1 portfolio (standalone or adapter path)
+  → attribution_table.csv with top_k_labels + close_deltas
+  → confusion matrix against known perturbation labels (11 × 11)
+  → repair_success table after Post-Repair Context Replay
+  → provenance DAG per MemoryItem (Execution Lineage + trace-mem citation)
 ```

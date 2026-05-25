@@ -1,51 +1,49 @@
-# Issue 0010 Implementation Details: Evidence-Driven Version Gates
+# Issue 0010 实现细节：证据驱动版本关卡
 
-## Purpose
+## 目的
 
-This document is the zoomed-out implementation map for issue 0010, `Enforce evidence-driven version gates`.
-
-Issue 0010 closes the V0 governance loop by defining, checking, and tracking version gates that are driven by credibility evidence rather than feature stacking:
+本文档是 issue 0010《强制执行证据驱动版本关卡》的全局实现地图。Issue 0010 通过定义、检查和追踪以可信度证据（而非功能堆叠）驱动的版本关卡，闭合 V0 治理循环：
 
 ```text
-Four V0 Evidence Artifacts
-  -> GateCriterion per artifact
+四个 V0 证据产出物
+  -> 每个产出物一个 GateCriterion
   -> check_v0_to_v1_gate()
       -> _check_macro_f1 (comparison_metrics.csv)
       -> _check_confusion_diagonal (attribution_confusion_matrix.csv)
       -> _check_accuracy_top2 (comparison_metrics.csv)
       -> _check_repair_distribution (post_repair_table.csv)
-  -> GateResult (pass/fail per criterion)
-  -> write_gate_status -> V0V1_gate_status.txt (sandbox artifact)
-  -> GateReview (HITL decision: approved/deferred/rejected)
-  -> write_gate_review -> V0V1_gate_review.txt (dated review note)
+  -> GateResult（逐标准 pass/fail）
+  -> write_gate_status -> V0V1_gate_status.txt（沙箱产出物）
+  -> GateReview（HITL 决策：approved/deferred/rejected）
+  -> write_gate_review -> V0V1_gate_review.txt（带日期的审核记录）
 ```
 
-The V1→V2 gate is defined as a stub: at least two distinct memory agents integrated through the Adapter Interface without macro F1 regression. This gate always returns not-met in V0 because no adapter integrations exist.
+V1→V2 关卡以存根定义：至少两个不同的记忆代理通过 Adapter Interface 集成，且无 macro F1 退化。该关卡在 V0 中始终返回 not-met，因为不存在任何适配器集成。
 
-The final gate decision is HITL (human-in-the-loop): the code checks thresholds and reports evidence; the human reviews and signs off.
+最终关卡决策为 HITL（人机协同）：代码检查阈值并报告证据；人类审核并签字。
 
-## Source Requirements
+## 源需求
 
-The implementation follows these local planning files:
+本实现遵循以下本地规划文件：
 
-| Source | Requirement Applied In Issue 0010 |
+| 来源 | 在 Issue 0010 中应用的需求 |
 | --- | --- |
-| `TASK.md` | Define V0→V1 and V1→V2 evidence gates; gate status tracked in a document, not code; HITL sign-off required. |
-| `CLAUDE.md` | Version gates V0→V1→V2 are evidence-driven: V0→V1 requires four V0 evidence artifacts passing paper-claim thresholds; V1→V2 requires at least two distinct memory agents integrated without macro F1 regression. |
-| `cmd_innovation_core/CONTEXT.md` | **Version Gates** are evidence-driven, not feature-stacking. **CMD-Audit** writes to sandbox only. |
-| `cmd_innovation_core/prd/cmd_minimal_probe_prd.md` | AC10: V0→V1 requires four V0 evidence artifacts passing paper-claim thresholds; V1→V2 requires adapter integration count and macro F1 non-regression. User story 32: version gates driven by evidence thresholds, not feature completion. |
-| `cmd_innovation_core/issues/0010-enforce-evidence-driven-version-gates.md` | Four V0→V1 criteria: macro F1, confusion diagonal, accuracy+top-2, repair distribution. V1→V2 stub. Gate tracking document with dated review notes. Gates do not block implementation — they gate the version lock claim only. |
-| `cmd_innovation_core/tdd/cmd_tracer_bullets.md` | Gate check verified through public interfaces; sandbox write boundary enforced; HITL review pipeline testable independently. |
+| `TASK.md` | 定义 V0→V1 和 V1→V2 证据关卡；关卡状态记录在文档中而非代码中；需要 HITL 签字。 |
+| `CLAUDE.md` | 版本关卡 V0→V1→V2 是证据驱动的：V0→V1 要求四个 V0 证据产出物通过论文声明的阈值；V1→V2 要求至少两个不同的记忆代理集成且无 macro F1 退化。 |
+| `cmd_innovation_core/CONTEXT.md` | **版本关卡**是证据驱动的，非功能堆叠。**CMD-Audit** 仅写入沙箱。 |
+| `cmd_innovation_core/prd/cmd_minimal_probe_prd.md` | AC10：V0→V1 要求四个 V0 证据产出物通过论文声明阈值；V1→V2 要求适配器集成数量和 macro F1 非退化。User Story 32：版本关卡由证据阈值驱动，非功能完成度。 |
+| `cmd_innovation_core/issues/0010-enforce-evidence-driven-version-gates.md` | 四个 V0→V1 标准：macro F1、confusion diagonal、accuracy+top-2、repair distribution。V1→V2 存根。带日期审核记录的关卡追踪文档。关卡不阻塞实现——仅锁定版本声明。 |
+| `cmd_innovation_core/tdd/cmd_tracer_bullets.md` | 关卡检查通过公共接口验证；沙箱写入边界强制；HITL 审核流水线可独立测试。 |
 
-## Domain Boundary
+## 领域边界
 
-Issue 0010 sits at the governance layer, reading evidence artifacts produced by earlier issues and producing gate status output:
+Issue 0010 位于治理层，读取早期 issue 产生的证据产出物并产出关卡状态输出：
 
 ```text
-Issue 0002/0003 artifacts
+Issue 0002/0003 产出物
   -> comparison_metrics.csv ─────────────┐
   -> attribution_confusion_matrix.csv ───┼──> check_v0_to_v1_gate()
-Issue 0005 artifacts                      │
+Issue 0005 产出物                          │
   -> post_repair_table.csv ──────────────┘
       -> GateCriterion x4
       -> GateResult
@@ -54,49 +52,53 @@ Issue 0005 artifacts                      │
       -> artifacts/sandbox/V0V1_gate_review.txt
 ```
 
-It does own:
+Issue 0010 拥有的内容：
 
-- defining V0→V1 gate criteria with specific thresholds;
-- reading evidence artifacts and evaluating each criterion;
-- producing a GateResult with pass/fail per criterion and aggregate all_passed;
-- defining the V1→V2 gate criterion (adapter integration count);
-- writing gate status documents to the replay-local sandbox;
-- writing dated HITL review notes;
-- exposing the gate check API for programmatic use.
+- 定义带特定阈值的 V0→V1 关卡标准；
+- 读取证据产出物并评估每个标准；
+- 产生 GateResult，包含逐标准 pass/fail 和聚合 `all_passed`；
+- 定义 V1→V2 关卡标准（适配器集成数量）；
+- 将关卡状态文档写入回放本地沙箱；
+- 写入带日期的 HITL 审核记录；
+- 暴露关卡检查 API 供编程调用。
 
-It does not own:
+Issue 0010 不拥有的内容（属于其他 issue）：
 
-- producing the evidence artifacts themselves (issues 0002, 0003, 0005);
-- making the final version-lock decision (HITL);
-- blocking implementation work (gates gate the version claim, not development);
-- integrating with production CI/CD or remote tracking;
-- expanding the V0 label set or attribution taxonomy.
+- 产生证据产出物本身（issues 0002、0003、0005、0006、0007）；
+- 做出最终版本锁定决策（HITL）；
+- 阻塞实现工作（关卡仅锁定版本声明，不锁定开发）；
+- 与生产 CI/CD 或远程追踪集成；
+- 扩展 V0 标签集或归因分类法。
 
-## Current Code Artifacts
+## 代码产物
 
-| Artifact | Role in issue 0010 |
+| 产物 | 在 Issue 0010 中的角色 |
 | --- | --- |
-| `cmd_audit/version_gates.py` | Core module: data types (GateCriterion, GateResult, GateReview), V0→V1 gate check, V1→V2 stub, gate status and review writers, internal CSV readers and criterion checkers. |
-| `cmd_audit/__init__.py` | Exports 7 new symbols: GateCriterion, GateResult, GateReview, check_v0_to_v1_gate, check_v1_to_v2_gate, write_gate_status, write_gate_review. |
-| `cmd_innovation_core/gates/V0V1_gate_status.md` | Human-readable gate tracking document with per-criterion evidence and HITL review log. |
-| `artifacts/sandbox/V0V1_gate_status.txt` | Generated gate status artifact from `write_gate_status`. |
-| `artifacts/sandbox/V0V1_gate_review.txt` | Generated HITL review artifact from `write_gate_review`. |
-| `tests/test_cmd_audit_issue10_version_gates.py` | 48 behavior-level tests across 14 test classes. |
+| `cmd_audit/version_gates.py` | 核心模块：数据类型（GateCriterion、GateResult、GateReview）、V0→V1 关卡检查、V1→V2 存根、关卡状态与审核文档写入器、内部 CSV 读取器和标准检查器。451 行。 |
+| `cmd_audit/labels.py` | 提供 `V0_PIPELINE_LABEL_ORDER`（六个 V0 标签），由 `_check_confusion_diagonal` 使用。 |
+| `cmd_audit/writers.py` | 提供 `write_text_artifact`（第 55-67 行），由 `write_gate_status` 和 `write_gate_review` 使用以写入带沙箱校验的文本产出物。 |
+| `cmd_audit/post_repair.py` | 提供 `validate_sandbox_path`，`write_text_artifact` 通过它强制沙箱写入边界。 |
+| `cmd_audit/__init__.py` | 导出 7 个新符号：GateCriterion、GateResult、GateReview、check_v0_to_v1_gate、check_v1_to_v2_gate、write_gate_status、write_gate_review。 |
+| `cmd_innovation_core/gates/V0V1_gate_status.md` | 人类可读的关卡追踪文档，包含逐标准证据和 HITL 审核日志。 |
+| `artifacts/sandbox/V0V1_gate_status.txt` | 由 `write_gate_status` 生成的关卡状态产出物。 |
+| `artifacts/sandbox/V0V1_gate_review.txt` | 由 `write_gate_review` 生成的 HITL 审核产出物。 |
+| `tests/test_cmd_audit_issue10_version_gates.py` | 14 个测试类中的 48 个行为级测试。 |
 
-## Module Map
+## 模块地图
 
-| Module | Issue 0010 Role |
+| 模块 | Issue 0010 角色 |
 | --- | --- |
-| `cmd_audit/version_gates.py` | Owns gate data types, criterion checks, gate check functions, and output writers. |
-| `cmd_audit/labels.py` | Provides `V0_PIPELINE_LABEL_ORDER` used by `_check_confusion_diagonal` to iterate all six V0 labels. |
-| `cmd_audit/post_repair.py` | Provides `validate_sandbox_path` used by `write_gate_status` and `write_gate_review` to enforce sandbox write boundary. |
-| `cmd_audit/__init__.py` | Exports the public surface for callers and tests. |
+| `cmd_audit/version_gates.py` | 拥有关卡数据类型、标准检查、关卡检查函数和输出写入器。 |
+| `cmd_audit/labels.py` | 提供 `V0_PIPELINE_LABEL_ORDER`，由 `_check_confusion_diagonal` 用于遍历所有六个 V0 标签。 |
+| `cmd_audit/writers.py` | 提供 `write_text_artifact`（第 55-67 行）：通用文本产出物写入器，可选沙箱校验。由 `write_gate_status` 和 `write_gate_review` 调用以写入关卡文本文件。 |
+| `cmd_audit/post_repair.py` | 提供 `validate_sandbox_path`，由 `write_text_artifact` 使用以强制沙箱写入边界。 |
+| `cmd_audit/__init__.py` | 为调用者和测试导出公共接口。 |
 
-Issue 0010 does not depend on `harness.py`, `baselines.py`, `replays.py`, `attribution.py`, `repairs.py`, `failure_memory.py`, or `models.py`. It reads CSV artifacts directly, not through the harness.
+Issue 0010 不依赖 `harness.py`、`baselines.py`、`replays.py`、`attribution.py`、`repairs.py`、`failure_memory.py` 或 `models.py`。它直接读取 CSV 产出物，不通过 harness。
 
-## Caller Graph
+## 调用图
 
-Main gate check path:
+主关卡检查路径：
 
 ```text
 tests/test_cmd_audit_issue10_version_gates.py
@@ -110,14 +112,16 @@ tests/test_cmd_audit_issue10_version_gates.py
           -> _read_comparison_csv
       -> _check_repair_distribution(post_repair_table.csv)
           -> _read_repair_csv
-  -> check_v1_to_v2_gate()  [stub, always not-met]
+  -> check_v1_to_v2_gate()  [存根，始终 not-met]
   -> write_gate_status(result, path, sandbox_root)
-      -> post_repair.validate_sandbox_path
+      -> writers.write_text_artifact
+          -> post_repair.validate_sandbox_path
   -> write_gate_review(review, path, sandbox_root)
-      -> post_repair.validate_sandbox_path
+      -> writers.write_text_artifact
+          -> post_repair.validate_sandbox_path
 ```
 
-Artifact generation path:
+产出物生成路径：
 
 ```text
 python3 -c "..."
@@ -128,55 +132,57 @@ python3 -c "..."
   -> write_gate_review(review, "artifacts/sandbox/V0V1_gate_review.txt")
 ```
 
-## Data Flow
+## 数据流
 
-Input artifacts (read by gate checks):
+输入产出物（由关卡检查读取）：
 
 ```text
 artifacts/comparison_metrics.csv
-  -> macro_f1 column (criterion 1)
-  -> attribution_accuracy, top2_accuracy columns (criterion 3)
+  -> macro_f1 列（标准 1）
+  -> attribution_accuracy、top2_accuracy 列（标准 3）
 
 artifacts/attribution_confusion_matrix.csv
-  -> per-label row counts (criterion 2)
+  -> 逐标签行计数（标准 2）
 
 artifacts/sandbox/post_repair_table.csv
-  -> repair_assessment column (criterion 4)
+  -> repair_assessment 列（标准 4）
 ```
 
-Output:
+输出：
 
 ```text
-GateCriterion (7 fields)
+GateCriterion（7 个字段）
   criterion_id, description, artifact_path, threshold, passed, evidence, missing
 
-GateResult (4 fields)
+GateResult（4 个字段）
   gate_id: "V0→V1" | "V1→V2"
   criteria: tuple[GateCriterion, ...]
   all_passed: bool
-  checked_at: str (ISO timestamp)
+  checked_at: str（ISO 时间戳）
 
-GateReview (6 fields)
-  gate_id, reviewer, decision ("approved"|"deferred"|"rejected"),
+GateReview（6 个字段）
+  gate_id, reviewer, decision（"approved"|"deferred"|"rejected"）,
   rationale, missing_evidence, reviewed_at
 ```
 
-Artifact output:
+产出物输出：
 
 ```text
 artifacts/sandbox/V0V1_gate_status.txt
 artifacts/sandbox/V0V1_gate_review.txt
 ```
 
-## Function-Level Contract
+## 函数级合约
 
 ### `cmd_audit/version_gates.py`
 
-This module owns issue 0010's entire version gate surface. It is a new module that depends on `labels.py` (for `V0_PIPELINE_LABEL_ORDER`) and `post_repair.py` (for `validate_sandbox_path`). It does not depend on the harness, baselines, replays, or models.
+此模块拥有 issue 0010 的全部版本关卡接口。它是一个新模块，依赖 `labels.py`（获取 `V0_PIPELINE_LABEL_ORDER`）、`writers.py`（获取 `write_text_artifact`）和 `post_repair.py`（间接通过 `writers.write_text_artifact` → `validate_sandbox_path`）。不依赖 harness、baselines、replays 或 models。
 
-### Constant: `V0V1_CRITERION_IDS`
+---
 
-Definition:
+#### 常量：`V0V1_CRITERION_IDS`
+
+位置：`cmd_audit/version_gates.py:15-20`
 
 ```python
 V0V1_CRITERION_IDS = (
@@ -187,168 +193,184 @@ V0V1_CRITERION_IDS = (
 )
 ```
 
-Role:
+目的：
 
-- Documents the four criterion IDs that define the V0→V1 gate.
-- Used as a reference constant; not enforced programmatically (the four criteria are hardcoded in `check_v0_to_v1_gate` for explicit ordering).
+- 记录定义 V0→V1 关卡的四个标准 ID。
+- 作为参考常量使用；不在程序中强制（四个标准在 `check_v0_to_v1_gate` 中硬编码以保持显式排序）。
 
-### Constant: `_GATE_DECISION_VALUES`
+---
 
-Definition:
+#### 常量：`_GATE_DECISION_VALUES`
+
+位置：`cmd_audit/version_gates.py:13`
 
 ```python
 _GATE_DECISION_VALUES = ("approved", "deferred", "rejected")
 ```
 
-Role:
+目的：
 
-- Defines the three valid HITL review decisions.
-- Used by `GateReview.__post_init__` for validation.
+- 定义三个有效的 HITL 审核决策。
+- 由 `GateReview.__post_init__` 用于校验。
 
-### Dataclass: `GateCriterion`
+---
 
-Fields:
+#### 数据类：`GateCriterion`
+
+位置：`cmd_audit/version_gates.py:26-37`
 
 ```python
-criterion_id: str
-description: str
-artifact_path: str
-threshold: str
-passed: bool
-evidence: str
-missing: str
+@dataclass(frozen=True)
+class GateCriterion:
+    criterion_id: str
+    description: str
+    artifact_path: str
+    threshold: str
+    passed: bool
+    evidence: str
+    missing: str
 ```
 
-Role:
+目的：
 
-- Immutable single-criterion check result.
-- Records whether the criterion passed, what evidence was observed, and what is missing if it failed.
+- 不可变的单个标准检查结果。
+- 记录标准是否通过、观察到什么证据，以及失败时缺失什么。
 
-Field meanings:
+字段含义：
 
-| Field | Meaning |
+| 字段 | 领域含义 |
 | --- | --- |
-| `criterion_id` | Short machine-readable identifier (e.g., `"macro_f1_exceeds_baselines"`). |
-| `description` | Human-readable one-line description of what this criterion checks. |
-| `artifact_path` | Path to the evidence artifact that was read (as a string, for documentation). |
-| `threshold` | Human-readable threshold description (e.g., `"CMD-Audit macro_f1 > evidence_recall AND subagent_judge AND random_label"`). |
-| `passed` | Whether the criterion is satisfied. |
-| `evidence` | Concise summary of observed values (e.g., `"CMD-Audit macro_f1=1.000; evidence_recall=0.778"`). |
-| `missing` | Empty string if passed; description of what is missing if failed. |
+| `criterion_id` | 简短机器可读标识符（如 `"macro_f1_exceeds_baselines"`）。 |
+| `description` | 人类可读的一句话描述，说明此标准检查什么。 |
+| `artifact_path` | 被读取的证据产出物的路径（字符串形式，用于文档记录）。 |
+| `threshold` | 人类可读的阈值描述（如 `"CMD-Audit macro_f1 > evidence_recall AND subagent_judge AND random_label"`）。 |
+| `passed` | 标准是否满足。 |
+| `evidence` | 观察值的简明摘要（如 `"CMD-Audit macro_f1=1.000; evidence_recall=0.778"`）。 |
+| `missing` | 通过时为空字符串；失败时描述缺失内容。 |
 
-### Dataclass: `GateResult`
+---
 
-Fields:
+#### 数据类：`GateResult`
 
-```python
-gate_id: str
-criteria: tuple[GateCriterion, ...]
-all_passed: bool
-checked_at: str
-```
-
-Role:
-
-- Immutable aggregate result of checking all criteria for a version gate.
-- `all_passed` is `True` only when every criterion in `criteria` has `passed=True`.
-
-### Dataclass: `GateReview`
-
-Fields:
+位置：`cmd_audit/version_gates.py:39-47`
 
 ```python
-gate_id: str
-reviewer: str
-decision: str
-rationale: str
-missing_evidence: str
-reviewed_at: str
+@dataclass(frozen=True)
+class GateResult:
+    gate_id: str
+    criteria: tuple[GateCriterion, ...]
+    all_passed: bool
+    checked_at: str
 ```
 
-Role:
+目的：
 
-- Immutable HITL review decision for a version gate.
-- The `decision` field is validated to be one of `("approved", "deferred", "rejected")`.
+- 检查版本关卡所有标准后的不可变聚合结果。
+- `all_passed` 仅当 `criteria` 中每个标准的 `passed=True` 时才为 `True`。
 
-#### `GateReview.__post_init__(self) -> None`
+---
 
-Purpose:
+#### 数据类：`GateReview`
 
-- Validates that `decision` is one of the three allowed values.
+位置：`cmd_audit/version_gates.py:49-65`
 
-Behavior:
+```python
+@dataclass(frozen=True)
+class GateReview:
+    gate_id: str
+    reviewer: str
+    decision: str
+    rationale: str
+    missing_evidence: str
+    reviewed_at: str
 
-- Raises `ValueError` if `decision` is not in `_GATE_DECISION_VALUES`.
+    def __post_init__(self) -> None:
+        if self.decision not in _GATE_DECISION_VALUES:
+            raise ValueError(...)
+```
 
-Why it matters:
+目的：
 
-- Prevents ambiguous or undefined review decisions from entering the gate tracking document.
-- The three values map to: approved (gate passed, version locked), deferred (evidence insufficient, need more data), rejected (gate failed, version cannot be claimed).
+- 版本关卡的不可变 HITL 审核决策。
+- `decision` 字段被校验为 `("approved", "deferred", "rejected")` 之一。
 
-### Function: `check_v0_to_v1_gate(artifacts_dir=None, sandbox_dir=None) -> GateResult`
+`__post_init__` 行为：
 
-Purpose:
+- 若 `decision` 不在 `_GATE_DECISION_VALUES` 中则抛出 `ValueError`。
 
-- Checks all four V0→V1 evidence gate criteria against the current artifacts.
+为什么重要：
 
-Signature:
+- 防止歧义或未定义的审核决策进入关卡追踪文档。
+- 三个值映射为：approved（关卡通过，版本锁定）、deferred（证据不足，需要更多数据）、rejected（关卡失败，不能声明版本）。
+
+---
+
+#### 函数：`check_v0_to_v1_gate(artifacts_dir=None, sandbox_dir=None) -> GateResult`
+
+位置：`cmd_audit/version_gates.py:71-110`
 
 ```python
 def check_v0_to_v1_gate(
     artifacts_dir: Path | None = None,
     sandbox_dir: Path | None = None,
-) -> GateResult
+) -> GateResult:
 ```
 
-Inputs:
+目的：
 
-- `artifacts_dir`: path to the artifacts directory (default `Path("artifacts")`).
-- `sandbox_dir`: path to the sandbox directory (default `Path("artifacts/sandbox")`).
+- 根据当前产出物检查所有四个 V0→V1 证据关卡标准。
 
-Behavior:
+参数：
 
-1. Resolves artifact and sandbox directory paths (defaulting to project-relative paths).
-2. Runs four criterion checks in order:
+- `artifacts_dir`：产出物目录路径（默认 `Path("artifacts")`）。
+- `sandbox_dir`：沙箱目录路径（默认 `Path("artifacts/sandbox")`）。
+
+行为：
+
+1. 解析产出物和沙箱目录路径（默认使用项目相对路径）。
+2. 按顺序运行四个标准检查：
    - `_check_macro_f1(artifacts_dir / "comparison_metrics.csv")`
    - `_check_confusion_diagonal(artifacts_dir / "attribution_confusion_matrix.csv")`
    - `_check_accuracy_top2(artifacts_dir / "comparison_metrics.csv")`
    - `_check_repair_distribution(sandbox_dir / "post_repair_table.csv")`
-3. Sets `all_passed = all(c.passed for c in criteria)`.
-4. Records the current UTC timestamp as `checked_at`.
-5. Returns `GateResult(gate_id="V0→V1", criteria=..., all_passed=..., checked_at=...)`.
+3. 设置 `all_passed = all(c.passed for c in criteria)`。
+4. 记录当前 UTC 时间戳为 `checked_at`。
+5. 返回 `GateResult(gate_id="V0→V1", criteria=..., all_passed=..., checked_at=...)`。
 
-Edge cases:
+边界条件：
 
-- If an artifact file is missing, the corresponding criterion returns `passed=False` with `missing` describing the missing file.
-- If an artifact is malformed (e.g., missing expected columns), the criterion returns `passed=False` with the exception message in `missing`.
+- 若产出物文件缺失，对应标准返回 `passed=False`，`missing` 描述缺失文件。
+- 若产出物格式错误（如缺少预期列），标准返回 `passed=False`，`missing` 包含异常消息。
 
-Domain boundary:
+领域边界：
 
-- The function does not modify any artifacts or write to disk.
-- It reads CSV files directly; it does not use the CMD harness.
-- The `all_passed` field is a programmatic summary, not the final gate decision. The final decision is HITL.
+- 该函数不修改任何产出物或写入磁盘。
+- 它直接读取 CSV 文件；不使用 CMD harness。
+- `all_passed` 字段是程序性摘要，而非最终关卡决策。最终决策为 HITL。
 
-Callers:
+调用者：
 
-- Tests (`V0V1GateCheckWithRealArtifactsTest`, `V0V1GateCheckWithTempArtifactsTest`, `GatesDoNotBlockImplementationTest`).
-- Artifact generation scripts.
-- External users importing from `cmd_audit`.
+- 测试（`V0V1GateCheckWithRealArtifactsTest`、`V0V1GateCheckWithTempArtifactsTest`、`GatesDoNotBlockImplementationTest`）。
+- 产出物生成脚本。
+- 从 `cmd_audit` 导入的外部用户。
 
-### Function: `check_v1_to_v2_gate() -> GateResult`
+---
 
-Purpose:
+#### 函数：`check_v1_to_v2_gate() -> GateResult`
 
-- Returns a stub V1→V2 gate result indicating the gate is not yet evaluable.
-
-Signature:
+位置：`cmd_audit/version_gates.py:116-142`
 
 ```python
-def check_v1_to_v2_gate() -> GateResult
+def check_v1_to_v2_gate() -> GateResult:
 ```
 
-Behavior:
+目的：
 
-1. Creates a single `GateCriterion` with:
+- 返回存根 V1→V2 关卡结果，表明该关卡尚不可评估。
+
+行为：
+
+1. 创建单个 `GateCriterion`：
    - `criterion_id="adapter_integration_count"`
    - `description="At least two distinct memory agents integrated through the Adapter Interface without macro F1 regression"`
    - `artifact_path="(none — adapter integrations do not exist in V0)"`
@@ -356,48 +378,50 @@ Behavior:
    - `passed=False`
    - `evidence="0 adapter integrations; V0 operates as standalone harness."`
    - `missing="No Adapter Interface integrations exist. V1 must integrate at least two distinct memory agents before V1→V2 gate review."`
-2. Records the current UTC timestamp as `checked_at`.
-3. Returns `GateResult(gate_id="V1→V2", criteria=(criterion,), all_passed=False, checked_at=...)`.
+2. 记录当前 UTC 时间戳为 `checked_at`。
+3. 返回 `GateResult(gate_id="V1→V2", criteria=(criterion,), all_passed=False, checked_at=...)`。
 
-Domain meaning:
+领域含义：
 
-- The V1→V2 gate is defined but always returns not-met in V0. It serves as a forward reference for the V1 roadmap.
-- The gate criterion is intentionally single-criterion (adapter count + non-regression). As V1 progresses, additional criteria may be added.
+- V1→V2 关卡已定义但在 V0 中始终返回 not-met。它作为 V1 路线图的前向引用。
+- 关卡标准故意为单一标准（适配器数量 + 非退化）。随着 V1 推进，可能添加额外标准。
 
-### Function: `write_gate_status(result, output_path, sandbox_root=None) -> Path`
+---
 
-Purpose:
+#### 函数：`write_gate_status(result, output_path, sandbox_root=None) -> Path`
 
-- Writes a human-readable gate status document to the sandbox.
-
-Signature:
+位置：`cmd_audit/version_gates.py:148-181`
 
 ```python
 def write_gate_status(
     result: GateResult,
     output_path: Path,
     sandbox_root: str | Path | None = None,
-) -> Path
+) -> Path:
 ```
 
-Inputs:
+目的：
 
-- `result`: the `GateResult` from `check_v0_to_v1_gate` or `check_v1_to_v2_gate`.
-- `output_path`: the file path to write (must be inside the sandbox).
-- `sandbox_root`: optional sandbox root for path validation.
+- 将人类可读的关卡状态文档写入沙箱。
 
-Behavior:
+参数：
 
-1. Validates `output_path` is inside the sandbox via `validate_sandbox_path(output_path, sandbox_root)`.
-2. Creates parent directories as needed.
-3. Writes a structured text document with:
-   - Header: gate ID, date, separator line.
-   - `All criteria passed: True/False`.
-   - Per-criterion block: criterion number, ID, PASS/FAIL status, description, artifact path, threshold, evidence, missing (if any).
-   - Footer: "Final decision: HITL review required.", checked timestamp.
-4. Returns the written path.
+- `result`：来自 `check_v0_to_v1_gate` 或 `check_v1_to_v2_gate` 的 `GateResult`。
+- `output_path`：要写入的文件路径（必须在沙箱内）。
+- `sandbox_root`：可选的沙箱根路径，用于路径校验。
 
-Output format:
+行为：
+
+1. 通过 `write_text_artifact` → `validate_sandbox_path(output_path, sandbox_root)` 验证 `output_path` 在沙箱内。
+2. 按需创建父目录。
+3. 写入结构化文本文档，包含：
+   - 标题：关卡 ID、日期、分隔线。
+   - `All criteria passed: True/False`。
+   - 逐标准块：标准编号、ID、PASS/FAIL 状态、描述、产出物路径、阈值、证据、缺失（如有）。
+   - 页脚：`"Final decision: HITL review required."`、检查时间戳。
+4. 返回写入的路径。
+
+输出格式：
 
 ```text
 CMD V0→V1 Gate Status — 2026-05-10
@@ -418,45 +442,47 @@ Final decision: HITL review required.
 Checked at: 2026-05-10T...
 ```
 
-Callers:
+调用者：
 
-- Artifact generation scripts.
-- Tests (`GateStatusWriteTest`).
+- 产出物生成脚本。
+- 测试（`GateStatusWriteTest`）。
 
-### Function: `write_gate_review(review, output_path, sandbox_root=None) -> Path`
+---
 
-Purpose:
+#### 函数：`write_gate_review(review, output_path, sandbox_root=None) -> Path`
 
-- Writes a dated HITL gate review note to the sandbox.
-
-Signature:
+位置：`cmd_audit/version_gates.py:184-209`
 
 ```python
 def write_gate_review(
     review: GateReview,
     output_path: Path,
     sandbox_root: str | Path | None = None,
-) -> Path
+) -> Path:
 ```
 
-Inputs:
+目的：
 
-- `review`: the `GateReview` with the HITL decision.
-- `output_path`: the file path to write (must be inside the sandbox).
-- `sandbox_root`: optional sandbox root for path validation.
+- 将带日期的 HITL 关卡审核记录写入沙箱。
 
-Behavior:
+参数：
 
-1. Validates `output_path` is inside the sandbox via `validate_sandbox_path(output_path, sandbox_root)`.
-2. Creates parent directories as needed.
-3. Writes a structured text document with:
-   - Header: gate ID, date.
-   - Reviewer, decision, reviewed timestamp.
-   - Rationale section.
-   - Missing evidence section (if non-empty).
-4. Returns the written path.
+- `review`：包含 HITL 决策的 `GateReview`。
+- `output_path`：要写入的文件路径（必须在沙箱内）。
+- `sandbox_root`：可选的沙箱根路径，用于路径校验。
 
-Output format:
+行为：
+
+1. 通过 `write_text_artifact` → `validate_sandbox_path(output_path, sandbox_root)` 验证 `output_path` 在沙箱内。
+2. 按需创建父目录。
+3. 写入结构化文本文档，包含：
+   - 标题：关卡 ID、日期。
+   - Reviewer、decision、reviewed 时间戳。
+   - Rationale 部分。
+   - Missing evidence 部分（如非空）。
+4. 返回写入的路径。
+
+输出格式：
 
 ```text
 CMD V0→V1 Gate Review — 2026-05-10
@@ -473,197 +499,263 @@ Missing evidence:
   Smoke suite (6 cases) is insufficient for paper claims. ...
 ```
 
-Callers:
+调用者：
 
-- Artifact generation scripts.
-- Tests (`GateReviewWriteTest`).
+- 产出物生成脚本。
+- 测试（`GateReviewWriteTest`）。
 
-### Internal: `_read_comparison_csv(path) -> dict[str, dict[str, float]]`
+---
 
-Purpose:
+#### 内部函数：`_read_comparison_csv(path) -> dict[str, dict[str, float]]`
 
-- Reads `comparison_metrics.csv` and returns a nested dict: `{system_name: {column_name: value}}`.
+位置：`cmd_audit/version_gates.py:215-227`
 
-Behavior:
+```python
+def _read_comparison_csv(path: Path) -> dict[str, dict[str, float]]:
+```
 
-1. Raises `FileNotFoundError` if the file does not exist.
-2. Parses CSV with `csv.DictReader`.
-3. Converts all non-`system_name` columns to `float`.
-4. Returns `{row["system_name"]: {col: float(val), ...}, ...}`.
+目的：
 
-Used by:
+- 读取 `comparison_metrics.csv` 并返回嵌套字典：`{system_name: {column_name: value}}`。
 
-- `_check_macro_f1`
-- `_check_accuracy_top2`
+行为：
 
-### Internal: `_read_confusion_csv(path) -> dict[str, dict[str, int]]`
+1. 若文件不存在则抛出 `FileNotFoundError`。
+2. 使用 `csv.DictReader` 解析 CSV。
+3. 将所有非 `system_name` 列转换为 `float`。
+4. 返回 `{row["system_name"]: {col: float(val), ...}, ...}`。
 
-Purpose:
+被以下使用：`_check_macro_f1`、`_check_accuracy_top2`。
 
-- Reads `attribution_confusion_matrix.csv` and returns a nested dict: `{gold_label: {pred_label: count}}`.
+---
 
-Behavior:
+#### 内部函数：`_read_confusion_csv(path) -> dict[str, dict[str, int]]`
 
-1. Raises `FileNotFoundError` if the file does not exist.
-2. Parses CSV with `csv.DictReader`.
-3. Converts all non-`gold_label` columns to `int`.
-4. Returns `{row["gold_label"]: {col: int(val), ...}, ...}`.
+位置：`cmd_audit/version_gates.py:230-240`
 
-Used by:
+```python
+def _read_confusion_csv(path: Path) -> dict[str, dict[str, int]]:
+```
 
-- `_check_confusion_diagonal`
+目的：
 
-### Internal: `_read_repair_csv(path) -> list[str]`
+- 读取 `attribution_confusion_matrix.csv` 并返回嵌套字典：`{gold_label: {pred_label: count}}`。
 
-Purpose:
+行为：
 
-- Reads `post_repair_table.csv` and returns a list of `repair_assessment` values.
+1. 若文件不存在则抛出 `FileNotFoundError`。
+2. 使用 `csv.DictReader` 解析 CSV。
+3. 将所有非 `gold_label` 列转换为 `int`。
+4. 返回 `{row["gold_label"]: {col: int(val), ...}, ...}`。
 
-Behavior:
+被以下使用：`_check_confusion_diagonal`。
 
-1. Raises `FileNotFoundError` if the file does not exist.
-2. Parses CSV with `csv.DictReader`.
-3. Returns `[row["repair_assessment"], ...]` for each data row.
+---
 
-Used by:
+#### 内部函数：`_read_repair_csv(path) -> list[str]`
 
-- `_check_repair_distribution`
+位置：`cmd_audit/version_gates.py:243-252`
 
-### Internal: `_check_macro_f1(comparison_path) -> GateCriterion`
+```python
+def _read_repair_csv(path: Path) -> list[str]:
+```
 
-Purpose:
+目的：
 
-- Checks whether CMD-Audit macro F1 exceeds all three comparator baselines.
+- 读取 `post_repair_table.csv` 并返回 `repair_assessment` 值列表。
 
-Behavior:
+行为：
 
-1. Reads `comparison_metrics.csv` via `_read_comparison_csv`.
-2. Extracts `macro_f1` for CMD-Audit, evidence_recall, subagent_judge, and random_label.
-3. `passed = cmd_macro_f1 > max(evidence_recall, subagent_judge, random_label)`.
-4. If any baseline has equal or higher macro F1, `passed=False` and `missing` records the gap.
-5. On `FileNotFoundError` or `KeyError`: returns `passed=False` with the exception in `evidence` and `missing`.
+1. 若文件不存在则抛出 `FileNotFoundError`。
+2. 使用 `csv.DictReader` 解析 CSV。
+3. 返回每个数据行的 `[row["repair_assessment"], ...]`。
 
-Threshold:
+被以下使用：`_check_repair_distribution`。
+
+---
+
+#### 内部函数：`_check_macro_f1(comparison_path) -> GateCriterion`
+
+位置：`cmd_audit/version_gates.py:255-293`
+
+```python
+def _check_macro_f1(comparison_path: Path) -> GateCriterion:
+```
+
+目的：
+
+- 检查 CMD-Audit macro F1 是否超过全部三个比较基线。
+
+行为：
+
+1. 通过 `_read_comparison_csv` 读取 `comparison_metrics.csv`。
+2. 提取 CMD-Audit、evidence_recall、subagent_judge 和 random_label 的 `macro_f1`。
+3. `passed = cmd_macro_f1 > max(evidence_recall, subagent_judge, random_label)`。
+4. 若任何基线具有相等或更高的 macro F1，则 `passed=False`，`missing` 记录差距。
+5. 在 `FileNotFoundError` 或 `KeyError` 时：返回 `passed=False`，异常信息放在 `evidence` 和 `missing` 中。
+
+阈值：
 
 ```text
 CMD-Audit macro_f1 > evidence_recall AND subagent_judge AND random_label
 ```
 
-Domain meaning:
+领域含义：
 
-- Macro F1 is the primary paper-claim metric for attribution quality.
-- CMD must strictly exceed (not equal) all baselines. Equality would not demonstrate improvement.
+- Macro F1 是归因质量的主要论文声明指标。
+- CMD 必须严格超过（非等于）所有基线。相等无法证明改进。
 
-Caller:
+调用者：`check_v0_to_v1_gate`。
 
-- `check_v0_to_v1_gate`
+---
 
-### Internal: `_check_confusion_diagonal(confusion_path) -> GateCriterion`
+#### 内部函数：`_check_confusion_diagonal(confusion_path) -> GateCriterion`
 
-Purpose:
+位置：`cmd_audit/version_gates.py:296-339`
 
-- Checks that the confusion matrix has diagonal dominance for all six V0 labels.
-
-Behavior:
-
-1. Reads `attribution_confusion_matrix.csv` via `_read_confusion_csv`.
-2. Iterates all six labels from `V0_PIPELINE_LABEL_ORDER`.
-3. For each label row: computes `diagonal` (self-prediction count) and `off_diagonal_sum` (sum of all other columns).
-4. `passed = diagonal > off_diagonal_sum` for every label.
-5. Collects violation strings for any label where `diagonal <= off_diagonal_sum`.
-6. On success: evidence = "All 6 V0 labels have diagonal > off-diagonal sum".
-7. On failure: missing = concatenated violation strings.
-8. On `FileNotFoundError` or `KeyError`: returns `passed=False` with the exception in `evidence` and `missing`.
-
-Threshold:
-
-```text
-For each V0 label row: diagonal > sum of off-diagonal entries
+```python
+def _check_confusion_diagonal(confusion_path: Path) -> GateCriterion:
 ```
 
-Domain meaning:
+目的：
 
-- Diagonal dominance means each label is more often correct than confused with any other label.
-- With 1 case per label, diagonal=1 and off-diagonal=0 is trivially true. As the probe suite scales, off-diagonal entries will appear and this criterion will become discriminating.
+- 检查混淆矩阵在所有六个 V0 标签上具有对角线主导。
 
-Caller:
+行为：
 
-- `check_v0_to_v1_gate`
+1. 通过 `_read_confusion_csv` 读取 `attribution_confusion_matrix.csv`。
+2. 遍历 `V0_PIPELINE_LABEL_ORDER` 中的所有六个标签。
+3. 对每个标签行：计算 `diagonal`（自预测计数）和 `off_diagonal_sum`（所有其他列的总和）。
+4. `passed = diagonal > off_diagonal_sum` 对每个标签都成立。
+5. 收集任何 `diagonal <= off_diagonal_sum` 标签的违规字符串。
+6. 成功时：evidence = `"All 6 V0 labels have diagonal > off-diagonal sum"`。
+7. 失败时：missing = 拼接的违规字符串。
+8. 在 `FileNotFoundError` 或 `KeyError` 时：返回 `passed=False`，异常信息放在 `evidence` 和 `missing` 中。
 
-### Internal: `_check_accuracy_top2(comparison_path) -> GateCriterion`
+阈值：
 
-Purpose:
+```text
+对每个 V0 标签行：diagonal > 非对角线项之和
+```
 
-- Checks whether CMD-Audit outperforms all baselines on both attribution accuracy and top-2 accuracy.
+领域含义：
 
-Behavior:
+- 对角线主导意味着每个标签的正确率高于与任何其他标签混淆的概率。
+- 每个标签 1 个案例时，diagonal=1 和 off-diagonal=0 是平凡的。随着探针套件扩展，非对角线项将出现，此标准将变得有区分力。
 
-1. Reads `comparison_metrics.csv` via `_read_comparison_csv`.
-2. Extracts `attribution_accuracy` and `top2_accuracy` for CMD-Audit and all three baselines.
-3. `acc_ok = cmd_attribution_accuracy > max(baseline_attribution_accuracy)`.
-4. `top2_ok = cmd_top2_accuracy > max(baseline_top2_accuracy)`.
-5. `passed = acc_ok AND top2_ok`.
-6. On failure: `missing` records which sub-criterion failed and the specific gap.
-7. On `FileNotFoundError` or `KeyError`: returns `passed=False` with the exception in `evidence` and `missing`.
+调用者：`check_v0_to_v1_gate`。
 
-Threshold:
+---
+
+#### 内部函数：`_check_accuracy_top2(comparison_path) -> GateCriterion`
+
+位置：`cmd_audit/version_gates.py:342-398`
+
+```python
+def _check_accuracy_top2(comparison_path: Path) -> GateCriterion:
+```
+
+目的：
+
+- 检查 CMD-Audit 在归因准确率和 top-2 准确率上均优于所有基线。
+
+行为：
+
+1. 通过 `_read_comparison_csv` 读取 `comparison_metrics.csv`。
+2. 提取 CMD-Audit 和全部三个基线的 `attribution_accuracy` 和 `top2_accuracy`。
+3. `acc_ok = cmd_attribution_accuracy > max(baseline_attribution_accuracy)`。
+4. `top2_ok = cmd_top2_accuracy > max(baseline_top2_accuracy)`。
+5. `passed = acc_ok AND top2_ok`。
+6. 失败时：`missing` 记录哪个子标准失败及具体差距。
+7. 在 `FileNotFoundError` 或 `KeyError` 时：返回 `passed=False`，异常信息放在 `evidence` 和 `missing` 中。
+
+阈值：
 
 ```text
 CMD-Audit attribution_accuracy > all baselines AND CMD-Audit top2_accuracy > all baselines
 ```
 
-Domain meaning:
+领域含义：
 
-- Attribution accuracy measures exact-match correctness; top-2 accuracy measures whether the correct label is in the top two.
-- Both must exceed all baselines. This is stricter than requiring only one of the two.
-- `random_label` is included as a sanity check baseline but is not the discriminating comparator.
+- 归因准确率衡量精确匹配正确性；top-2 准确率衡量正确标签是否在前两位。
+- 两者都必须超过所有基线。这比仅要求其中一个更严格。
+- `random_label` 作为合理性检查基线包含在内，但不是有区分力的比较者。
 
-Caller:
+调用者：`check_v0_to_v1_gate`。
 
-- `check_v0_to_v1_gate`
+---
 
-### Internal: `_check_repair_distribution(repair_path) -> GateCriterion`
+#### 内部函数：`_check_repair_distribution(repair_path) -> GateCriterion`
 
-Purpose:
+位置：`cmd_audit/version_gates.py:400-450`
 
-- Checks whether the post-repair assessment distribution supports the repair-validity claim.
+```python
+def _check_repair_distribution(repair_path: Path) -> GateCriterion:
+```
 
-Behavior:
+目的：
 
-1. Reads `post_repair_table.csv` via `_read_repair_csv`.
-2. Counts `recovered`, `partial`, and `failed` assessments.
-3. Computes `recovered_rate = recovered / total`.
-4. Computes `majority_improves = (recovered + partial) > failed`.
-5. `passed = recovered_rate >= 0.5 AND majority_improves`.
-6. On success: evidence includes counts and rate.
-7. On failure: `missing` records which sub-criterion failed.
-8. On empty table (0 rows): `passed=False` with "Post-repair table is empty".
-9. On `FileNotFoundError` or `KeyError`: returns `passed=False` with the exception.
+- 检查修复后评估分布是否支持修复有效性声明。
 
-Threshold:
+行为：
+
+1. 通过 `_read_repair_csv` 读取 `post_repair_table.csv`。
+2. 统计 `recovered`、`partial` 和 `failed` 评估数量。
+3. 计算 `recovered_rate = recovered / total`。
+4. 计算 `majority_improves = (recovered + partial) > failed`。
+5. `passed = recovered_rate >= 0.5 AND majority_improves`。
+6. 成功时：evidence 包含计数和比例。
+7. 失败时：`missing` 记录哪个子标准失败。
+8. 空表（0 行）：`passed=False`，`"Post-repair table is empty"`。
+9. 在 `FileNotFoundError` 或 `KeyError` 时：返回 `passed=False`，异常信息放在 `evidence` 和 `missing` 中。
+
+阈值：
 
 ```text
 recovered_rate >= 0.5 AND recovered + partial > failed
 ```
 
-Why two sub-criteria:
+为什么两个子标准：
 
-- `recovered_rate >= 0.5`: the majority of repair assessments should be full recoveries.
-- `recovered + partial > failed`: even if the recovery rate is below 0.5, the total of improved cases (recovered + partial) should exceed failed cases. This sub-criterion alone is not sufficient — both must hold.
+- `recovered_rate >= 0.5`：大多数修复评估应为完全恢复。
+- `recovered + partial > failed`：即使恢复率低于 0.5，改进案例总数（recovered + partial）应超过失败案例。此子标准单独不充分——两者必须同时成立。
 
-Domain meaning:
+领域含义：
 
-- `partial` cases (evidence recovered, answer still wrong) are positive diagnostic signal — they expose coupled failures.
-- The threshold requires BOTH a majority recovery rate AND more improvements than failures.
-- This two-part test prevents gaming: you can't pass with 10% recovered + 41% partial (rec+partial > failed but recovered_rate < 0.5), and you can't pass with 50% recovered + 0% partial + 50% failed (rec+partial == failed).
+- `partial` 案例（证据恢复，答案仍错误）是正向诊断信号——它们暴露耦合失败。
+- 阈值要求 BOTH 恢复率过半 AND 改进多于失败。
+- 此两部分测试防止取巧：不能通过 10% recovered + 41% partial（rec+partial > failed 但 recovered_rate < 0.5），也不能通过 50% recovered + 0% partial + 50% failed（rec+partial == failed）。
 
-Caller:
+调用者：`check_v0_to_v1_gate`。
 
-- `check_v0_to_v1_gate`
+---
 
-## `cmd_audit/__init__.py` Public Surface
+### `cmd_audit/writers.py`（Issue 0010 相关部分）
 
-Issue 0010 exports:
+#### 函数：`write_text_artifact(path, lines, sandbox_root=None) -> Path`
+
+位置：`cmd_audit/writers.py:55-67`
+
+```python
+def write_text_artifact(
+    path: str | Path,
+    lines: Iterable[str],
+    *,
+    sandbox_root: str | Path | None = None,
+) -> Path:
+```
+
+目的：
+
+- 通用文本产出物写入器，可选沙箱校验。被 `write_gate_status` 和 `write_gate_review` 使用。
+- 若 `sandbox_root` 不为 None，通过 `validate_sandbox_path` 校验路径在沙箱内。
+- 按需创建父目录，写入 `"\n".join(lines) + "\n"`。
+
+调用者：`write_gate_status`（第 181 行）、`write_gate_review`（第 209 行）。
+
+## `cmd_audit/__init__.py` 公共接口
+
+Issue 0010 导出：
 
 - `GateCriterion`
 - `GateResult`
@@ -673,360 +765,184 @@ Issue 0010 exports:
 - `write_gate_status`
 - `write_gate_review`
 
-Why export them:
+为什么导出：
 
-- Tests can import and verify gate behavior through the public surface.
-- Future issues (e.g., CI integration, automated gate checks) can use the stable API.
-- The HITL review pipeline is callable from scripts without importing internal helpers.
+- 测试可通过公共接口导入和验证关卡行为。
+- 未来的 issue（如 CI 集成、自动关卡检查）可使用稳定的 API。
+- HITL 审核流水线可从脚本调用，无需导入内部 helper。
 
-## Test Coverage
+## 测试级合约
 
-Test file:
+测试文件：`tests/test_cmd_audit_issue10_version_gates.py`。14 个测试类，48 个测试方法。
 
-```text
-tests/test_cmd_audit_issue10_version_gates.py
-```
+### `GateCriterionCreationTest`（3 个测试）
 
-48 tests across 14 test classes.
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_passed_criterion` | `passed=True` 的 GateCriterion 具有正确的字段值；`missing` 为空。 |
+| `test_failed_criterion_with_missing` | `passed=False` 的 GateCriterion 有非空 `missing`；`evidence` 即使在失败时也记录观察值。 |
+| `test_criterion_immutable` | GateCriterion 是冻结的；字段赋值抛出异常。 |
 
-### `GateCriterionCreationTest` (3 tests)
+### `GateResultCreationTest`（3 个测试）
 
-**`test_passed_criterion`**
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_result_all_passed_true` | 所有标准通过 → `all_passed=True`。 |
+| `test_result_all_passed_false` | 任一标准失败 → `all_passed=False`。 |
+| `test_result_immutable` | GateResult 是冻结的；字段赋值抛出异常。 |
 
-Verifies:
+### `GateReviewCreationTest`（3 个测试）
 
-- A GateCriterion with `passed=True` has correct field values.
-- `missing` is empty for passing criteria.
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_valid_review` | `decision="approved"` 的 GateReview 创建成功。 |
+| `test_review_rejects_invalid_decision` | `decision="maybe_later"` 抛出 `ValueError`。 |
+| `test_deferred_review_with_missing` | deferred 审核的 `missing_evidence` 正确存储。 |
 
-**`test_failed_criterion_with_missing`**
+### `ComparisonCSVReaderTest`（2 个测试）
 
-Verifies:
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_reads_all_systems` | `_read_comparison_csv` 正确解析以 system_name 为键的行和浮点数值。 |
+| `test_missing_file_raises` | 缺失文件抛出 `FileNotFoundError`。 |
 
-- A GateCriterion with `passed=False` has non-empty `missing`.
-- `evidence` records observed values even when failing.
+### `ConfusionCSVReaderTest`（2 个测试）
 
-**`test_criterion_immutable`**
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_reads_matrix` | `_read_confusion_csv` 正确解析以 gold_label 为键的行和整数计数。 |
+| `test_missing_file_raises` | 缺失文件抛出 `FileNotFoundError`。 |
 
-Verifies:
+### `RepairCSVReaderTest`（1 个测试）
 
-- GateCriterion is frozen; mutation raises an exception.
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_reads_assessments` | `_read_repair_csv` 按顺序返回 `repair_assessment` 字符串列表。 |
 
-### `GateResultCreationTest` (3 tests)
+### `MacroF1CheckTest`（4 个测试）
 
-**`test_result_all_passed_true`**
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_passes_when_cmd_beats_all_baselines` | CMD macro_f1=0.92 > 所有基线（0.78, 0.80, 0.17）→ 通过。 |
+| `test_fails_when_baseline_beats_cmd` | CMD macro_f1=0.70 < evidence_recall=0.85 → 失败，missing 包含 "0.70"。 |
+| `test_fails_when_cmd_missing_from_csv` | CSV 没有 CMD-Audit 行 → 失败。 |
+| `test_fails_when_artifact_missing` | 文件不存在 → 失败，missing 包含 "not found"。 |
 
-Verifies:
+### `ConfusionDiagonalCheckTest`（2 个测试）
 
-- When all criteria pass, `all_passed=True`.
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_passes_with_perfect_diagonal` | 所有 6 个标签的单位矩阵（diagonal=1, off-diagonal=0）→ 通过。 |
+| `test_fails_with_off_diagonal` | write_error 行有 2 个非对角线项 → 失败，missing 包含 "write_error"。 |
 
-**`test_result_all_passed_false`**
+### `AccuracyTop2CheckTest`（3 个测试）
 
-Verifies:
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_passes_when_cmd_beats_all` | CMD accuracy=0.95 且 top2=1.0 > 所有基线 → 通过。 |
+| `test_fails_when_accuracy_lower` | CMD accuracy=0.70 < evidence_recall=0.83 → 失败。 |
+| `test_fails_when_top2_lower` | CMD top2=0.65 < evidence_recall=0.83 → 失败。 |
 
-- When any criterion fails, `all_passed=False`.
+### `RepairDistributionCheckTest`（5 个测试）
 
-**`test_result_immutable`**
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_passes_with_high_recovery` | 3 recovered、1 partial、1 failed → recovered_rate=0.6, rec+partial(4) > failed(1) → 通过。 |
+| `test_fails_when_below_recovery_threshold` | 1 recovered、2 partial、1 failed → recovered_rate=0.25 < 0.5 → 失败（rec+partial > failed 单独不充分）。 |
+| `test_fails_when_recovery_rate_low` | 1 recovered、4 failed → recovered_rate=0.2 < 0.5 AND rec+partial(1) < failed(4) → 失败。 |
+| `test_fails_when_failed_dominates` | 1 recovered、2 failed → rec+partial(1) <= failed(2) → 失败。 |
+| `test_fails_with_empty_table` | 仅含表头的 CSV，无数据行 → 失败，"Post-repair table is empty"。 |
 
-Verifies:
+### `V0V1GateCheckWithRealArtifactsTest`（4 个测试）
 
-- GateResult is frozen; mutation raises an exception.
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_all_criteria_pass_with_current_artifacts` | 针对真实项目产出物的 `check_v0_to_v1_gate()` 返回 `all_passed=True`，含 4 个标准。 |
+| `test_criterion_ids_match_spec` | 四个标准 ID 按预期顺序精确匹配规格。 |
+| `test_result_is_immutable` | 返回的 GateResult 是冻结的。 |
+| `test_each_criterion_has_evidence` | 所有标准有非空 `evidence` 字符串。 |
 
-### `GateReviewCreationTest` (3 tests)
+### `V0V1GateCheckWithTempArtifactsTest`（5 个测试）
 
-**`test_valid_review`**
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_all_pass_with_passing_artifacts` | 端到端：通过临时产出物 → `all_passed=True`。 |
+| `test_fails_when_comparison_missing` | 删除 `comparison_metrics.csv` → 2 个标准失败（macro_f1 和 accuracy_top2 都依赖它）。 |
+| `test_fails_when_confusion_missing` | 删除 `attribution_confusion_matrix.csv` → confusion_diagonal_dominance 失败。 |
+| `test_fails_when_repair_missing` | 删除 `post_repair_table.csv` → repair_assessment_distribution 失败。 |
+| `test_fails_when_macro_f1_insufficient` | 覆盖 comparison_metrics，CMD macro_f1=0.50 < baselines → macro_f1 标准失败。 |
 
-Verifies:
+### `V1V2GateCheckTest`（2 个测试）
 
-- A GateReview with decision="approved" is created successfully.
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_returns_not_met_stub` | `check_v1_to_v2_gate()` 返回 `all_passed=False`，包含一个标准 `adapter_integration_count`。Evidence 包含 "0 adapter integrations"。 |
+| `test_result_has_timestamp` | 结果有包含 "T" 分隔符的 ISO 时间戳。 |
 
-**`test_review_rejects_invalid_decision`**
+### `GateStatusWriteTest`（4 个测试）
 
-Verifies:
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_writes_status_file` | `write_gate_status` 写入包含 "V0→V1" 和 "PASS" 的文件。 |
+| `test_output_contains_all_criteria` | 输出包含通过和失败标准的 ID、PASS/FAIL 状态标签和 missing 文本。 |
+| `test_sandbox_path_enforced` | 写入沙箱外部路径抛出 `ValueError`。 |
+| `test_creates_parent_directories` | 写入沙箱内深层嵌套路径创建父目录并成功。 |
 
-- A GateReview with decision="maybe_later" raises `ValueError`.
+### `GateReviewWriteTest`（3 个测试）
 
-**`test_deferred_review_with_missing`**
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_writes_review_file` | `write_gate_review` 写入包含关卡 ID、decision 和 reviewer 的文件。 |
+| `test_dated_review_format` | 审核文件包含日期、deferred 决策、rationale 和 missing evidence 文本。 |
+| `test_sandbox_path_enforced` | 写入沙箱外部路径抛出 `ValueError`。 |
 
-Verifies:
+### `GatesDoNotBlockImplementationTest`（2 个测试）
 
-- A deferred review with missing_evidence correctly stores both fields.
+| 测试方法 | 验证内容 |
+| --- | --- |
+| `test_gate_check_runs_independently` | `check_v0_to_v1_gate()` 运行时不导入 harness、baselines 或其他实现模块。函数本身不写入磁盘。 |
+| `test_v1_v2_stub_does_not_crash` | `check_v1_to_v2_gate()` 返回有效 GateResult 而不崩溃。 |
 
-### `ComparisonCSVReaderTest` (2 tests)
+## 产出物合约
 
-**`test_reads_all_systems`**
+### `artifacts/sandbox/V0V1_gate_status.txt`
 
-Verifies:
+由 `write_gate_status` 写入的结构化文本文档。内容：关卡 ID、检查日期、`All criteria passed` 标志、四个逐标准块（编号、ID、PASS/FAIL 状态）、描述、产出物路径、阈值、证据和缺失内容。页脚包含 "Final decision: HITL review required." 和 ISO 检查时间戳。
 
-- `_read_comparison_csv` parses system_name-keyed rows with float values.
+### `artifacts/sandbox/V0V1_gate_review.txt`
 
-**`test_missing_file_raises`**
+由 `write_gate_review` 写入的带日期 HITL 审核记录。内容：关卡 ID、日期、reviewer、decision（approved/deferred/rejected）、reviewed 时间戳、rationale 和 missing evidence 部分。
 
-Verifies:
+## 边界规则
 
-- Missing file raises `FileNotFoundError`.
+1. **关卡检查只读**：`check_v0_to_v1_gate` 和 `check_v1_to_v2_gate` 不修改任何产出物或写入磁盘。它们是纯评估函数。
 
-### `ConfusionCSVReaderTest` (2 tests)
+2. **沙箱写入边界**：`write_gate_status` 和 `write_gate_review` 通过 `write_text_artifact` → `validate_sandbox_path` 强制沙箱写入边界。写入沙箱外部路径抛出 `ValueError`。
 
-**`test_reads_matrix`**
+3. **HITL 最终决策**：`GateResult.all_passed` 是程序性摘要，不是最终关卡决策。最终决策由 `GateReview.decision`（approved/deferred/rejected）通过 HITL 审核确定。
 
-Verifies:
+4. **关卡不阻塞实现**：关卡检查函数与其他模块无依赖（不导入 harness、baselines、replays、models）。它们仅锁定版本声明，不阻塞开发工作。
 
-- `_read_confusion_csv` parses gold_label-keyed rows with int counts.
+5. **V1→V2 存根**：V1→V2 关卡检查始终返回 not-met。它作为 V1 路线图的前向引用，不作为可测试的关卡。0 个适配器集成存在于 V0。
 
-**`test_missing_file_raises`**
+6. **直接 CSV 读取**：关卡检查直接读取 CSV 文件，不通过 CMD harness。这确保治理层独立于归因/回放/修复层。
 
-Verifies:
+7. **双输出格式**：关卡状态同时存在于 (a) `artifacts/sandbox/V0V1_gate_status.txt`（临时程序输出）和 (b) `cmd_innovation_core/gates/V0V1_gate_status.md`（持久 HITL 记录）。两者互补，各有价值——.txt 文件自动生成，.md 文件人工维护。
 
-- Missing file raises `FileNotFoundError`.
+## 验收标准可追溯性
 
-### `RepairCSVReaderTest` (1 test)
-
-**`test_reads_assessments`**
-
-Verifies:
-
-- `_read_repair_csv` returns a list of `repair_assessment` strings in order.
-
-### `MacroF1CheckTest` (4 tests)
-
-**`test_passes_when_cmd_beats_all_baselines`**
-
-Verifies:
-
-- CMD macro_f1=0.92 > all baselines (0.78, 0.80, 0.17) → passes.
-
-**`test_fails_when_baseline_beats_cmd`**
-
-Verifies:
-
-- CMD macro_f1=0.70 < evidence_recall=0.85 → fails, missing contains "0.70".
-
-**`test_fails_when_cmd_missing_from_csv`**
-
-Verifies:
-
-- CSV without CMD-Audit row → fails.
-
-**`test_fails_when_artifact_missing`**
-
-Verifies:
-
-- Non-existent file → fails, missing contains "not found".
-
-### `ConfusionDiagonalCheckTest` (2 tests)
-
-**`test_passes_with_perfect_diagonal`**
-
-Verifies:
-
-- Identity matrix (diagonal=1, off-diagonal=0) for all 6 labels → passes.
-
-**`test_fails_with_off_diagonal`**
-
-Verifies:
-
-- write_error row has 2 off-diagonal entries → fails, missing contains "write_error".
-
-### `AccuracyTop2CheckTest` (3 tests)
-
-**`test_passes_when_cmd_beats_all`**
-
-Verifies:
-
-- CMD accuracy=0.95 and top2=1.0 > all baselines → passes.
-
-**`test_fails_when_accuracy_lower`**
-
-Verifies:
-
-- CMD accuracy=0.70 < evidence_recall=0.83 → fails.
-
-**`test_fails_when_top2_lower`**
-
-Verifies:
-
-- CMD top2=0.65 < evidence_recall=0.83 → fails.
-
-### `RepairDistributionCheckTest` (5 tests)
-
-**`test_passes_with_high_recovery`**
-
-Verifies:
-
-- 3 recovered, 1 partial, 1 failed → recovered_rate=0.6, rec+partial(4) > failed(1) → passes.
-
-**`test_fails_when_below_recovery_threshold`**
-
-Verifies:
-
-- 1 recovered, 2 partial, 1 failed → recovered_rate=0.25 < 0.5 → fails. (rec+partial > failed alone is not sufficient.)
-
-**`test_fails_when_recovery_rate_low`**
-
-Verifies:
-
-- 1 recovered, 4 failed → recovered_rate=0.2 < 0.5 AND rec+partial(1) < failed(4) → fails.
-
-**`test_fails_when_failed_dominates`**
-
-Verifies:
-
-- 1 recovered, 2 failed → rec+partial(1) <= failed(2) → fails.
-
-**`test_fails_with_empty_table`**
-
-Verifies:
-
-- CSV with headers only, no data rows → fails with "Post-repair table is empty".
-
-### `V0V1GateCheckWithRealArtifactsTest` (4 tests)
-
-**`test_all_criteria_pass_with_current_artifacts`**
-
-Verifies:
-
-- `check_v0_to_v1_gate()` against the real project artifacts returns `all_passed=True` with 4 criteria.
-
-**`test_criterion_ids_match_spec`**
-
-Verifies:
-
-- The four criterion IDs match the spec exactly in the expected order.
-
-**`test_result_is_immutable`**
-
-Verifies:
-
-- The returned GateResult is frozen.
-
-**`test_each_criterion_has_evidence`**
-
-Verifies:
-
-- All criteria have non-empty `evidence` strings.
-
-### `V0V1GateCheckWithTempArtifactsTest` (5 tests)
-
-**`test_all_pass_with_passing_artifacts`**
-
-Verifies:
-
-- End-to-end: passing temp artifacts → `all_passed=True`.
-
-**`test_fails_when_comparison_missing`**
-
-Verifies:
-
-- Deleting `comparison_metrics.csv` → 2 criteria fail (macro_f1 and accuracy_top2 both depend on it).
-
-**`test_fails_when_confusion_missing`**
-
-Verifies:
-
-- Deleting `attribution_confusion_matrix.csv` → confusion_diagonal_dominance fails.
-
-**`test_fails_when_repair_missing`**
-
-Verifies:
-
-- Deleting `post_repair_table.csv` → repair_assessment_distribution fails.
-
-**`test_fails_when_macro_f1_insufficient`**
-
-Verifies:
-
-- Overwriting comparison_metrics with CMD macro_f1=0.50 < baselines → macro_f1 criterion fails.
-
-### `V1V2GateCheckTest` (2 tests)
-
-**`test_returns_not_met_stub`**
-
-Verifies:
-
-- `check_v1_to_v2_gate()` returns `all_passed=False` with one criterion `adapter_integration_count`.
-- Evidence contains "0 adapter integrations".
-
-**`test_result_has_timestamp`**
-
-Verifies:
-
-- Result has an ISO timestamp with "T" separator.
-
-### `GateStatusWriteTest` (4 tests)
-
-**`test_writes_status_file`**
-
-Verifies:
-
-- `write_gate_status` writes a file containing "V0→V1" and "PASS".
-
-**`test_output_contains_all_criteria`**
-
-Verifies:
-
-- Output contains both passing and failing criterion IDs, PASS/FAIL status tags, and missing text.
-
-**`test_sandbox_path_enforced`**
-
-Verifies:
-
-- Writing to a path outside the sandbox raises `ValueError`.
-
-**`test_creates_parent_directories`**
-
-Verifies:
-
-- Writing to a deeply nested path under sandbox creates parent directories and succeeds.
-
-### `GateReviewWriteTest` (3 tests)
-
-**`test_writes_review_file`**
-
-Verifies:
-
-- `write_gate_review` writes a file containing gate ID, decision, and reviewer.
-
-**`test_dated_review_format`**
-
-Verifies:
-
-- Review file contains the date, deferred decision, rationale, and missing evidence text.
-
-**`test_sandbox_path_enforced`**
-
-Verifies:
-
-- Writing to a path outside the sandbox raises `ValueError`.
-
-### `GatesDoNotBlockImplementationTest` (2 tests)
-
-**`test_gate_check_runs_independently`**
-
-Verifies:
-
-- `check_v0_to_v1_gate()` runs without importing from harness, baselines, or other implementation modules.
-- The function does not write to disk by itself.
-
-**`test_v1_v2_stub_does_not_crash`**
-
-Verifies:
-
-- `check_v1_to_v2_gate()` returns a valid GateResult without crashing.
-
-## Acceptance Criteria Traceability
-
-| Issue 0010 AC | Code Surface | Test Surface |
+| Issue 0010 AC | 代码接口 | 测试接口 |
 | --- | --- | --- |
-| V0→V1 gate defined with four criteria. | `check_v0_to_v1_gate` runs four criterion checks; `V0V1_CRITERION_IDS` documents the four IDs. | `test_criterion_ids_match_spec`, `test_all_criteria_pass_with_current_artifacts` |
-| V1→V2 gate defined with adapter integration criterion. | `check_v1_to_v2_gate` returns a single-criterion GateResult with `adapter_integration_count`. | `test_returns_not_met_stub` |
-| Gate status tracked in a dedicated document, not code. | `cmd_innovation_core/gates/V0V1_gate_status.md` is the tracking document. `write_gate_status` produces the sandbox artifact. | `test_writes_status_file` |
-| Each gate check documented with dated review note recording artifacts inspected, threshold result, and human decision. | `GateReview` records gate_id, reviewer, decision, rationale, missing_evidence, and reviewed_at timestamp. `write_gate_review` produces the dated review artifact. | `test_dated_review_format`, `test_writes_review_file` |
-| If gate not met, note records specific evidence missing and what must complete before re-review. | `GateCriterion.missing` records what is missing; `GateReview.missing_evidence` records what must be addressed. | `test_failed_criterion_with_missing`, `test_deferred_review_with_missing` |
-| Gates do not block ongoing implementation; they gate the version lock claim only. | `check_v0_to_v1_gate` is a read-only function that does not write to disk or affect other modules. `version_gates.py` does not import from harness or baselines. | `test_gate_check_runs_independently` |
+| V0→V1 关卡定义四个标准。 | `check_v0_to_v1_gate` 运行四个标准检查；`V0V1_CRITERION_IDS` 记录四个 ID。 | `test_criterion_ids_match_spec`、`test_all_criteria_pass_with_current_artifacts` |
+| V1→V2 关卡定义适配器集成标准。 | `check_v1_to_v2_gate` 返回含 `adapter_integration_count` 的单标准 GateResult。 | `test_returns_not_met_stub` |
+| 关卡状态在专用文档中追踪，非代码中。 | `cmd_innovation_core/gates/V0V1_gate_status.md` 是追踪文档。`write_gate_status` 产生沙箱产出物。 | `test_writes_status_file` |
+| 每次关卡检查记录带日期审核记录。 | `GateReview` 记录 gate_id、reviewer、decision、rationale、missing_evidence 和 reviewed_at 时间戳。`write_gate_review` 产生带日期的审核产出物。 | `test_dated_review_format`、`test_writes_review_file` |
+| 若关卡未通过，记录具体缺失证据。 | `GateCriterion.missing` 记录缺失内容；`GateReview.missing_evidence` 记录需要解决的问题。 | `test_failed_criterion_with_missing`、`test_deferred_review_with_missing` |
+| 关卡不阻塞进行中的实现。 | `check_v0_to_v1_gate` 是只读函数，不写入磁盘或影响其他模块。`version_gates.py` 不从 harness 或 baselines 导入。 | `test_gate_check_runs_independently` |
 
-## Current Artifact Semantics
+## 当前产出物语义
 
-Current `artifacts/sandbox/V0V1_gate_status.txt`:
+当前 `artifacts/sandbox/V0V1_gate_status.txt`：
 
 ```text
 CMD V0→V1 Gate Status — 2026-05-10
@@ -1051,7 +967,7 @@ Criterion 4: repair_assessment_distribution [PASS]
   Evidence:    6 cases: recovered=6, partial=0, failed=0 (recovered_rate=1.000)
 ```
 
-Current `artifacts/sandbox/V0V1_gate_review.txt`:
+当前 `artifacts/sandbox/V0V1_gate_review.txt`：
 
 ```text
 CMD V0→V1 Gate Review — 2026-05-10
@@ -1065,54 +981,68 @@ Rationale:
   All four criteria pass on 6-case smoke suite. However, the PRD targets 50-100 probe cases...
 ```
 
-Interpretation:
+解读：
 
-- All four criteria pass against the 6-case smoke suite because the suite is small enough to produce ceiling effects (perfect macro F1, perfect confusion matrix, 100% recovery).
-- The HITL review is deferred because 6 cases (1 per label) is insufficient evidence for a paper claim. The PRD targets 50-100 cases.
-- The gate check infrastructure is operational. It will produce discriminating results as the probe suite scales:
-  - Macro F1 will regress from 1.000 toward realistic values.
-  - Off-diagonal confusion entries will appear when multiple cases share a label.
-  - `partial` and `failed` repair assessments will emerge with more complex cases.
-- The V0→V1 gate is not yet locked. The version remains unlocked until HITL approves the gate review.
+- 全部四个标准在 6 案例烟雾套件上通过，因为套件足够小以至于产生天花板效应（完美 macro F1、完美混淆矩阵、100% 恢复率）。
+- HITL 审核被推迟，因为 6 个案例（每标签 1 个）不足以支撑论文声明。PRD 目标为 50-100 案例。
+- 关卡检查基础设施已可运行。随着探针套件扩展，它将产生有区分力的结果：
+  - Macro F1 将从 1.000 退化到现实值。
+  - 当多个案例共享同一标签时，非对角线混淆项将出现。
+  - 更复杂的案例将出现 `partial` 和 `failed` 修复评估。
+- V0→V1 关卡尚未锁定。版本保持未锁定直到 HITL 批准关卡审核。
 
-## Verification
+## 验证
 
-Commands:
+命令：
 
 ```bash
+# 仅 issue 0010 测试（48 个测试）
 python3 -m pytest tests/test_cmd_audit_issue10_version_gates.py -v
+
+# 全量测试套件
 python3 -m pytest tests/ -q
+
+# 编译检查
 python3 -m compileall cmd_audit tests
 ```
 
-Expected state:
+预期状态（2026-05-14）：
 
-- All 48 issue 0010 tests pass.
-- All 175 total tests pass (127 existing + 48 new).
-- `artifacts/sandbox/V0V1_gate_status.txt` is generated.
-- `artifacts/sandbox/V0V1_gate_review.txt` is generated.
-- `cmd_innovation_core/gates/V0V1_gate_status.md` is the gate tracking document.
+- 全部 48 个 issue 0010 测试通过。
+- 全部 218 个测试通过（含 178 个子测试）。
+- `artifacts/sandbox/V0V1_gate_status.txt` 已生成。
+- `artifacts/sandbox/V0V1_gate_review.txt` 已生成。
+- `cmd_innovation_core/gates/V0V1_gate_status.md` 是关卡追踪文档。
 
-## Non-Goals Preserved
+## Non-Goals 保留
 
-- No production CI/CD integration (gates are checked locally, not in a pipeline).
-- No automatic version locking (HITL decision is required).
-- No blocking of implementation work (gates gate the version claim, not development).
-- No expansion of the V0 label set or attribution taxonomy.
-- No modification of evidence artifacts (gate checks are read-only).
-- No dependency on the CMD harness, baselines, replays, or models (reads CSV files directly).
-- No remote gate status tracking (local documents only).
+- 无生产 CI/CD 集成（关卡在本地检查，非流水线中）。
+- 无自动版本锁定（需要 HITL 决策）。
+- 无阻塞实现工作（关卡仅锁定版本声明，非开发）。
+- 无 V0 标签集或归因分类法扩展。
+- 无证据产出物修改（关卡检查只读）。
+- 无对 CMD harness、baselines、replays 或 models 的依赖（直接读取 CSV 文件）。
+- 无远程关卡状态追踪（仅本地文档）。
 
-## Next Technical Step
+## 后续技术步骤
 
-Issue 0010 completes the V0 CMD-Audit governance layer. The V0 evidence chain is now structurally complete:
+Issue 0010 完成了 V0 CMD-Audit 治理层。V0 证据链现已结构完整：
 
 1. `attribution_table.csv` + `comparison_metrics.csv` + `attribution_confusion_matrix.csv` — issues 0002/0003
-2. Post-Repair Context Replay table — issue 0005
-3. Targeted repair-success table + claim ledger — issue 0006
-4. ECS Failure Memory recurrence comparison — issue 0007
-5. Evidence-driven version gates — issue 0010
+2. Post-Repair Context Replay 表 — issue 0005
+3. 针对性修复成功表 + 声明账本 — issue 0006
+4. ECS Failure Memory 复发率对比 — issue 0007
+5. 检索基线与证据评分强化（V0.5）— issue 0008
+6. 证据驱动版本关卡 — issue 0010
 
-All four V0 gate criteria pass on the 6-case smoke suite. The HITL review is deferred pending probe suite scaling.
+全部四个 V0→V1 关卡标准在 6 案例烟雾套件上通过。HITL 审核因探针套件扩展而推迟。
 
-The next slice is **issue 0008** (V0.5 retrieval baseline strengthening), a follow-up not on the V0 critical path. Parallel work: scale the probe suite from 6 to 50-100 cases to produce discriminating evidence for the V0→V1 gate review.
+V0 CMD-Audit 证据链通过 issues 0001-0010 闭合（218 个测试通过）。下一个关键工作：将探针套件从 6 个扩展到 50-100 个案例，为 V0→V1 关卡审核产生有区分力的证据。并行工作：推进 V1 标签扩展（issues 0011-0013）和适配器集成（issues 0014-0015）。
+
+## 后续依赖此 Issue 的问题
+
+| Issue | 依赖 | 方式 |
+| --- | --- | --- |
+| Issues 0011-0017（V1 标签和适配器） | V0→V1 关卡提供证据基线 | V1 工作完成后，重新运行 V0→V1 关卡以验证无退化。 |
+| Issue 0015（Letta 适配器 + V1→V2 关卡） | V1→V2 存根定义 | `check_v1_to_v2_gate` 扩展为实际检查，要求 ≥2 适配器集成且无 macro F1 退化。 |
+| 探针套件扩展 | V0→V1 关卡审核 | 50-100 案例套件是 HITL 从 "deferred" 到 "approved" 的前提条件。 |

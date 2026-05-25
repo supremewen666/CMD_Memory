@@ -1,73 +1,73 @@
-# Issue 0002 Implementation Details: Baselines and Judge Monitor
+# Issue 0002 实现细节：基线系统与 Judge Monitor
 
-## Purpose
+## 目的
 
-Issue 0002 adds the first non-CMD comparison layer around the existing CMD-Audit retrieval tracer bullet.
+Issue 0002 在现有 CMD-Audit 检索示踪子弹之上，添加了首个非 CMD 的对比层。
 
-The implemented slice answers this question:
+所实现的切片回答以下问题：
 
 ```text
-For each labeled Memory Failure probe case, can CMD-Audit keep replay-delta attribution separate from cheaper observational comparators and from a leak-safe replay trigger?
+对于每个已标注的 Memory Failure 探针案例，CMD-Audit 能否将 replay-delta 归因与更廉价的观察性对比方法以及防泄漏的 replay 触发器保持分离？
 ```
 
-This document zooms out from individual statements in code and maps the issue to project vocabulary, module boundaries, caller paths, public result shapes, and every issue-0002 function.
+本文档从代码中的单个语句拉远视角，将 issue 映射到项目词汇、模块边界、调用方路径、公开结果结构，以及每个 issue-0002 函数。
 
-## Source Requirements
+## 需求来源
 
-The implementation follows these local documents.
+实现遵循以下本地文档。
 
-| Source | Requirement Applied In Issue 0002 |
+| 来源 | Issue 0002 中应用的需求 |
 | --- | --- |
-| `TASK.md` | Run fixed-summary and vector-memory baselines; compare CMD against heuristic and subagent judge baselines; produce evidence before paper claims. |
-| `CLAUDE.md` | Treat `cmd_innovation_core/` as source of truth; keep **CMD-Audit** separate from **CMD-Skill Adapter**; keep **Subagent Judge Monitor** leak-safe. |
-| `cmd_innovation_core/CONTEXT.md` | Use **Subagent Judge Baseline** only as comparator; use **Subagent Judge Monitor** only to trigger replay; final attribution belongs to CMD replay deltas. |
-| `cmd_innovation_core/prd/cmd_minimal_probe_prd.md` | Include baseline outputs, evidence recall heuristics, subagent judge baseline, high-recall monitor, random baseline, and comparison metrics. |
-| `cmd_innovation_core/issues/0002-establish-baselines-and-judge-monitor.md` | Implement fixed-summary/vector baselines, evidence recall comparator, subagent judge explanation, monitor trigger, random labels, and metrics. |
-| `cmd_innovation_core/tdd/cmd_tracer_bullets.md` | Cycle 7 keeps judge explanation separate from CMD attribution; Cycle 8 rejects monitor payloads that emit final labels, ECS, memory writes, gold answers, or full failed traces. |
+| `TASK.md` | 运行 fixed-summary 和 vector-memory 基线；将 CMD 与启发式基线及 subagent judge 基线进行对比；在论文声明之前产出证据。 |
+| `CLAUDE.md` | 以 `cmd_innovation_core/` 为真源；保持 **CMD-Audit** 与 **CMD-Skill Adapter** 分离；保持 **Subagent Judge Monitor** 防泄漏。 |
+| `cmd_innovation_core/CONTEXT.md` | 仅将 **Subagent Judge Baseline** 用作对比器；仅将 **Subagent Judge Monitor** 用于触发 replay；最终归因属于 CMD replay delta。 |
+| `cmd_innovation_core/prd/cmd_minimal_probe_prd.md` | 包含基线输出、证据召回启发式、subagent judge 基线、高召回 monitor、随机基线及对比指标。 |
+| `cmd_innovation_core/issues/0002-establish-baselines-and-judge-monitor.md` | 实现 fixed-summary/vector 基线、证据召回对比器、subagent judge 解释、monitor 触发器、随机标签及指标。 |
+| `cmd_innovation_core/tdd/cmd_tracer_bullets.md` | Cycle 7 将 judge 解释与 CMD 归因分离；Cycle 8 拒绝输出最终标签、ECS、记忆写入、gold answer 或完整失败 trace 的 monitor 载荷。 |
 
-## Domain Boundary
+## 领域边界
 
-Issue 0002 sits between the failed baseline output and the expensive **Counterfactual Replay** path:
+Issue 0002 位于失败的基线输出与昂贵的 **Counterfactual Replay** 路径之间：
 
 ```text
 ProbeCase
-  -> baseline memory outputs from issue 0001
-  -> issue 0002 comparison layer
-      -> fixed-summary baseline record
-      -> vector-memory baseline record
-      -> evidence-recall heuristic comparator
-      -> Subagent Judge Baseline comparator
-      -> random label sanity baseline
-      -> Subagent Judge Monitor replay trigger
-  -> issue 0001 replay path remains unchanged
+  -> 来自 issue 0001 的基线记忆输出
+  -> issue 0002 对比层
+      -> fixed-summary 基线记录
+      -> vector-memory 基线记录
+      -> evidence-recall 启发式对比器
+      -> Subagent Judge Baseline 对比器
+      -> random label 健全性基线
+      -> Subagent Judge Monitor replay 触发器
+  -> issue 0001 replay 路径保持不变
       -> Oracle Retrieval Counterfactual Replay
       -> Recovery Gain
       -> Operation-Level Attribution
 ```
 
-The important separation:
+关键分离：
 
-- **CMD-Audit** final label: comes from `assign_attribution(...)` over replay results.
-- **Evidence recall heuristic**: a cheap comparator, not CMD attribution.
-- **Subagent Judge Baseline**: a post-hoc explanation comparator, not CMD attribution.
-- **Subagent Judge Monitor**: a high-recall trigger for expensive replay, not an attribution system.
-- **CMD-Skill Adapter**: still deferred; issue 0002 does not integrate with a runtime memory agent.
+- **CMD-Audit** 最终标签：来自对 replay 结果调用 `assign_attribution(...)`。
+- **证据召回启发式**：廉价对比器，非 CMD 归因。
+- **Subagent Judge Baseline**：事后解释性对比器，非 CMD 归因。
+- **Subagent Judge Monitor**：高召回触发器，用于触发昂贵的 replay，非归因系统。
+- **CMD-Skill Adapter**：仍延迟实现；issue 0002 不与运行时 memory agent 集成。
 
-## Module Map
+## 模块地图
 
-| Module | Issue 0002 Role |
+| 模块 | Issue 0002 角色 |
 | --- | --- |
-| `cmd_audit/baselines.py` | Owns memory baseline normalization, non-CMD comparator outputs, random sanity baseline, and monitor leak-safety. |
-| `cmd_audit/metrics.py` | Owns system-level diagnosis predictions and comparison metrics. |
-| `cmd_audit/harness.py` | Wires issue 0002 into the public CMD-Audit result while preserving replay-delta attribution. |
-| `cmd_audit/cli.py` | Exposes issue 0002 artifacts through `python3 -m cmd_audit run`. |
-| `cmd_audit/__init__.py` | Exports the small public surface for callers and tests. |
-| `cmd_audit/labels.py` | Provides the V0 label order and validation used by comparators and metrics. |
-| `tests/test_cmd_audit_issue2_baselines.py` | Behavior-level tests for the issue acceptance criteria. |
+| `cmd_audit/baselines.py` | 拥有记忆基线规范化、非 CMD 对比器输出、随机健全性基线及 monitor 防泄漏检查。 |
+| `cmd_audit/metrics.py` | 拥有系统级诊断预测和对比指标。 |
+| `cmd_audit/harness.py` | 将 issue 0002 接入公开的 CMD-Audit 结果，同时保留 replay-delta 归因。 |
+| `cmd_audit/cli.py` | 通过 `python3 -m cmd_audit run` 暴露 issue 0002 制品。 |
+| `cmd_audit/__init__.py` | 导出调用方和测试所需的精简公开接口。 |
+| `cmd_audit/labels.py` | 提供对比器和指标使用的 V0 标签顺序及校验。 |
+| `tests/test_cmd_audit_issue2_baselines.py` | issue 验收标准的行为级测试。 |
 
-## Caller Graph
+## 调用图
 
-Main CLI path:
+主 CLI 路径：
 
 ```text
 cmd_audit.__main__
@@ -101,7 +101,7 @@ cmd_audit.__main__
                   -> metrics._label_f1
 ```
 
-Behavior-test path:
+行为测试路径：
 
 ```text
 tests/test_cmd_audit_issue2_baselines.py
@@ -114,23 +114,23 @@ tests/test_cmd_audit_issue2_baselines.py
   -> write_comparison_metrics_table
 ```
 
-## Data Flow
+## 数据流
 
-Input fixture:
+输入 fixture：
 
 ```text
 data/probe_cases/v0_retrieval_error_case.json
 ```
 
-Important fixture facts:
+重要 fixture 事实：
 
-- `vector_memory` retrieves `mem-002`, a distractor.
-- `fixed_summary` gives a generic summary and does not retrieve a memory item.
-- Gold evidence lives in extracted memory `mem-001`.
-- Gold answer is `Lisbon`.
-- Perturbation label is `retrieval_error`.
+- `vector_memory` 检索到 `mem-002`，一个干扰项。
+- `fixed_summary` 给出通用摘要，不检索任何记忆条目。
+- Gold evidence 存在于提取记忆 `mem-001` 中。
+- Gold answer 为 `Lisbon`。
+- 扰动标签为 `retrieval_error`。
 
-Issue 0002 outputs:
+Issue 0002 输出：
 
 ```text
 BaselineSuiteResult
@@ -142,7 +142,7 @@ BaselineSuiteResult
   monitor
 ```
 
-Harness-level output:
+Harness 级输出：
 
 ```text
 AuditResult
@@ -151,7 +151,7 @@ AuditResult
   attribution
 ```
 
-Artifact output:
+制品输出：
 
 ```text
 artifacts/attribution_table.csv
@@ -160,106 +160,106 @@ artifacts/comparison_metrics.csv
 
 ## `cmd_audit/baselines.py`
 
-This module owns issue 0002's non-CMD layer. Its docstring says it directly: baseline, comparator, and monitor surfaces for CMD-Audit issue 0002.
+此模块拥有 issue 0002 的非 CMD 层。其 docstring 直接说明：CMD-Audit issue 0002 的基线、对比器和 monitor 接口。
 
-### Constant: `REQUIRED_MEMORY_BASELINES`
+### 常量：`REQUIRED_MEMORY_BASELINES`
 
-Definition:
+定义：
 
 ```python
 REQUIRED_MEMORY_BASELINES = ("fixed_summary", "vector_memory")
 ```
 
-Role:
+角色：
 
-- Encodes issue 0002's required baseline systems.
-- Used as the default `required_baselines` argument in `run_memory_baselines(...)`.
-- Makes every probe case prove that both a fixed-summary baseline and vector-memory baseline have been specified.
+- 编码 issue 0002 所需的基线系统。
+- 作为 `run_memory_baselines(...)` 中 `required_baselines` 参数的默认值。
+- 确保每个探针案例都证明已指定 fixed-summary 基线和 vector-memory 基线。
 
-Failure behavior:
+失败行为：
 
-- If either name is missing from `case.baseline_outputs`, `run_memory_baselines(...)` raises `BaselineConfigurationError`.
+- 如果 `case.baseline_outputs` 中缺少任一名称，`run_memory_baselines(...)` 抛出 `BaselineConfigurationError`。
 
-Domain meaning:
+领域含义：
 
-- These are **Memory-Augmented Agent** baseline behaviors, not CMD interventions.
-- The values come from the issue requirement to specify fixed-summary and vector-memory behavior for every probe case.
+- 这些是 **Memory-Augmented Agent** 的基线行为，而非 CMD 干预。
+- 这些值来自为每个探针案例指定 fixed-summary 和 vector-memory 行为的 issue 需求。
 
-### Constant: `FORBIDDEN_MONITOR_FIELDS`
+### 常量：`FORBIDDEN_MONITOR_FIELDS`
 
-Definition:
+定义：
 
 ```python
 FORBIDDEN_MONITOR_FIELDS = frozenset({...})
 ```
 
-Current rejected keys:
+当前拒绝的键：
 
-- label-like fields: `label`, `labels`, `final_label`, `predicted_label`, `diagnosis_label`, `cmd_label`, `attribution`, `attribution_label`, `replay_label`, `top2_labels`
-- repair/ECS fields: `ecs`, `error_cause_solution`, `repair_guidance`, `corrected_memory`
-- memory-write fields: `memory_write`, `memory_writes`
-- gold-data fields: `gold_answer`, `gold_evidence`
-- trace or dataset fields: `raw_events`, `extracted_memory`, `baseline_outputs`, `full_trace`, `full_failed_trace`, `failed_trace`
+- 类似标签的字段：`label`、`labels`、`final_label`、`predicted_label`、`diagnosis_label`、`cmd_label`、`attribution`、`attribution_label`、`replay_label`、`top2_labels`
+- repair/ECS 字段：`ecs`、`error_cause_solution`、`repair_guidance`、`corrected_memory`
+- 记忆写入字段：`memory_write`、`memory_writes`
+- gold 数据字段：`gold_answer`、`gold_evidence`
+- trace 或数据集字段：`raw_events`、`extracted_memory`、`baseline_outputs`、`full_trace`、`full_failed_trace`、`failed_trace`
 
-Role:
+角色：
 
-- Defines the leak-safety boundary for **Subagent Judge Monitor** payloads.
-- Used by `_reject_forbidden_monitor_fields(...)`.
-- Tested through `test_monitor_payload_can_trigger_replay_without_forbidden_outputs` and `test_monitor_rejects_final_labels_ecs_memory_writes_gold_answers_and_full_traces`.
+- 定义 **Subagent Judge Monitor** 载荷的防泄漏边界。
+- 由 `_reject_forbidden_monitor_fields(...)` 使用。
+- 通过 `test_monitor_payload_can_trigger_replay_without_forbidden_outputs` 和 `test_monitor_rejects_final_labels_ecs_memory_writes_gold_answers_and_full_traces` 进行测试。
 
-Domain meaning:
+领域含义：
 
-- The monitor can say "replay should run".
-- It cannot output final **Operation-Level Attribution**, **Error-Cause-Solution**, **User Memory** writes, gold answers/evidence, or full failed traces.
+- Monitor 可以说"应运行 replay"。
+- 但不能输出最终的 **Operation-Level Attribution**、**Error-Cause-Solution**、**User Memory** 写入、gold answer/evidence 或完整的失败 trace。
 
-### Exception: `BaselineConfigurationError`
+### 异常：`BaselineConfigurationError`
 
-Definition:
+定义：
 
 ```python
 class BaselineConfigurationError(ValueError):
     """Raised when a probe case lacks required baseline outputs."""
 ```
 
-Raised by:
+抛出位置：
 
 - `run_memory_baselines(...)`
 
-Failure cases:
+失败场景：
 
-- Duplicate baseline names in `case.baseline_outputs`.
-- Missing names from `REQUIRED_MEMORY_BASELINES`.
+- `case.baseline_outputs` 中存在重复的基线名称。
+- 缺少 `REQUIRED_MEMORY_BASELINES` 中的名称。
 
-Why it exists:
+为何存在：
 
-- Issue 0002 is invalid if a probe case cannot produce both required baseline records.
-- This is a case-contract failure, not a replay failure.
+- 如果探针案例无法产生两条所需的基线记录，则 issue 0002 无效。
+- 这是案例契约失败，而非 replay 失败。
 
-### Exception: `LeakSafeMonitorError`
+### 异常：`LeakSafeMonitorError`
 
-Definition:
+定义：
 
 ```python
 class LeakSafeMonitorError(ValueError):
     """Raised when the monitor attempts to expose forbidden diagnosis payloads."""
 ```
 
-Raised by:
+抛出位置：
 
 - `_reject_forbidden_monitor_fields(...)`
 
-Used by:
+使用者：
 
 - `validate_monitor_payload(...)`
 - `SubagentJudgeMonitorDecision.to_payload(...)`
 
-Why it exists:
+为何存在：
 
-- It enforces the `CLAUDE.md`, `TASK.md`, and `CONTEXT.md` boundary that the monitor cannot emit final labels, ECS, memory writes, gold answers, or full failed traces.
+- 强制执行 `CLAUDE.md`、`TASK.md` 和 `CONTEXT.md` 中规定的边界：monitor 不能输出最终标签、ECS、记忆写入、gold answer 或完整失败 trace。
 
-### Dataclass: `MemoryBaselineRun`
+### 数据类：`MemoryBaselineRun`
 
-Fields:
+字段：
 
 ```python
 baseline_name: str
@@ -270,70 +270,70 @@ evidence_score: float
 injected_context: str
 ```
 
-Role:
+角色：
 
-- Normalized runtime view of a `BaselineOutput`.
-- Keeps baseline behavior available in issue 0002 without changing the issue 0001 `ProbeCase` contract.
+- `BaselineOutput` 的规范化运行时视图。
+- 在不改变 issue 0001 `ProbeCase` 契约的前提下，使基线行为在 issue 0002 中可用。
 
-Domain mapping:
+领域映射：
 
-- `baseline_name`: fixed-summary or vector-memory baseline system.
-- `answer`: failed output from the baseline **Memory-Augmented Agent**.
-- `retrieved_memory_ids`: memory items retrieved by the baseline memory system.
-- `answer_score`: score against `gold_answer`, used for comparison metrics.
-- `evidence_score`: score against `gold_evidence`, used by monitor and diagnostics.
-- `injected_context`: context supplied to the baseline before answer generation.
+- `baseline_name`：fixed-summary 或 vector-memory 基线系统。
+- `answer`：基线 **Memory-Augmented Agent** 的失败输出。
+- `retrieved_memory_ids`：基线记忆系统检索到的记忆条目。
+- `answer_score`：与 `gold_answer` 的匹配得分，用于对比指标。
+- `evidence_score`：与 `gold_evidence` 的匹配得分，由 monitor 和诊断使用。
+- `injected_context`：在生成答案前提供给基线的上下文。
 
 #### `MemoryBaselineRun.from_output(output)`
 
-Signature:
+签名：
 
 ```python
 @classmethod
 def from_output(cls, output: BaselineOutput) -> "MemoryBaselineRun"
 ```
 
-Inputs:
+输入：
 
-- `output`: the issue 0001 `BaselineOutput` stored in a probe case.
+- `output`：存储在探针案例中的 issue 0001 `BaselineOutput`。
 
-Returns:
+返回：
 
-- A `MemoryBaselineRun` with the same baseline name, answer, retrieved IDs, scores, and injected context.
+- 具有相同基线名称、answer、检索 ID、得分和注入上下文的 `MemoryBaselineRun`。
 
-Callers:
+调用方：
 
 - `run_memory_baselines(...)`
 
-Reason for the method:
+方法存在的原因：
 
-- Keeps issue 0002 output independent from issue 0001 model internals while preserving the same values.
+- 使 issue 0002 的输出独立于 issue 0001 模型内部结构，同时保留相同的值。
 
 #### `MemoryBaselineRun.failed`
 
-Signature:
+签名：
 
 ```python
 @property
 def failed(self) -> bool
 ```
 
-Returns:
+返回：
 
-- `True` when `answer_score < 1.0`.
-- `False` when the baseline answer is fully correct under the current deterministic scorer.
+- 当 `answer_score < 1.0` 时返回 `True`。
+- 当基线答案在当前确定性评分器下完全正确时返回 `False`。
 
-Callers:
+调用方：
 
-- Tests use it to assert both current fixture baselines fail.
+- 测试用它断言当前两个 fixture 基线均失败。
 
-Domain meaning:
+领域含义：
 
-- The baseline is a failed starting point before CMD replay.
+- 基线是 CMD replay 之前的失败起点。
 
-### Dataclass: `ComparatorResult`
+### 数据类：`ComparatorResult`
 
-Fields:
+字段：
 
 ```python
 comparator_name: str
@@ -344,43 +344,43 @@ cost_per_diagnosis: float
 uses_counterfactual_replay: bool = False
 ```
 
-Role:
+角色：
 
-- Common result shape for non-CMD label-producing comparators.
-- Used by evidence recall heuristic, subagent judge baseline, and random label baseline.
+- 非 CMD 标签输出对比器的通用结果结构。
+- 由证据召回启发式、subagent judge 基线和随机标签基线使用。
 
-Domain boundary:
+领域边界：
 
-- `predicted_label` is a comparator prediction, not final CMD attribution.
-- `uses_counterfactual_replay` is explicitly `False` for all issue 0002 comparators.
+- `predicted_label` 是对比器预测，而非最终 CMD 归因。
+- `uses_counterfactual_replay` 对所有 issue 0002 对比器显式设为 `False`。
 
 #### `ComparatorResult.__post_init__()`
 
-Signature:
+签名：
 
 ```python
 def __post_init__(self) -> None
 ```
 
-Behavior:
+行为：
 
-- Calls `validate_v0_label(...)` for `predicted_label`.
-- Calls `validate_v0_label(...)` for every label in `top2_labels`.
+- 对 `predicted_label` 调用 `validate_v0_label(...)`。
+- 对 `top2_labels` 中的每个标签调用 `validate_v0_label(...)`。
 
-Why it matters:
+为何重要：
 
-- Issue 0002 comparators must stay inside the same V0 six-label boundary:
+- Issue 0002 对比器必须保持在相同的 V0 六标签边界内：
   - `write_error`
   - `compression_error`
   - `premature_extraction_error`
   - `retrieval_error`
   - `injection_error`
   - `reasoning_error`
-- Comparators cannot introduce bad memory item labels or deferred pipeline labels into the comparison table.
+- 对比器不能将不合规的记忆条目标签或延后的流水线标签引入对比表。
 
-### Dataclass: `SubagentJudgeMonitorDecision`
+### 数据类：`SubagentJudgeMonitorDecision`
 
-Fields:
+字段：
 
 ```python
 should_trigger_replay: bool
@@ -390,58 +390,58 @@ trace_summary: str
 cost_per_decision: float = 0.2
 ```
 
-Role:
+角色：
 
-- Leak-safe monitor decision.
-- Represents only whether expensive CMD replay should run, plus a small risk summary.
+- 防泄漏的 monitor 决策。
+- 仅表示是否应运行昂贵的 CMD replay，附带少量风险摘要。
 
-Allowed payload content:
+允许的载荷内容：
 
-- trigger boolean
+- trigger 布尔值
 - risk score
-- short reasons
-- aggregate trace summary
+- 简短 reasons
+- 聚合 trace summary
 - monitor cost
 
-Forbidden content:
+禁止的内容：
 
 - final label
 - ECS
 - memory writes
-- gold answers/evidence
-- full failed trace
+- gold answer/evidence
+- 完整失败 trace
 
 #### `SubagentJudgeMonitorDecision.to_payload()`
 
-Signature:
+签名：
 
 ```python
 def to_payload(self) -> dict[str, Any]
 ```
 
-Behavior:
+行为：
 
-1. Builds a dict with these keys:
+1. 构建包含以下键的字典：
    - `should_trigger_replay`
    - `risk_score`
    - `reasons`
    - `trace_summary`
    - `cost_per_decision`
-2. Calls `validate_monitor_payload(payload)`.
-3. Returns the validated payload.
+2. 调用 `validate_monitor_payload(payload)`。
+3. 返回校验通过的载荷。
 
-Callers:
+调用方：
 
-- `run_subagent_judge_monitor(...)` calls it immediately before returning the decision.
-- Tests call it directly to verify allowed payload shape.
+- `run_subagent_judge_monitor(...)` 在返回决策之前立即调用它。
+- 测试直接调用它来验证允许的载荷结构。
 
-Why the validation call is inside this method:
+为何在此方法内调用校验：
 
-- Every serialization path for monitor decisions must pass the leak-safety gate.
+- monitor 决策的每条序列化路径都必须通过防泄漏门禁。
 
-### Dataclass: `BaselineSuiteResult`
+### 数据类：`BaselineSuiteResult`
 
-Fields:
+字段：
 
 ```python
 case_id: str
@@ -452,29 +452,29 @@ random_label: ComparatorResult
 monitor: SubagentJudgeMonitorDecision
 ```
 
-Role:
+角色：
 
-- Aggregates all issue 0002 outputs for one probe case.
-- Stored on `AuditResult.baseline_suite`.
+- 聚合单个探针案例的所有 issue 0002 输出。
+- 存储在 `AuditResult.baseline_suite` 上。
 
-Domain mapping:
+领域映射：
 
-- `memory_baselines`: observed behavior of fixed-summary and vector-memory memory systems.
-- `evidence_recall_heuristic`: cheap retrieval-centered comparator.
-- `subagent_judge`: post-hoc observational explanation comparator.
-- `random_label`: sanity baseline for attribution metrics.
-- `monitor`: high-recall replay trigger.
+- `memory_baselines`：fixed-summary 和 vector-memory 记忆系统的观测行为。
+- `evidence_recall_heuristic`：廉价的以检索为中心的对比器。
+- `subagent_judge`：事后观察性解释对比器。
+- `random_label`：用于归因指标的健全性基线。
+- `monitor`：高召回 replay 触发器。
 
 #### `BaselineSuiteResult.comparator_results`
 
-Signature:
+签名：
 
 ```python
 @property
 def comparator_results(self) -> tuple[ComparatorResult, ...]
 ```
 
-Returns:
+返回：
 
 ```python
 (
@@ -484,55 +484,55 @@ Returns:
 )
 ```
 
-Callers:
+调用方：
 
 - `harness.diagnosis_predictions(...)`
 
-Why it exists:
+为何存在：
 
-- Keeps metric generation generic over comparator systems without mixing monitor outputs into final attribution metrics.
+- 使指标生成对对比器系统保持通用，同时不将 monitor 输出混入最终归因指标。
 
-### Function: `run_baseline_suite(case)`
+### 函数：`run_baseline_suite(case)`
 
-Signature:
+签名：
 
 ```python
 def run_baseline_suite(case: ProbeCase) -> BaselineSuiteResult
 ```
 
-Inputs:
+输入：
 
-- `case`: one validated `ProbeCase`.
+- `case`：一个已验证的 `ProbeCase`。
 
-Returns:
+返回：
 
-- `BaselineSuiteResult`.
+- `BaselineSuiteResult`。
 
-Step-by-step behavior:
+逐步行为：
 
-1. Calls `run_memory_baselines(case)` to validate and normalize baseline memory system outputs.
-2. Calls `_select_comparison_baseline(case)` to pick the baseline trace used by comparators.
-3. Calls `run_evidence_recall_heuristic(case, comparison_baseline)`.
-4. Calls `run_subagent_judge_baseline(case, comparison_baseline)`.
-5. Calls `run_random_label_baseline(case)`.
-6. Calls `run_subagent_judge_monitor(case, comparison_baseline)`.
-7. Packs all outputs into `BaselineSuiteResult`.
+1. 调用 `run_memory_baselines(case)` 以校验并规范化基线记忆系统输出。
+2. 调用 `_select_comparison_baseline(case)` 选择对比器使用的基线 trace。
+3. 调用 `run_evidence_recall_heuristic(case, comparison_baseline)`。
+4. 调用 `run_subagent_judge_baseline(case, comparison_baseline)`。
+5. 调用 `run_random_label_baseline(case)`。
+6. 调用 `run_subagent_judge_monitor(case, comparison_baseline)`。
+7. 将所有输出打包为 `BaselineSuiteResult`。
 
-Callers:
+调用方：
 
 - `harness.run_case(...)`
 - `tests/test_cmd_audit_issue2_baselines.py`
-- Public export through `cmd_audit.__init__`
+- 通过 `cmd_audit.__init__` 公开导出
 
-Boundary guarantee:
+边界保证：
 
-- The function does not call any replay function.
-- It does not assign CMD attribution.
-- It creates comparison data that sits beside, not inside, `AuditResult.attribution`.
+- 该函数不调用任何 replay 函数。
+- 不分配 CMD 归因。
+- 生成位于 `AuditResult.attribution` 旁边而非内部的对比数据。
 
-### Function: `run_memory_baselines(case, required_baselines=REQUIRED_MEMORY_BASELINES)`
+### 函数：`run_memory_baselines(case, required_baselines=REQUIRED_MEMORY_BASELINES)`
 
-Signature:
+签名：
 
 ```python
 def run_memory_baselines(
@@ -541,38 +541,38 @@ def run_memory_baselines(
 ) -> tuple[MemoryBaselineRun, ...]
 ```
 
-Inputs:
+输入：
 
-- `case`: one probe case.
-- `required_baselines`: names that must exist in `case.baseline_outputs`.
+- `case`：一个探针案例。
+- `required_baselines`：必须存在于 `case.baseline_outputs` 中的名称。
 
-Returns:
+返回：
 
-- Ordered tuple of `MemoryBaselineRun`.
+- `MemoryBaselineRun` 的有序元组。
 
-Ordering:
+排序：
 
-1. Required baseline names in `required_baselines` order:
+1. 按 `required_baselines` 中的顺序排列的必需基线名称：
    - `fixed_summary`
    - `vector_memory`
-2. Any extra baseline outputs from the case, preserving their fixture order.
+2. 来自案例的任何额外基线输出，保持其 fixture 顺序。
 
-Validation:
+校验：
 
-- Rejects duplicate `baseline_name`.
-- Rejects missing required baseline names.
+- 拒绝重复的 `baseline_name`。
+- 拒绝缺少必需基线名称的情况。
 
-Callers:
+调用方：
 
 - `run_baseline_suite(...)`
 
-Domain meaning:
+领域含义：
 
-- The probe case must specify both baseline memory system behaviors before CMD comparisons are meaningful.
+- 探针案例必须指定两种基线记忆系统行为，CMD 对比才有意义。
 
-### Function: `run_evidence_recall_heuristic(case, baseline=None)`
+### 函数：`run_evidence_recall_heuristic(case, baseline=None)`
 
-Signature:
+签名：
 
 ```python
 def run_evidence_recall_heuristic(
@@ -581,40 +581,40 @@ def run_evidence_recall_heuristic(
 ) -> ComparatorResult
 ```
 
-Inputs:
+输入：
 
-- `case`: one probe case.
-- `baseline`: optional baseline trace. If omitted, `_select_comparison_baseline(case)` is used.
+- `case`：一个探针案例。
+- `baseline`：可选的基线 trace。如果省略，则使用 `_select_comparison_baseline(case)`。
 
-Returns:
+返回：
 
-- `ComparatorResult` with:
+- `ComparatorResult`，包含：
   - `comparator_name="evidence_recall"`
-  - `predicted_label` from `_observational_label(...)`
-  - single-entry `top2_labels`
-  - natural-language rationale
+  - `predicted_label` 来自 `_observational_label(...)`
+  - 单一元素的 `top2_labels`
+  - 自然语言理由
   - `cost_per_diagnosis=0.05`
   - `uses_counterfactual_replay=False`
 
-Callers:
+调用方：
 
 - `run_baseline_suite(...)`
 - `run_subagent_judge_baseline(...)`
 
-Boundary guarantee:
+边界保证：
 
-- It does not run counterfactual replay.
-- It is an observational comparator, not CMD attribution.
+- 不运行 counterfactual replay。
+- 是观察性对比器，而非 CMD 归因。
 
-Current fixture behavior:
+当前 fixture 行为：
 
-- Extracted memory contains the gold memory item.
-- Vector-memory baseline retrieved a distractor instead.
-- Heuristic predicts comparator label `retrieval_error`.
+- 提取记忆中包含 gold 记忆条目。
+- Vector-memory 基线检索到的是干扰项。
+- 启发式方法预测对比器标签为 `retrieval_error`。
 
-### Function: `run_subagent_judge_baseline(case, baseline=None)`
+### 函数：`run_subagent_judge_baseline(case, baseline=None)`
 
-Signature:
+签名：
 
 ```python
 def run_subagent_judge_baseline(
@@ -623,74 +623,74 @@ def run_subagent_judge_baseline(
 ) -> ComparatorResult
 ```
 
-Inputs:
+输入：
 
-- `case`: one probe case.
-- `baseline`: optional baseline trace. If omitted, `_select_comparison_baseline(case)` is used.
+- `case`：一个探针案例。
+- `baseline`：可选的基线 trace。如果省略，则使用 `_select_comparison_baseline(case)`。
 
-Returns:
+返回：
 
-- `ComparatorResult` with:
+- `ComparatorResult`，包含：
   - `comparator_name="subagent_judge"`
-  - `predicted_label` copied from the evidence recall heuristic
-  - `top2_labels` copied from the evidence recall heuristic
-  - a post-hoc explanation string over the failed trace
+  - `predicted_label` 从证据召回启发式复制
+  - `top2_labels` 从证据召回启发式复制
+  - 针对失败 trace 的事后解释字符串
   - `cost_per_diagnosis=1.0`
   - `uses_counterfactual_replay=False`
 
-Internal calls:
+内部调用：
 
-- Calls `run_evidence_recall_heuristic(case, baseline)` to reuse the cheap observational label.
+- 调用 `run_evidence_recall_heuristic(case, baseline)` 以复用廉价的观察性标签。
 
-Why this shape:
+为何采用此结构：
 
-- V0 does not invoke a real LLM/subagent from tests.
-- The deterministic placeholder preserves the research contract: a judge-like explanation can be recorded and compared, but it cannot become CMD attribution.
+- V0 不会从测试中调用真实的 LLM/subagent。
+- 确定性占位符保留了研究契约：类似 judge 的解释可以被记录和比较，但不能成为 CMD 归因。
 
-Domain boundary:
+领域边界：
 
-- This implements **Subagent Judge Baseline**, not **Subagent Judge Monitor** and not **CMD-Audit** attribution.
+- 这实现的是 **Subagent Judge Baseline**，而非 **Subagent Judge Monitor**，也非 **CMD-Audit** 归因。
 
-### Function: `run_random_label_baseline(case)`
+### 函数：`run_random_label_baseline(case)`
 
-Signature:
+签名：
 
 ```python
 def run_random_label_baseline(case: ProbeCase) -> ComparatorResult
 ```
 
-Inputs:
+输入：
 
-- `case`: one probe case.
+- `case`：一个探针案例。
 
-Returns:
+返回：
 
-- `ComparatorResult` with:
+- `ComparatorResult`，包含：
   - `comparator_name="random_label"`
-  - deterministic pseudo-random `predicted_label`
-  - deterministic pseudo-random two-label tuple
+  - 确定性伪随机的 `predicted_label`
+  - 确定性伪随机的双标签元组
   - `cost_per_diagnosis=0.01`
   - `uses_counterfactual_replay=False`
 
-Algorithm:
+算法：
 
-1. Hashes `case.case_id` with SHA-256.
-2. Uses the first byte to choose the top-1 label from `V0_PIPELINE_LABEL_ORDER`.
-3. Uses the second byte to choose a different top-2 label.
+1. 使用 SHA-256 对 `case.case_id` 进行哈希。
+2. 使用第一个字节从 `V0_PIPELINE_LABEL_ORDER` 中选择 top-1 标签。
+3. 使用第二个字节选择一个不同的 top-2 标签。
 
-Why deterministic:
+为何是确定性的：
 
-- Test results and artifacts remain reproducible.
-- Random baseline can still serve as a sanity check without nondeterministic CI behavior.
+- 测试结果和制品保持可复现。
+- 随机基线仍可作为健全性检查，而不会在 CI 中产生不确定行为。
 
-Domain meaning:
+领域含义：
 
-- It is not a meaningful diagnosis system.
-- It exists to reveal whether CMD and stronger comparators beat chance-level attribution.
+- 它不是一个有意义的诊断系统。
+- 它的存在是为了揭示 CMD 和更强的对比器是否优于随机水平的归因。
 
-### Function: `run_subagent_judge_monitor(case, baseline=None, *, trigger_threshold=0.5)`
+### 函数：`run_subagent_judge_monitor(case, baseline=None, *, trigger_threshold=0.5)`
 
-Signature:
+签名：
 
 ```python
 def run_subagent_judge_monitor(
@@ -701,179 +701,179 @@ def run_subagent_judge_monitor(
 ) -> SubagentJudgeMonitorDecision
 ```
 
-Inputs:
+输入：
 
-- `case`: one probe case.
-- `baseline`: optional baseline trace. If omitted, `_select_comparison_baseline(case)` is used.
-- `trigger_threshold`: minimum risk score required to trigger replay.
+- `case`：一个探针案例。
+- `baseline`：可选的基线 trace。如果省略，则使用 `_select_comparison_baseline(case)`。
+- `trigger_threshold`：触发 replay 所需的最低 risk score。
 
-Risk scoring:
+风险评分：
 
-- Add `0.5` if `baseline.answer_score < 1.0`.
-- Add `0.4` if `baseline.evidence_score < 1.0`.
-- Add `0.1` if `baseline.retrieved_memory_ids` is empty.
-- Cap total risk at `1.0`.
+- 如果 `baseline.answer_score < 1.0`，则加 `0.5`。
+- 如果 `baseline.evidence_score < 1.0`，则加 `0.4`。
+- 如果 `baseline.retrieved_memory_ids` 为空，则加 `0.1`。
+- 将总风险封顶于 `1.0`。
 
-Returns:
+返回：
 
-- `SubagentJudgeMonitorDecision`.
+- `SubagentJudgeMonitorDecision`。
 
-Internal validation:
+内部校验：
 
-- Builds a decision.
-- Calls `decision.to_payload()`.
-- `to_payload()` calls `validate_monitor_payload(...)`.
+- 构建决策。
+- 调用 `decision.to_payload()`。
+- `to_payload()` 调用 `validate_monitor_payload(...)`。
 
-Current fixture behavior:
+当前 fixture 行为：
 
-- Vector-memory baseline answer score is `0.0`.
-- Vector-memory baseline evidence score is `0.0`.
-- It did retrieve one memory item, so no no-retrieval bonus.
-- Risk score is `0.9`.
-- With threshold `0.5`, `should_trigger_replay=True`.
+- Vector-memory 基线 answer score 为 `0.0`。
+- Vector-memory 基线 evidence score 为 `0.0`。
+- 它确实检索了一个记忆条目，因此不适用无检索加分。
+- Risk score 为 `0.9`。
+- 在阈值 `0.5` 下，`should_trigger_replay=True`。
 
-Domain boundary:
+领域边界：
 
-- This is **Subagent Judge Monitor** behavior.
-- It can trigger expensive replay.
-- It cannot provide the final label or repair content.
+- 这是 **Subagent Judge Monitor** 的行为。
+- 它可以触发昂贵的 replay。
+- 不能提供最终标签或修复内容。
 
-### Function: `validate_monitor_payload(payload)`
+### 函数：`validate_monitor_payload(payload)`
 
-Signature:
+签名：
 
 ```python
 def validate_monitor_payload(payload: dict[str, Any]) -> dict[str, Any]
 ```
 
-Inputs:
+输入：
 
-- Any dict intended to represent a monitor payload.
+- 任何意图代表 monitor 载荷的字典。
 
-Returns:
+返回：
 
-- The same payload if valid.
+- 如果有效，返回相同的载荷。
 
-Raises:
+抛出：
 
-- `LeakSafeMonitorError` when a forbidden key appears anywhere inside the payload.
+- 当载荷中任意位置出现禁止键时抛出 `LeakSafeMonitorError`。
 
-Callers:
+调用方：
 
 - `SubagentJudgeMonitorDecision.to_payload(...)`
-- Tests that intentionally pass forbidden keys.
+- 故意传入禁止键的测试。
 
-Why it returns the payload:
+为何返回载荷：
 
-- It can be used inline in future adapter code without changing the data.
+- 可在未来适配器代码中内联使用，不改变数据。
 
-### Helper: `_reject_forbidden_monitor_fields(value)`
+### 辅助函数：`_reject_forbidden_monitor_fields(value)`
 
-Signature:
+签名：
 
 ```python
 def _reject_forbidden_monitor_fields(value: Any) -> None
 ```
 
-Inputs:
+输入：
 
-- Any nested value.
+- 任意嵌套值。
 
-Behavior:
+行为：
 
-- If `value` is a dict:
-  - checks each key against `FORBIDDEN_MONITOR_FIELDS`;
-  - recurses into each nested value.
-- If `value` is a list or tuple:
-  - recurses into each element.
-- Other values are ignored.
+- 如果 `value` 是 dict：
+  - 检查每个键是否在 `FORBIDDEN_MONITOR_FIELDS` 中；
+  - 递归检查每个嵌套值。
+- 如果 `value` 是 list 或 tuple：
+  - 递归检查每个元素。
+- 其他值被忽略。
 
-Raises:
+抛出：
 
-- `LeakSafeMonitorError` when any forbidden field is found at any nesting level.
+- 当在任意嵌套层级发现任何禁止字段时抛出 `LeakSafeMonitorError`。
 
-Why recursive:
+为何递归：
 
-- A monitor must not hide `gold_answer`, `final_label`, `ecs`, or full trace content inside nested metadata.
+- Monitor 不得将 `gold_answer`、`final_label`、`ecs` 或完整 trace 内容隐藏在嵌套元数据中。
 
-### Helper: `_select_comparison_baseline(case)`
+### 辅助函数：`_select_comparison_baseline(case)`
 
-Signature:
+签名：
 
 ```python
 def _select_comparison_baseline(case: ProbeCase) -> BaselineOutput
 ```
 
-Behavior:
+行为：
 
-- Returns the first baseline output named `vector_memory` if present.
-- Otherwise returns `case.primary_baseline`.
+- 如果存在名称为 `vector_memory` 的基线输出，返回第一个匹配项。
+- 否则返回 `case.primary_baseline`。
 
-Callers:
+调用方：
 
 - `run_baseline_suite(...)`
 - `run_evidence_recall_heuristic(...)`
 - `run_subagent_judge_baseline(...)`
 - `run_subagent_judge_monitor(...)`
 
-Why vector-memory is preferred:
+为何优先选择 vector-memory：
 
-- Issue 0002 explicitly evaluates vector-memory retrieval.
-- Evidence recall heuristic is most meaningful over a retrieval baseline.
+- Issue 0002 明确评估 vector-memory 检索。
+- 证据召回启发式在检索基线上最有意义。
 
-Boundary note:
+边界说明：
 
-- The selection is only for comparator and monitor observation.
-- It does not decide final CMD attribution.
+- 该选择仅用于对比器和 monitor 的观察。
+- 不决定最终的 CMD 归因。
 
-### Helper: `_observational_label(case, baseline)`
+### 辅助函数：`_observational_label(case, baseline)`
 
-Signature:
+签名：
 
 ```python
 def _observational_label(case: ProbeCase, baseline: BaselineOutput) -> tuple[str, str]
 ```
 
-Inputs:
+输入：
 
-- `case`: one probe case.
-- `baseline`: selected failed baseline trace.
+- `case`：一个探针案例。
+- `baseline`：选定的失败基线 trace。
 
-Returns:
+返回：
 
 - `(predicted_label, rationale)`
 
-Scores computed:
+计算的得分：
 
-- `retrieved_recall`: whether `baseline.retrieved_memory_ids` cover gold memory IDs.
-- `extracted_recall`: whether all extracted memory IDs include gold memory IDs.
-- `context_recall`: whether baseline injected context text includes required gold phrases.
-- `raw_event_recall`: whether raw event text includes required gold phrases.
-- `has_gold_memory_pointer`: whether any gold evidence points to a source memory ID.
+- `retrieved_recall`：`baseline.retrieved_memory_ids` 是否覆盖 gold 记忆 ID。
+- `extracted_recall`：所有提取记忆 ID 是否包含 gold 记忆 ID。
+- `context_recall`：基线注入的上下文文本是否包含所需的 gold 短语。
+- `raw_event_recall`：原始事件文本是否包含所需的 gold 短语。
+- `has_gold_memory_pointer`：是否有任何 gold evidence 指向某个源记忆 ID。
 
-Rule order:
+规则顺序：
 
-1. If retrieved IDs contain gold evidence but injected context lacks the evidence, return `injection_error`.
-2. If injected context recalls evidence but answer score fails, return `reasoning_error`.
-3. If extracted memory contains gold evidence but retrieved IDs miss it, return `retrieval_error`.
-4. If raw events contain evidence but extracted memory does not:
-   - return `compression_error` when gold evidence had a memory pointer;
-   - return `premature_extraction_error` when no recoverable extracted memory points to it.
-5. Otherwise return `write_error`.
+1. 如果检索到的 ID 包含 gold evidence 但注入上下文缺少证据，返回 `injection_error`。
+2. 如果注入上下文召回了证据但 answer score 失败，返回 `reasoning_error`。
+3. 如果提取记忆包含 gold evidence 但检索 ID 遗漏了它，返回 `retrieval_error`。
+4. 如果原始事件包含证据但提取记忆不包含：
+   - 当 gold evidence 有记忆指针时返回 `compression_error`；
+   - 当没有可恢复的提取记忆指向它时返回 `premature_extraction_error`。
+5. 否则返回 `write_error`。
 
-Why the order matters:
+为何顺序重要：
 
-- It keeps `retrieval_error` restricted to the case where recoverable extracted memory exists but baseline retrieval missed it.
-- It protects the **Premature Extraction Error** boundary by checking raw event recall versus extracted memory recall.
-- It remains a heuristic comparator, not an intervention-grounded attribution result.
+- 它使 `retrieval_error` 仅限于存在可恢复的提取记忆但基线检索遗漏了它的情形。
+- 通过检查原始事件召回 vs 提取记忆召回来保护 **Premature Extraction Error** 边界。
+- 它仍然是启发式对比器，而非基于干预的归因结果。
 
 ## `cmd_audit/metrics.py`
 
-This module owns issue 0002's comparison metric surface.
+此模块拥有 issue 0002 的对比指标接口。
 
-### Dataclass: `DiagnosisPrediction`
+### 数据类：`DiagnosisPrediction`
 
-Fields:
+字段：
 
 ```python
 system_name: str
@@ -884,12 +884,12 @@ top2_labels: tuple[str, ...]
 cost_per_diagnosis: float
 ```
 
-Role:
+角色：
 
-- One row of diagnosis output for one system on one case.
-- Used for both CMD-Audit and comparator systems.
+- 一个系统在一个案例上的一行诊断输出。
+- 同时用于 CMD-Audit 和对比器系统。
 
-System names currently produced:
+当前产生的系统名称：
 
 - `CMD-Audit`
 - `evidence_recall`
@@ -898,26 +898,26 @@ System names currently produced:
 
 #### `DiagnosisPrediction.__post_init__()`
 
-Signature:
+签名：
 
 ```python
 def __post_init__(self) -> None
 ```
 
-Behavior:
+行为：
 
-- Validates `gold_label`.
-- Validates `predicted_label`.
-- Validates every label in `top2_labels`.
+- 校验 `gold_label`。
+- 校验 `predicted_label`。
+- 校验 `top2_labels` 中的每个标签。
 
-Why it matters:
+为何重要：
 
-- Keeps comparison metrics aligned with the V0 attribution boundary.
-- Prevents item labels or deferred labels from entering comparison results.
+- 使对比指标与 V0 归因边界保持一致。
+- 防止条目标签或延后标签进入对比结果。
 
-### Dataclass: `DiagnosisMetrics`
+### 数据类：`DiagnosisMetrics`
 
-Fields:
+字段：
 
 ```python
 system_name: str
@@ -927,21 +927,21 @@ top2_accuracy: float
 cost_per_diagnosis: float
 ```
 
-Role:
+角色：
 
-- Aggregated metric row for one system.
-- Written to `artifacts/comparison_metrics.csv`.
+- 一个系统的聚合指标行。
+- 写入 `artifacts/comparison_metrics.csv`。
 
-Metric meaning:
+指标含义：
 
-- `attribution_accuracy`: top-1 label correctness against the known perturbation label.
-- `macro_f1`: mean F1 over observed labels unless a fixed label set is provided.
-- `top2_accuracy`: whether the gold label appears in the system's top-2 tuple.
-- `cost_per_diagnosis`: average cost unit for the system.
+- `attribution_accuracy`：top-1 标签相对于已知扰动标签的正确率。
+- `macro_f1`：在观测到的标签上的平均 F1，除非提供了固定的标签集。
+- `top2_accuracy`：gold label 是否出现在系统的 top-2 元组中。
+- `cost_per_diagnosis`：系统的平均成本单位。
 
-### Function: `compute_diagnosis_metrics(predictions, *, labels=None)`
+### 函数：`compute_diagnosis_metrics(predictions, *, labels=None)`
 
-Signature:
+签名：
 
 ```python
 def compute_diagnosis_metrics(
@@ -951,185 +951,185 @@ def compute_diagnosis_metrics(
 ) -> dict[str, DiagnosisMetrics]
 ```
 
-Inputs:
+输入：
 
-- `predictions`: rows from `harness.diagnosis_predictions(...)`.
-- `labels`: optional explicit label set for macro F1.
+- `predictions`：来自 `harness.diagnosis_predictions(...)` 的行。
+- `labels`：可选，用于 macro F1 的显式标签集。
 
-Returns:
+返回：
 
-- Dict keyed by `system_name`.
+- 以 `system_name` 为键的字典。
 
-Step-by-step behavior:
+逐步行为：
 
-1. Groups predictions by `system_name`.
-2. For each system:
-   - chooses `labels` if provided, otherwise `_observed_labels(rows)`;
-   - counts top-1 correct rows;
-   - counts top-2 correct rows with `_top2_correct(...)`;
-   - sums cost;
-   - computes average cost;
-   - computes macro F1 with `_macro_f1(...)`.
-3. Returns one `DiagnosisMetrics` per system.
+1. 按 `system_name` 对预测进行分组。
+2. 对每个系统：
+   - 如果提供了 `labels` 则使用之，否则使用 `_observed_labels(rows)`；
+   - 统计 top-1 正确的行数；
+   - 使用 `_top2_correct(...)` 统计 top-2 正确的行数；
+   - 累加成本；
+   - 计算平均成本；
+   - 使用 `_macro_f1(...)` 计算 macro F1。
+3. 每个系统返回一个 `DiagnosisMetrics`。
 
-Callers:
+调用方：
 
 - `harness.write_comparison_metrics_table(...)`
-- Tests
+- 测试
 
-Domain meaning:
+领域含义：
 
-- This is the first evidence surface for CMD-vs-heuristic-vs-subagent judge comparison.
+- 这是 CMD-vs-启发式-vs-subagent judge 对比的首个证据层。
 
-### Helper: `_observed_labels(rows)`
+### 辅助函数：`_observed_labels(rows)`
 
-Signature:
+签名：
 
 ```python
 def _observed_labels(rows: list[DiagnosisPrediction]) -> tuple[str, ...]
 ```
 
-Behavior:
+行为：
 
-- Builds a sorted set from gold labels and predicted labels observed in the system's rows.
+- 从系统行中观测到的 gold labels 和 predicted labels 构建排序集合。
 
-Why observed labels:
+为何使用观测标签：
 
-- Current V0 fixture set has one case.
-- Observed-label macro F1 avoids reporting zero across all six labels before the dataset is expanded.
-- Future larger runs can pass the full V0 label set through the `labels` argument.
+- 当前 V0 fixture 集只有一个案例。
+- 在数据集扩展之前，观测标签的 macro F1 避免在所有六个标签上报告零值。
+- 未来更大的运行可以通过 `labels` 参数传入完整的 V0 标签集。
 
-### Helper: `_top2_correct(row)`
+### 辅助函数：`_top2_correct(row)`
 
-Signature:
+签名：
 
 ```python
 def _top2_correct(row: DiagnosisPrediction) -> bool
 ```
 
-Behavior:
+行为：
 
-- Uses `row.top2_labels` when present.
-- Falls back to `(row.predicted_label,)` when top-2 is empty.
-- Returns whether `row.gold_label` appears in that tuple.
+- 当 `row.top2_labels` 存在时使用之。
+- 当 top-2 为空时退回到 `(row.predicted_label,)`。
+- 返回 `row.gold_label` 是否出现在该元组中。
 
-Why fallback exists:
+为何存在回退：
 
-- Some systems may only produce top-1 labels in future issue slices.
+- 某些系统在未来 issue 切片中可能只产出 top-1 标签。
 
-### Helper: `_macro_f1(rows, labels)`
+### 辅助函数：`_macro_f1(rows, labels)`
 
-Signature:
+签名：
 
 ```python
 def _macro_f1(rows: list[DiagnosisPrediction], labels: tuple[str, ...]) -> float
 ```
 
-Behavior:
+行为：
 
-- Returns `0.0` if no labels exist.
-- Otherwise computes `_label_f1(rows, label)` for each label and averages.
+- 如果没有标签存在，返回 `0.0`。
+- 否则对每个标签计算 `_label_f1(rows, label)` 并取平均。
 
-Domain meaning:
+领域含义：
 
-- Macro F1 is required by issue 0002 and later supports claim gating for CMD attribution quality.
+- Macro F1 是 issue 0002 所要求的，后续也支持 CMD 归因质量的声明门禁。
 
-### Helper: `_label_f1(rows, label)`
+### 辅助函数：`_label_f1(rows, label)`
 
-Signature:
+签名：
 
 ```python
 def _label_f1(rows: list[DiagnosisPrediction], label: str) -> float
 ```
 
-Behavior:
+行为：
 
-1. Counts true positives:
+1. 统计 true positives：
    - `gold_label == label and predicted_label == label`
-2. Counts false positives:
+2. 统计 false positives：
    - `gold_label != label and predicted_label == label`
-3. Counts false negatives:
+3. 统计 false negatives：
    - `gold_label == label and predicted_label != label`
-4. Computes precision and recall with zero-denominator protection.
-5. Returns harmonic mean, or `0.0` if precision plus recall is zero.
+4. 计算 precision 和 recall，含零分母保护。
+5. 返回调和平均值；如果 precision 加 recall 为零则返回 `0.0`。
 
-Why implemented locally:
+为何本地实现：
 
-- Keeps the V0 harness dependency-free.
-- Matches `pyproject.toml`, which currently has no dependencies.
+- 保持 V0 harness 无外部依赖。
+- 与当前无任何依赖的 `pyproject.toml` 一致。
 
-## `cmd_audit/harness.py` Integration
+## `cmd_audit/harness.py` 集成
 
-Issue 0002 extends the public harness but does not replace issue 0001 behavior.
+Issue 0002 扩展了公开的 harness，但不替换 issue 0001 的行为。
 
-### Constant: `CMD_REPLAY_COST_UNITS`
+### 常量：`CMD_REPLAY_COST_UNITS`
 
-Definition:
+定义：
 
 ```python
 CMD_REPLAY_COST_UNITS = 5.0
 ```
 
-Role:
+角色：
 
-- Placeholder unit cost for CMD replay diagnosis.
-- Used only in `diagnosis_predictions(...)` for comparison metrics.
+- CMD replay 诊断的占位符单位成本。
+- 仅在 `diagnosis_predictions(...)` 中用于对比指标。
 
-Interpretation:
+解读：
 
-- CMD-Audit cost is monitor cost plus replay cost.
-- Current value is a deterministic V0 proxy, not a measured token or wall-clock cost.
+- CMD-Audit 成本 = monitor 成本 + replay 成本。
+- 当前值为确定性 V0 代理，而非实测的 token 或挂钟成本。
 
-### Dataclass field: `AuditResult.baseline_suite`
+### 数据类字段：`AuditResult.baseline_suite`
 
-Added field:
+新增字段：
 
 ```python
 baseline_suite: BaselineSuiteResult
 ```
 
-Role:
+角色：
 
-- Attaches issue 0002 outputs to every harness result.
-- Keeps comparator and monitor outputs available without mixing them into `attribution`.
+- 将 issue 0002 输出附加到每个 harness 结果上。
+- 保持对比器和 monitor 输出可用，而不混入 `attribution`。
 
-Boundary:
+边界：
 
-- `AuditResult.attribution` remains CMD replay attribution.
-- `AuditResult.baseline_suite.subagent_judge.predicted_label` remains comparator output.
+- `AuditResult.attribution` 仍然是 CMD replay 归因。
+- `AuditResult.baseline_suite.subagent_judge.predicted_label` 仍然是对比器输出。
 
-### Function: `run_case(case)`
+### 函数：`run_case(case)`
 
-Issue 0002 behavior:
+Issue 0002 行为：
 
-1. Calls `run_baseline_suite(case)` before replay.
-2. Runs existing `run_oracle_retrieval(case)`.
-3. Runs existing `assign_attribution((replay,))`.
-4. Returns `AuditResult(..., baseline_suite=baseline_suite)`.
+1. 在 replay 之前调用 `run_baseline_suite(case)`。
+2. 运行现有的 `run_oracle_retrieval(case)`。
+3. 运行现有的 `assign_attribution((replay,))`。
+4. 返回 `AuditResult(..., baseline_suite=baseline_suite)`。
 
-Why this order:
+为何采用此顺序：
 
-- The monitor/comparator layer observes the failed baseline trace before expensive replay.
-- Final label still comes from replay-delta attribution.
+- Monitor/对比器层在昂贵的 replay 之前观察失败的基线 trace。
+- 最终标签仍然来自 replay-delta 归因。
 
-### Function: `diagnosis_predictions(result)`
+### 函数：`diagnosis_predictions(result)`
 
-Signature:
+签名：
 
 ```python
 def diagnosis_predictions(result: AuditResult) -> tuple[DiagnosisPrediction, ...]
 ```
 
-Inputs:
+输入：
 
-- One `AuditResult`.
+- 一个 `AuditResult`。
 
-Returns:
+返回：
 
-- One `DiagnosisPrediction` for `CMD-Audit`.
-- One `DiagnosisPrediction` for each comparator in `result.baseline_suite.comparator_results`.
+- 为 `CMD-Audit` 生成一个 `DiagnosisPrediction`。
+- 为 `result.baseline_suite.comparator_results` 中的每个对比器生成一个 `DiagnosisPrediction`。
 
-CMD-Audit prediction row:
+CMD-Audit 预测行：
 
 - `system_name="CMD-Audit"`
 - `gold_label=result.perturbation_label`
@@ -1137,7 +1137,7 @@ CMD-Audit prediction row:
 - `top2_labels=result.attribution.top2_labels`
 - `cost_per_diagnosis=result.baseline_suite.monitor.cost_per_decision + CMD_REPLAY_COST_UNITS`
 
-Comparator prediction rows:
+对比器预测行：
 
 - `system_name=comparator.comparator_name`
 - `gold_label=result.perturbation_label`
@@ -1145,18 +1145,18 @@ Comparator prediction rows:
 - `top2_labels=comparator.top2_labels`
 - `cost_per_diagnosis=comparator.cost_per_diagnosis`
 
-Callers:
+调用方：
 
 - `write_comparison_metrics_table(...)`
-- Tests
+- 测试
 
-Boundary guarantee:
+边界保证：
 
-- It creates comparison rows but does not mutate attribution.
+- 生成对比行但不修改归因。
 
-### Function: `write_comparison_metrics_table(results, output_path)`
+### 函数：`write_comparison_metrics_table(results, output_path)`
 
-Signature:
+签名：
 
 ```python
 def write_comparison_metrics_table(
@@ -1165,58 +1165,58 @@ def write_comparison_metrics_table(
 ) -> None
 ```
 
-Inputs:
+输入：
 
-- `results`: output from `run_cases(...)`.
-- `output_path`: CSV target.
+- `results`：来自 `run_cases(...)` 的输出。
+- `output_path`：CSV 目标路径。
 
-Behavior:
+行为：
 
-1. Flattens `diagnosis_predictions(result)` across all results.
-2. Calls `compute_diagnosis_metrics(predictions)`.
-3. Creates parent directories.
-4. Writes CSV columns:
+1. 跨所有结果展平 `diagnosis_predictions(result)`。
+2. 调用 `compute_diagnosis_metrics(predictions)`。
+3. 创建父目录。
+4. 写入 CSV 列：
    - `system_name`
    - `attribution_accuracy`
    - `macro_f1`
    - `top2_accuracy`
    - `cost_per_diagnosis`
-5. Sorts systems by name for deterministic output.
+5. 按系统名称排序以确保确定性输出。
 
-Output artifact:
+输出制品：
 
 ```text
 artifacts/comparison_metrics.csv
 ```
 
-## `cmd_audit/cli.py` Integration
+## `cmd_audit/cli.py` 集成
 
-### Function: `main(argv=None)`
+### 函数：`main(argv=None)`
 
-Issue 0002 additions:
+Issue 0002 新增内容：
 
-- Adds `--metrics-out`, defaulting to `artifacts/comparison_metrics.csv`.
-- After `run_cases(cases)`:
-  - calls `write_attribution_table(results, args.out)`;
-  - calls `write_comparison_metrics_table(results, args.metrics_out)`.
-- Prints both artifact paths.
+- 添加 `--metrics-out`，默认值为 `artifacts/comparison_metrics.csv`。
+- 在 `run_cases(cases)` 之后：
+  - 调用 `write_attribution_table(results, args.out)`；
+  - 调用 `write_comparison_metrics_table(results, args.metrics_out)`。
+- 打印两个制品路径。
 
-CLI command:
+CLI 命令：
 
 ```bash
 python3 -m cmd_audit run
 ```
 
-Current default outputs:
+当前默认输出：
 
 ```text
 artifacts/attribution_table.csv
 artifacts/comparison_metrics.csv
 ```
 
-## `cmd_audit/__init__.py` Public Surface
+## `cmd_audit/__init__.py` 公开接口
 
-Issue 0002 exports:
+Issue 0002 导出：
 
 - `BaselineSuiteResult`
 - `DiagnosisMetrics`
@@ -1227,14 +1227,14 @@ Issue 0002 exports:
 - `run_baseline_suite`
 - `write_comparison_metrics_table`
 
-Why export them:
+为何导出它们：
 
-- Tests and future issue slices can use the stable public surface.
-- The harness remains standalone and does not expose a CMD-Skill Adapter.
+- 测试和未来的 issue 切片可以使用稳定的公开接口。
+- Harness 保持独立，不暴露 CMD-Skill Adapter。
 
-## `cmd_audit/labels.py` Support
+## `cmd_audit/labels.py` 支持
 
-Issue 0002 adds and uses:
+Issue 0002 新增并使用：
 
 ```python
 V0_PIPELINE_LABEL_ORDER = (
@@ -1247,21 +1247,21 @@ V0_PIPELINE_LABEL_ORDER = (
 )
 ```
 
-Role:
+角色：
 
-- Provides deterministic ordering for `run_random_label_baseline(...)`.
-- Keeps random baseline constrained to the V0 core label set.
+- 为 `run_random_label_baseline(...)` 提供确定性排序。
+- 将随机基线限制在 V0 核心标签集内。
 
-Existing `validate_v0_label(...)` is reused by:
+现有的 `validate_v0_label(...)` 被以下复用：
 
 - `ComparatorResult.__post_init__()`
 - `DiagnosisPrediction.__post_init__()`
 
-This ensures comparator predictions and metric rows cannot leave V0 attribution scope.
+这确保对比器预测和指标行不能脱离 V0 归因范围。
 
-## Test Coverage
+## 测试覆盖
 
-Test file:
+测试文件：
 
 ```text
 tests/test_cmd_audit_issue2_baselines.py
@@ -1269,98 +1269,98 @@ tests/test_cmd_audit_issue2_baselines.py
 
 ### `BaselineAndComparatorTest.test_issue2_baseline_suite_keeps_comparators_separate_from_cmd`
 
-Verifies:
+验证：
 
-- `run_baseline_suite(...)` returns both `fixed_summary` and `vector_memory`.
-- Both current fixture baselines fail.
-- Evidence recall comparator predicts `retrieval_error`.
-- Evidence recall does not use counterfactual replay.
-- Subagent judge comparator is named `subagent_judge`.
-- Subagent judge explanation includes `post-hoc`.
-- Subagent judge does not use counterfactual replay.
-- Random baseline is present as `random_label`.
+- `run_baseline_suite(...)` 同时返回 `fixed_summary` 和 `vector_memory`。
+- 当前两个 fixture 基线均失败。
+- 证据召回对比器预测 `retrieval_error`。
+- 证据召回不使用 counterfactual replay。
+- Subagent judge 对比器名称为 `subagent_judge`。
+- Subagent judge 解释包含 `post-hoc`。
+- Subagent judge 不使用 counterfactual replay。
+- 随机基线以 `random_label` 形式存在。
 
-Acceptance criteria covered:
+覆盖的验收标准：
 
-- fixed-summary/vector baseline behavior;
-- evidence recall comparator;
-- subagent judge comparator;
-- random label baseline.
+- fixed-summary/vector 基线行为；
+- 证据召回对比器；
+- subagent judge 对比器；
+- 随机标签基线。
 
 ### `BaselineAndComparatorTest.test_run_case_exposes_baseline_suite_but_cmd_label_still_comes_from_replay`
 
-Verifies:
+验证：
 
-- `run_case(...)` still predicts `retrieval_error` through CMD attribution.
-- Top replay remains `oracle_retrieval`.
-- Subagent judge comparator label is available but is not named `CMD-Audit`.
+- `run_case(...)` 仍然通过 CMD 归因预测 `retrieval_error`。
+- Top replay 仍为 `oracle_retrieval`。
+- Subagent judge 对比器标签可用，但系统名称不是 `CMD-Audit`。
 
-Acceptance criteria covered:
+覆盖的验收标准：
 
-- subagent judge cannot directly set CMD attribution.
+- subagent judge 不能直接设置 CMD 归因。
 
 ### `SubagentJudgeMonitorBoundaryTest.test_monitor_payload_can_trigger_replay_without_forbidden_outputs`
 
-Verifies:
+验证：
 
-- Monitor payload says `should_trigger_replay=True`.
-- Payload keys do not intersect `FORBIDDEN_MONITOR_FIELDS`.
-- Payload string does not contain the fixture gold answer.
-- Payload string does not contain the final label `retrieval_error`.
+- Monitor 载荷中 `should_trigger_replay=True`。
+- 载荷键与 `FORBIDDEN_MONITOR_FIELDS` 无交集。
+- 载荷字符串不包含 fixture 的 gold answer。
+- 载荷字符串不包含最终标签 `retrieval_error`。
 
-Acceptance criteria covered:
+覆盖的验收标准：
 
-- monitor can trigger replay;
-- monitor is leak-safe.
+- monitor 可以触发 replay；
+- monitor 是防泄漏的。
 
 ### `SubagentJudgeMonitorBoundaryTest.test_monitor_rejects_final_labels_ecs_memory_writes_gold_answers_and_full_traces`
 
-Verifies:
+验证：
 
-- `validate_monitor_payload(...)` raises `LeakSafeMonitorError` for:
+- 对于以下字段，`validate_monitor_payload(...)` 抛出 `LeakSafeMonitorError`：
   - `final_label`
   - `ecs`
   - `memory_writes`
   - `gold_answer`
   - `full_failed_trace`
 
-Acceptance criteria covered:
+覆盖的验收标准：
 
-- monitor cannot emit final label, ECS, memory writes, gold answer, or full failed trace.
+- monitor 不能输出最终标签、ECS、记忆写入、gold answer 或完整失败 trace。
 
 ### `ComparisonMetricsTest.test_comparison_metrics_include_accuracy_macro_f1_top2_and_cost`
 
-Verifies:
+验证：
 
-- Metrics include:
+- 指标包含：
   - `CMD-Audit`
   - `evidence_recall`
   - `subagent_judge`
   - `random_label`
-- CMD-Audit attribution accuracy is `1.0` for the current fixture.
-- CMD-Audit top-2 accuracy is `1.0`.
-- CMD-Audit macro F1 is present.
-- CMD-Audit cost is greater than zero.
+- CMD-Audit 归因准确率对当前 fixture 为 `1.0`。
+- CMD-Audit top-2 准确率为 `1.0`。
+- CMD-Audit macro F1 存在。
+- CMD-Audit 成本大于零。
 
-Acceptance criteria covered:
+覆盖的验收标准：
 
-- comparison metrics include attribution accuracy, macro F1, top-2 accuracy, and cost per diagnosis.
+- 对比指标包含归因准确率、macro F1、top-2 准确率及每次诊断成本。
 
 ### `ComparisonMetricsTest.test_comparison_metrics_table_can_be_written`
 
-Verifies:
+验证：
 
-- `write_comparison_metrics_table(...)` writes a CSV.
-- CSV header contains the required metric columns.
-- CSV contains `CMD-Audit`.
+- `write_comparison_metrics_table(...)` 写入一个 CSV。
+- CSV 表头包含所需的指标列。
+- CSV 包含 `CMD-Audit`。
 
-Acceptance criteria covered:
+覆盖的验收标准：
 
-- metrics are artifact-ready.
+- 指标已就绪，可作为制品输出。
 
-## Current Artifact Semantics
+## 当前制品语义
 
-Current `artifacts/comparison_metrics.csv` on the one-case fixture:
+在当前单案例 fixture 上的 `artifacts/comparison_metrics.csv`：
 
 ```text
 system_name,attribution_accuracy,macro_f1,top2_accuracy,cost_per_diagnosis
@@ -1370,27 +1370,27 @@ random_label,0.000,0.000,1.000,0.010
 subagent_judge,1.000,1.000,1.000,1.000
 ```
 
-Interpretation:
+解读：
 
-- This artifact proves the comparison pipeline exists.
-- It does not support a paper claim that CMD beats heuristic or subagent judge yet, because the dataset has only one retrieval-error case and the heuristic/subagent comparator match it.
-- It does satisfy the issue 0002 evidence gate for producing CMD-vs-comparator metric rows.
+- 该制品证明了对比流水线的存在。
+- 尚不能支持"CMD 优于启发式或 subagent judge"的论文声明，因为数据集仅有一个 retrieval-error 案例且启发式/subagent 对比器与之匹配。
+- 确实满足了 issue 0002 的证据门禁要求：产出 CMD-vs-对比器的指标行。
 
-## Acceptance Criteria Traceability
+## 验收标准可追溯性
 
-| Issue 0002 Acceptance Criterion | Code Surface | Test Surface |
+| Issue 0002 验收标准 | 代码层 | 测试层 |
 | --- | --- | --- |
-| Fixed-summary and vector-memory baseline behavior is specified for each probe case. | `REQUIRED_MEMORY_BASELINES`, `run_memory_baselines(...)`, `MemoryBaselineRun` | `test_issue2_baseline_suite_keeps_comparators_separate_from_cmd` |
-| Evidence recall heuristic output is specified as a comparator, not as CMD attribution. | `run_evidence_recall_heuristic(...)`, `ComparatorResult.uses_counterfactual_replay=False` | `test_issue2_baseline_suite_keeps_comparators_separate_from_cmd` |
-| Subagent judge output is specified as post-hoc explanation over the trace. | `run_subagent_judge_baseline(...)` | `test_issue2_baseline_suite_keeps_comparators_separate_from_cmd` |
-| Subagent judge monitor behavior is high-recall replay triggering, not final attribution. | `run_subagent_judge_monitor(...)`, `SubagentJudgeMonitorDecision` | `test_monitor_payload_can_trigger_replay_without_forbidden_outputs` |
-| Monitor is leak-safe and cannot emit final labels, ECS, memory writes, gold answers, or full failed traces. | `FORBIDDEN_MONITOR_FIELDS`, `validate_monitor_payload(...)`, `_reject_forbidden_monitor_fields(...)` | `test_monitor_rejects_final_labels_ecs_memory_writes_gold_answers_and_full_traces` |
-| Random label baseline is specified for attribution sanity checks. | `run_random_label_baseline(...)` | `test_issue2_baseline_suite_keeps_comparators_separate_from_cmd` |
-| Comparison metrics include attribution accuracy, macro F1, top-2 accuracy, and cost per diagnosis. | `DiagnosisMetrics`, `compute_diagnosis_metrics(...)`, `write_comparison_metrics_table(...)` | `test_comparison_metrics_include_accuracy_macro_f1_top2_and_cost`, `test_comparison_metrics_table_can_be_written` |
+| 为每个探针案例指定 fixed-summary 和 vector-memory 基线行为。 | `REQUIRED_MEMORY_BASELINES`、`run_memory_baselines(...)`、`MemoryBaselineRun` | `test_issue2_baseline_suite_keeps_comparators_separate_from_cmd` |
+| 证据召回启发式输出被指定为对比器，而非 CMD 归因。 | `run_evidence_recall_heuristic(...)`、`ComparatorResult.uses_counterfactual_replay=False` | `test_issue2_baseline_suite_keeps_comparators_separate_from_cmd` |
+| Subagent judge 输出被指定为针对 trace 的事后解释。 | `run_subagent_judge_baseline(...)` | `test_issue2_baseline_suite_keeps_comparators_separate_from_cmd` |
+| Subagent judge monitor 行为是高召回 replay 触发，而非最终归因。 | `run_subagent_judge_monitor(...)`、`SubagentJudgeMonitorDecision` | `test_monitor_payload_can_trigger_replay_without_forbidden_outputs` |
+| Monitor 是防泄漏的，不能输出最终标签、ECS、记忆写入、gold answer 或完整失败 trace。 | `FORBIDDEN_MONITOR_FIELDS`、`validate_monitor_payload(...)`、`_reject_forbidden_monitor_fields(...)` | `test_monitor_rejects_final_labels_ecs_memory_writes_gold_answers_and_full_traces` |
+| 随机标签基线被指定用于归因健全性检查。 | `run_random_label_baseline(...)` | `test_issue2_baseline_suite_keeps_comparators_separate_from_cmd` |
+| 对比指标包含归因准确率、macro F1、top-2 准确率和每次诊断成本。 | `DiagnosisMetrics`、`compute_diagnosis_metrics(...)`、`write_comparison_metrics_table(...)` | `test_comparison_metrics_include_accuracy_macro_f1_top2_and_cost`、`test_comparison_metrics_table_can_be_written` |
 
-## Verification
+## 验证
 
-Commands:
+命令：
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -1399,20 +1399,20 @@ python3 -m compileall cmd_audit tests
 python3 -m cmd_audit run
 ```
 
-Expected state:
+预期状态：
 
-- All issue 0001 and issue 0002 tests pass.
-- `artifacts/attribution_table.csv` is regenerated.
-- `artifacts/comparison_metrics.csv` is regenerated.
+- 所有 issue 0001 和 issue 0002 的测试通过。
+- `artifacts/attribution_table.csv` 被重新生成。
+- `artifacts/comparison_metrics.csv` 被重新生成。
 
-## Known Limits Before Issue 0003
+## Issue 0003 前的已知限制
 
-- Only Oracle Retrieval replay is executable.
-- The subagent judge is deterministic and local; it is a comparator shape, not a real LLM call.
-- Evidence recall and subagent judge are expected to match the single current retrieval-error fixture.
-- Macro F1 currently uses observed labels unless a full label set is passed.
-- No confusion matrix exists yet.
-- No Post-Repair Context Replay exists yet.
-- No Error-Cause-Solution record exists yet.
+- 仅 Oracle Retrieval replay 可执行。
+- Subagent judge 是确定性且本地的；它是对比器结构，而非真实的 LLM 调用。
+- 证据召回和 subagent judge 预期与当前单个 retrieval-error fixture 匹配。
+- Macro F1 当前使用观测标签，除非传入完整的标签集。
+- 尚无混淆矩阵。
+- 尚无 Post-Repair Context Replay。
+- 尚无 Error-Cause-Solution 记录。
 
-These limits are intentional. Issue 0002 completes the comparator and monitor boundary before issue 0003 expands the counterfactual attribution table.
+这些限制是有意为之。Issue 0002 在 issue 0003 扩展 counterfactual 归因表之前完成了对比器和 monitor 边界。

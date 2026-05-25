@@ -2,9 +2,14 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from cmd_audit import load_probe_cases, run_case, run_cases, write_attribution_table
-from cmd_audit.harness import write_confusion_matrix_table
-from cmd_audit.labels import V0_PIPELINE_LABEL_ORDER
+from cmd_audit import (
+    load_probe_cases,
+    run_case,
+    run_cases,
+    write_attribution_table,
+    write_confusion_matrix_table,
+)
+from cmd_audit.labels import V0_PIPELINE_LABEL_ORDER, V1_PIPELINE_LABEL_ORDER
 
 
 PREMATURE_FIXTURE = Path("data/probe_cases/v0_premature_extraction_error_case.json")
@@ -19,7 +24,9 @@ class VerbatimEventOracleBoundaryTest(unittest.TestCase):
         self.assertEqual(case.gold_evidence[0].source_event_id, "evt-101")
         self.assertIsNone(case.gold_evidence[0].source_memory_id)
 
-    def test_verbatim_event_oracle_beats_oracle_retrieval_for_extraction_loss(self) -> None:
+    def test_verbatim_event_oracle_beats_oracle_retrieval_for_extraction_loss(
+        self,
+    ) -> None:
         result = run_case(load_probe_cases(PREMATURE_FIXTURE)[0])
         replays = {replay.replay_name: replay for replay in result.replays}
 
@@ -28,7 +35,9 @@ class VerbatimEventOracleBoundaryTest(unittest.TestCase):
         self.assertEqual(replays["verbatim_event_oracle"].answer, "Berlin")
         self.assertEqual(replays["verbatim_event_oracle"].answer_score, 1.0)
         self.assertEqual(replays["verbatim_event_oracle"].evidence_score, 1.0)
-        self.assertEqual(result.attribution.predicted_label, "premature_extraction_error")
+        self.assertEqual(
+            result.attribution.predicted_label, "premature_extraction_error"
+        )
         self.assertEqual(result.attribution.top_replay, "verbatim_event_oracle")
         self.assertTrue(result.attribution_correct)
 
@@ -85,13 +94,12 @@ class VerbatimEventOracleBoundaryTest(unittest.TestCase):
 
         self.assertEqual(
             lines[0],
-            "gold_label,write_error,compression_error,premature_extraction_error,"
-            "retrieval_error,injection_error,reasoning_error",
+            "gold_label," + ",".join(V1_PIPELINE_LABEL_ORDER),
         )
         for label in V0_PIPELINE_LABEL_ORDER:
             row = next(line for line in lines if line.startswith(f"{label},"))
             values = row.split(",")[1:]
-            self.assertEqual(values[list(V0_PIPELINE_LABEL_ORDER).index(label)], "1")
+            self.assertEqual(values[list(V1_PIPELINE_LABEL_ORDER).index(label)], "1")
 
 
 if __name__ == "__main__":

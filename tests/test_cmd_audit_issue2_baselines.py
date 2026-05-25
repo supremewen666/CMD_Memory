@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 from cmd_audit import load_probe_cases, run_case
-from cmd_audit.baselines import (
+from baselines.comparators import (
     FORBIDDEN_MONITOR_FIELDS,
     LeakSafeMonitorError,
     run_baseline_suite,
@@ -27,21 +27,31 @@ class BaselineAndComparatorTest(unittest.TestCase):
             {"fixed_summary", "vector_memory"},
         )
         self.assertTrue(all(baseline.failed for baseline in suite.memory_baselines))
-        self.assertEqual(suite.evidence_recall_heuristic.comparator_name, "evidence_recall")
-        self.assertEqual(suite.evidence_recall_heuristic.predicted_label, "retrieval_error")
+        self.assertEqual(
+            suite.evidence_recall_heuristic.comparator_name, "evidence_recall"
+        )
+        self.assertEqual(
+            suite.evidence_recall_heuristic.predicted_label, "retrieval_error"
+        )
         self.assertFalse(suite.evidence_recall_heuristic.uses_counterfactual_replay)
         self.assertEqual(suite.subagent_judge.comparator_name, "subagent_judge")
         self.assertIn("post-hoc", suite.subagent_judge.explanation)
         self.assertFalse(suite.subagent_judge.uses_counterfactual_replay)
         self.assertEqual(suite.random_label.comparator_name, "random_label")
 
-    def test_run_case_exposes_baseline_suite_but_cmd_label_still_comes_from_replay(self) -> None:
+    def test_run_case_exposes_baseline_suite_but_cmd_label_still_comes_from_replay(
+        self,
+    ) -> None:
         result = run_case(load_probe_cases(FIXTURE)[0])
 
         self.assertEqual(result.attribution.predicted_label, "retrieval_error")
         self.assertEqual(result.attribution.top_replay, "oracle_retrieval")
-        self.assertEqual(result.baseline_suite.subagent_judge.predicted_label, "retrieval_error")
-        self.assertNotEqual(result.baseline_suite.subagent_judge.comparator_name, "CMD-Audit")
+        self.assertEqual(
+            result.baseline_suite.subagent_judge.predicted_label, "retrieval_error"
+        )
+        self.assertNotEqual(
+            result.baseline_suite.subagent_judge.comparator_name, "CMD-Audit"
+        )
 
 
 class SubagentJudgeMonitorBoundaryTest(unittest.TestCase):
@@ -55,7 +65,9 @@ class SubagentJudgeMonitorBoundaryTest(unittest.TestCase):
         self.assertNotIn(case.gold_answer, str(payload))
         self.assertNotIn("retrieval_error", str(payload))
 
-    def test_monitor_rejects_final_labels_ecs_memory_writes_gold_answers_and_full_traces(self) -> None:
+    def test_monitor_rejects_final_labels_ecs_memory_writes_gold_answers_and_full_traces(
+        self,
+    ) -> None:
         for forbidden_key in (
             "final_label",
             "ecs",

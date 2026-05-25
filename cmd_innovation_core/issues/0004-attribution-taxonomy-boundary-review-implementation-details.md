@@ -1,109 +1,107 @@
-# Issue 0004 Implementation Details: Attribution Taxonomy Boundary Review
+# Issue 0004 实现细节：归因分类边界审查
 
-## Purpose
+## 目的
 
-This document is the zoomed-out implementation map for issue 0004, `Review attribution taxonomy boundaries`.
+本文档是 issue 0004（`审查归因分类边界`）的全局实现地图。
 
-Issue 0004 is the HITL gate after the first six-replay V0 attribution table exists. Its job is to inspect the smoke-suite outputs, challenge every label boundary, and either confirm or revise the V0 taxonomy before Post-Repair Context Replay begins:
+Issue 0004 是首个六重放 V0 归因表生成后的 HITL 关口。其职责是检查烟雾测试套件的输出，挑战每条标签边界，并在进入修复后上下文重放之前确认或修订 V0 分类体系：
 
 ```text
 artifacts/attribution_table.csv
 artifacts/comparison_metrics.csv
 artifacts/attribution_confusion_matrix.csv
-  -> per-case replay gain inspection
-  -> confusion / near-confusion pattern detection
-  -> premature_extraction_error vs retrieval_error boundary re-check
-  -> top-2 / multi-label rule review
-  -> Subagent Judge Baseline/Monitor separation audit
-  -> bad-memory-item exclusion audit
-  -> deferred label registration audit
-  -> HITL verdict
+  -> 逐案例重放增益检查
+  -> 混淆/近似混淆模式检测
+  -> premature_extraction_error vs retrieval_error 边界复查
+  -> Top-2 / 多标签规则审查
+  -> Subagent Judge Baseline 与 Monitor 分离审计
+  -> 坏内存项排除审计
+  -> 延迟标签注册审计
+  -> HITL 裁决
 ```
 
-The reviewed slice confirms V0 taxonomy is correct for the current smoke suite and records edge cases for future richer probe suites.
+审查后的切片确认 V0 分类体系在当前烟雾套件中是正确的，并为未来更丰富的探针套件记录边界情况。
 
-## Source Requirements
+## 源头需求
 
-The review follows these local documents.
+审查遵循以下本地文档。
 
-| Source | Requirement Applied In Issue 0004 |
+| 来源 | 在 Issue 0004 中应用的需求 |
 | --- | --- |
-| `TASK.md` | Inspect confusions or near-confusions in the six smoke cases; decide whether `premature_extraction_error` remains distinct from `retrieval_error`; clarify top-2 or multi-label rules for coupled failures; keep Subagent Judge Baseline and Subagent Judge Monitor separate from final CMD attribution; keep V0 bad-memory-item exclusion as a boundary rule. |
-| `CLAUDE.md` | Treat `cmd_innovation_core/` as source of truth; keep **CMD-Audit** separate from **CMD-Skill Adapter**; output only the six V0 pipeline labels; do not silently broaden the taxonomy. |
-| `cmd_innovation_core/CONTEXT.md` | Use **V0 Core Label Set**, **Premature Extraction Error**, **Verbatim Event Oracle**, **Subagent Judge Baseline**, **Subagent Judge Monitor** consistently; respect all Flagged Ambiguities. |
-| `cmd_innovation_core/prd/cmd_minimal_probe_prd.md` | Review ambiguous attribution cases after the first table exists; confirm V0 taxonomy boundaries are working for all six labels; keep `CMD-Audit` and `CMD-Skill Adapter` separate; register `ingestion_error` as deferred. |
-| `cmd_innovation_core/issues/0003-counterfactual-attribution-table-implementation-details.md` | Provides the V0 Replay Portfolio, replay-to-label mapping, attribution table structure, and confusion matrix that issue 0004 reviews. |
-| `cmd_innovation_core/tdd/cmd_tracer_bullets.md` | Cycle 4 (Coupled Failure) boundary informs top-2 review; Cycle 10 (Bad Memory Item Exclusion) boundary informs the item-label exclusion audit. |
+| `TASK.md` | 检查六例烟雾用例中的混淆或近似混淆；判定 `premature_extraction_error` 是否与 `retrieval_error` 保持区分；明确耦合故障的 Top-2 或多标签规则；将 Subagent Judge Baseline 和 Subagent Judge Monitor 与最终 CMD 归因分离；将 V0 坏内存项排除作为边界规则。 |
+| `CLAUDE.md` | 以 `cmd_innovation_core/` 为真源；将 **CMD-Audit** 与 **CMD-Skill Adapter** 分离；仅输出六个 V0 管线标签；不静默扩展分类体系。 |
+| `cmd_innovation_core/CONTEXT.md` | 一致使用 **V0 Core Label Set**、**Premature Extraction Error**、**Verbatim Event Oracle**、**Subagent Judge Baseline**、**Subagent Judge Monitor**；遵守所有已标记的歧义。 |
+| `cmd_innovation_core/prd/cmd_minimal_probe_prd.md` | 在首张表生成后审查歧义归因案例；确认 V0 分类边界对所有六个标签有效；保持 `CMD-Audit` 与 `CMD-Skill Adapter` 分离；将 `ingestion_error` 注册为延迟标签。 |
+| `cmd_innovation_core/issues/0003-counterfactual-attribution-table-implementation-details.md` | 提供 issue 0004 审查所需的 V0 Replay Portfolio、重放-标签映射、归因表结构和混淆矩阵。 |
+| `cmd_innovation_core/tdd/cmd_tracer_bullets.md` | Cycle 4（耦合故障）边界为 Top-2 审查提供依据；Cycle 10（坏内存项排除）边界为项目标签排除审计提供依据。 |
 
-## Domain Boundary
+## 领域边界
 
-Issue 0004 reviews the first attribution evidence. It does not change labels, replays, or attribution logic.
+Issue 0004 审查首个归因证据。它不改变标签、重放或归因逻辑。
 
-It does own:
+它的职责范围：
+- 检查 `attribution_table.csv` 中逐案例的重放增益列，定位混淆或近似混淆；
+- 用 Verbatim Event Oracle 夹具证据复查 `premature_extraction_error` / `retrieval_error` 边界；
+- 审查 Top-2 和 `is_ambiguous` 行为对耦合故障的适用性；
+- 审计 `comparison_metrics.csv` 中 Subagent Judge Baseline 和 Monitor 与 CMD 归因的分离；
+- 审计所有 V0 工件中坏内存项的缺失；
+- 将 `ingestion_error` 注册为延迟 V1 标签；
+- 审查 grill-session 交叉边界案例（A：Verbatim Event Oracle 和 Oracle Retrieval 均恢复；B：两者均失败但 Oracle Compression 成功）；
+- 确认或修订 ECS `cause` 项目状态描述规则；
+- 发布 HITL 裁决。
 
-- inspecting per-case replay gain columns in `attribution_table.csv` for confusions or near-confusions;
-- re-checking the `premature_extraction_error` / `retrieval_error` boundary with Verbatim Event Oracle fixture evidence;
-- reviewing top-2 and `is_ambiguous` behavior for coupled failure readiness;
-- auditing Subagent Judge Baseline and Monitor separation from CMD attribution in `comparison_metrics.csv`;
-- auditing bad-memory-item absence from all V0 artifacts;
-- registering `ingestion_error` as a deferred V1 label;
-- reviewing grill-session crossover edge cases (A: both Verbatim Event Oracle and Oracle Retrieval recover; B: both fail but Oracle Compression succeeds);
-- confirming or revising ECS `cause` item-state description rules;
-- issuing a HITL verdict.
+不在其职责范围：
+- 修改重放逻辑或新增重放路径；
+- 修改归因 `tie_margin` 或 `positive_gain_threshold`；
+- 新增探针案例；
+- 实现修复后上下文重放；
+- 实现 ECS 或 Failure Memory。
 
-It does not own:
+## 审查工件
 
-- changing replay logic or adding new replay paths;
-- changing attribution `tie_margin` or `positive_gain_threshold`;
-- adding new probe cases;
-- implementing Post-Repair Context Replay;
-- implementing ECS or Failure Memory.
-
-## Review Artifacts
-
-| Artifact | Role in issue 0004 |
+| 工件 | 在 Issue 0004 中的角色 |
 | --- | --- |
-| `artifacts/attribution_table.csv` | Per-case replay scores, recovery gains, predicted labels, top-2 labels, ambiguity flags, and per-replay gain columns for all six V0 replays. |
-| `artifacts/comparison_metrics.csv` | CMD-Audit vs evidence_recall vs subagent_judge vs random_label accuracy, macro F1, top-2 accuracy, and cost per diagnosis. |
-| `artifacts/attribution_confusion_matrix.csv` | 6×6 confusion matrix with gold labels as rows and predicted labels as columns. |
-| `data/probe_cases/v0_issue3_cases.json` | Six-case smoke suite: one case per V0 pipeline label. |
-| `data/probe_cases/v0_premature_extraction_error_case.json` | Focused Verbatim Event Oracle boundary fixture. |
-| `tests/test_cmd_audit_issue3_attribution_table.py` | Behavior-level tests for the V0 Replay Portfolio and attribution table. |
-| `cmd_audit/labels.py` | V0 label set, replay-to-label mapping, deferred label registry, `validate_v0_label`. |
-| `cmd_audit/attribution.py` | `assign_attribution` with `tie_margin=0.05` and `positive_gain_threshold=0.0`. |
-| `cmd_audit/replays.py` | Six V0 replay functions with per-replay recovery logic. |
-| `cmd_audit/baselines.py` | Comparator outputs and Subagent Judge Monitor decision. |
-| `cmd_audit/harness.py` | Attribution table writer, comparison metrics writer, confusion matrix writer. |
+| `artifacts/attribution_table.csv` | 逐案例重放分数、恢复增益、预测标签、Top-2 标签、歧义标志，以及全部六种 V0 重放的逐重放增益列。 |
+| `artifacts/comparison_metrics.csv` | CMD-Audit vs evidence_recall vs subagent_judge vs random_label 的准确率、宏 F1、Top-2 准确率和每次诊断成本。 |
+| `artifacts/attribution_confusion_matrix.csv` | 6×6 混淆矩阵，行为黄金标签，列为预测标签。 |
+| `data/probe_cases/v0_issue3_cases.json` | 六例烟雾套件：每种 V0 管线标签一例。 |
+| `data/probe_cases/v0_premature_extraction_error_case.json` | 聚焦的 Verbatim Event Oracle 边界夹具。 |
+| `tests/test_cmd_audit_issue3_attribution_table.py` | V0 Replay Portfolio 和归因表的行为级测试。 |
+| `cmd_audit/labels.py` | V0 标签集、重放-标签映射、延迟标签注册、`validate_v0_label`。 |
+| `cmd_audit/attribution.py` | `assign_attribution`，`tie_margin=0.05`，`positive_gain_threshold=0.0`。 |
+| `cmd_audit/replays.py` | 六个 V0 重放函数及其逐重放恢复逻辑。 |
+| `cmd_audit/baselines.py` | 比较器输出和 Subagent Judge Monitor 决策。 |
+| `cmd_audit/harness.py` | 归因表写入器、比较指标写入器、混淆矩阵写入器。 |
 
-## Review Method
+## 审查方法
 
-For each of the six smoke cases, the review inspects:
+对六例烟雾案例逐一检查：
 
-1. **Predicted label vs perturbation label**: does CMD-Audit assign the correct label?
-2. **Top replay gain vs second-best gain**: is there a near-confusion (delta < `tie_margin`)?
-3. **Cross-replay gain pattern**: could another replay plausibly recover the case under a different fixture design?
-4. **Boundary integrity**: does the case respect V0 label boundaries (no deferred labels, no item labels)?
+1. **预测标签 vs 扰动标签**：CMD-Audit 是否正确分配标签？
+2. **Top 重放增益 vs 次优增益**：是否存在近似混淆（delta < `tie_margin`）？
+3. **跨重放增益模式**：在另一种夹具设计下，其他重放是否可能恢复同一案例？
+4. **边界完整性**：案例是否遵守 V0 标签边界（无延迟标签，无项目标签）？
 
-For the comparator layer, the review inspects:
+对比较器层进行检查：
 
-1. **CMD vs comparator separation**: are CMD-Audit predictions computed independently from evidence_recall, subagent_judge, and random_label?
-2. **Subagent Judge Monitor payload**: does the monitor output stay within leak-safe boundaries?
+1. **CMD vs 比较器分离**：CMD-Audit 预测是否独立于 evidence_recall、subagent_judge 和 random_label 计算？
+2. **Subagent Judge Monitor 载荷**：Monitor 输出是否保持在防泄漏边界内？
 
-For the taxonomy as a whole, the review inspects:
+对整体分类体系进行检查：
 
-1. **Label distinctiveness**: can any two V0 labels be collapsed without losing diagnostic signal?
-2. **Coverage gap**: is any common memory failure pattern not representable by the six V0 labels?
-3. **Deferred label readiness**: are `ingestion_error` and other deferred labels properly registered?
+1. **标签区分度**：是否存在可合并而不损失诊断信号的 V0 标签对？
+2. **覆盖缺口**：是否存在六种 V0 标签无法表示的常见内存故障模式？
+3. **延迟标签就绪度**：`ingestion_error` 和其他延迟标签是否已正确注册？
 
-## Per-Case Boundary Analysis
+## 逐案例边界分析
 
-### Case v0-write-001 (`write_error`)
+### 案例 v0-write-001（`write_error`）
 
-**Fixture design**: Gold evidence ("Kai chose Madrid for the partner workshop") has no `source_memory_id` and no `source_event_id`. Raw event text is generic ("the final city was not written into the memory event stream"). Extracted memory is lossy ("Kai discussed a partner workshop location"). Baseline retrieves the lossy memory and answers "Unknown".
+**夹具设计**：黄金证据（"Kai chose Madrid for the partner workshop"）没有 `source_memory_id` 也没有 `source_event_id`。原始事件文本是泛化的（"the final city was not written into the memory event stream"）。提取内存是有损的（"Kai discussed a partner workshop location"）。基线检索到有损内存并回答 "Unknown"。
 
-**Replay gain pattern**:
+**重放增益模式**：
 
-| Replay | answer_score | evidence_score | recovery_gain |
+| 重放 | answer_score | evidence_score | recovery_gain |
 | --- | --- | --- | --- |
 | `oracle_write` | 1.000 | 1.000 | 1.000 |
 | `oracle_compression` | 0.000 | 0.000 | 0.000 |
@@ -112,17 +110,17 @@ For the taxonomy as a whole, the review inspects:
 | `injection_oracle` | 0.000 | 0.000 | 0.000 |
 | `evidence_given_reasoning` | 0.000 | 0.000 | 0.000 |
 
-**Boundary assessment**: Clean single-replay recovery. Only Oracle Write can recover because gold evidence has no `source_memory_id` or `source_event_id` — the evidence was never written to the event stream or extracted memory. This is the correct behavior: `write_error` is the only label for "evidence not present in any recoverable form."
+**边界评估**：干净的单重放恢复。只有 Oracle Write 能够恢复，因为黄金证据没有 `source_memory_id` 或 `source_event_id`——证据从未被写入事件流或提取内存。这是正确的行为：`write_error` 是唯一适用于"证据不存在于任何可恢复形式"的标签。
 
-**Edge case note**: If the raw event were truncated upstream (evidence never reached the agent), the gain pattern would be identical. In V0, this is subsumed under `write_error`. V1 may split `ingestion_error` if these cases have distinct repair paths.
+**边界情况说明**：如果原始事件在上游被截断（证据从未到达 agent），增益模式将完全相同。在 V0 中，这种情况被归入 `write_error`。如果这些情况有不同修复路径，V1 可能拆分出 `ingestion_error`。
 
-### Case v0-compression-001 (`compression_error`)
+### 案例 v0-compression-001（`compression_error`）
 
-**Fixture design**: Gold evidence points to `source_memory_id: "mem-101"`. Raw event contains "Omar chose Prague for the retention review." Extracted memory `mem-101` text is "Omar chose a Central European city for the retention review" — the city name "Prague" was lost during compression.
+**夹具设计**：黄金证据指向 `source_memory_id: "mem-101"`。原始事件包含 "Omar chose Prague for the retention review"。提取内存 `mem-101` 文本为 "Omar chose a Central European city for the retention review"——城市名 "Prague" 在压缩过程中丢失。
 
-**Replay gain pattern**:
+**重放增益模式**：
 
-| Replay | answer_score | evidence_score | recovery_gain |
+| 重放 | answer_score | evidence_score | recovery_gain |
 | --- | --- | --- | --- |
 | `oracle_write` | 0.000 | 0.000 | 0.000 |
 | `oracle_compression` | 1.000 | 1.000 | 1.000 |
@@ -131,17 +129,17 @@ For the taxonomy as a whole, the review inspects:
 | `injection_oracle` | 0.000 | 0.000 | 0.000 |
 | `evidence_given_reasoning` | 0.000 | 0.000 | 0.000 |
 
-**Boundary assessment**: Clean single-replay recovery. Oracle Compression recovers because `source_memory_id` points to `mem-101` and the gold evidence text ("Omar chose Prague...") differs from the stored text ("Omar chose a Central European city..."). Oracle Retrieval has zero gain because the Memory Item `mem-101` does not satisfy `evidence_recall_from_text` for the required phrases — the compression already destroyed the evidence within that Memory Item.
+**边界评估**：干净的单重放恢复。Oracle Compression 成功恢复，因为 `source_memory_id` 指向 `mem-101`，且黄金证据文本（"Omar chose Prague..."）与存储文本（"Omar chose a Central European city..."）不同。Oracle Retrieval 的增益为零，因为 Memory Item `mem-101` 不满足 `evidence_recall_from_text` 对所需短语的要求——压缩已经在 Memory Item 内部摧毁了证据。
 
-**Why this is not `retrieval_error`**: The baseline retrieved `mem-101`, but `mem-101`'s text does not contain "Prague". Oracle Retrieval checks `evidence_recall_from_text((gold_evidence,), memory_item.text)` and correctly finds the evidence phrase is absent. The failure is in the Memory Item representation, not in retrieval.
+**为什么不是 `retrieval_error`**：基线检索到了 `mem-101`，但 `mem-101` 的文本不包含 "Prague"。Oracle Retrieval 检查 `evidence_recall_from_text((gold_evidence,), memory_item.text)` 并正确发现证据短语缺失。故障在于 Memory Item 的表示，而非检索。
 
-### Case v0-premature-extraction-001 (`premature_extraction_error`)
+### 案例 v0-premature-extraction-001（`premature_extraction_error`）
 
-**Fixture design**: Gold evidence has `source_event_id: "evt-201"` and no `source_memory_id`. Raw event `evt-201` contains "Nia chose Berlin for the incident review." Extracted memory `mem-201` text is "Nia selected a European city for the incident review" — the specific city "Berlin" was lost during extraction.
+**夹具设计**：黄金证据具有 `source_event_id: "evt-201"` 且无 `source_memory_id`。原始事件 `evt-201` 包含 "Nia chose Berlin for the incident review"。提取内存 `mem-201` 文本为 "Nia selected a European city for the incident review"——具体城市 "Berlin" 在提取过程中丢失。
 
-**Replay gain pattern**:
+**重放增益模式**：
 
-| Replay | answer_score | evidence_score | recovery_gain |
+| 重放 | answer_score | evidence_score | recovery_gain |
 | --- | --- | --- | --- |
 | `oracle_write` | 0.000 | 0.000 | 0.000 |
 | `oracle_compression` | 0.000 | 0.000 | 0.000 |
@@ -150,19 +148,19 @@ For the taxonomy as a whole, the review inspects:
 | `injection_oracle` | 0.000 | 0.000 | 0.000 |
 | `evidence_given_reasoning` | 0.000 | 0.000 | 0.000 |
 
-**Boundary assessment**: This is the most important V0 boundary and it holds correctly. Verbatim Event Oracle recovers because `source_event_id: "evt-201"` exists and the raw event text contains "Berlin". Oracle Retrieval has zero gain because `_recover_extracted_gold_evidence` skips gold evidence items with no `source_memory_id`. The case is unambiguously `premature_extraction_error`.
+**边界评估**：这是最重要的 V0 边界，并且它正确地成立。Verbatim Event Oracle 恢复成功，因为 `source_event_id: "evt-201"` 存在且原始事件文本包含 "Berlin"。Oracle Retrieval 的增益为零，因为 `_recover_extracted_gold_evidence` 跳过了没有 `source_memory_id` 的黄金证据项。该案例无歧义地属于 `premature_extraction_error`。
 
-**Why this is not `retrieval_error`**: No extracted Memory Item preserves "Berlin." Oracle Retrieval over extracted memory cannot recover evidence that extraction already lost. `evidence_recall_from_text(gold_evidence, mem-201.text)` returns 0.0 because "Berlin" is not in "Nia selected a European city for the incident review."
+**为什么不是 `retrieval_error`**：没有任何提取的 Memory Item 保存了 "Berlin"。对已丢失在提取中的证据，基于提取内存的 Oracle Retrieval 无法恢复。`evidence_recall_from_text(gold_evidence, mem-201.text)` 返回 0.0，因为 "Berlin" 不在 "Nia selected a European city for the incident review" 中。
 
-**Cross-reference**: `test_verbatim_event_oracle_beats_oracle_retrieval_for_extraction_loss` in `tests/test_cmd_audit_issue3_attribution_table.py` asserts exactly this boundary.
+**交叉引用**：`tests/test_cmd_audit_issue3_attribution_table.py` 中的 `test_verbatim_event_oracle_beats_oracle_retrieval_for_extraction_loss` 精确断言了此边界。
 
-### Case v0-retrieval-001 (`retrieval_error`)
+### 案例 v0-retrieval-001（`retrieval_error`）
 
-**Fixture design**: Gold evidence points to `source_memory_id: "mem-301"`. Extracted memory `mem-301` correctly preserves "Mira chose Lisbon for the Q3 offsite." Baseline vector_memory retrieves `mem-302` ("Porto was considered...but rejected"), a distractor.
+**夹具设计**：黄金证据指向 `source_memory_id: "mem-301"`。提取内存 `mem-301` 正确保存了 "Mira chose Lisbon for the Q3 offsite"。基线 vector_memory 检索到了 `mem-302`（"Porto was considered...but rejected"），一个干扰项。
 
-**Replay gain pattern**:
+**重放增益模式**：
 
-| Replay | answer_score | evidence_score | recovery_gain |
+| 重放 | answer_score | evidence_score | recovery_gain |
 | --- | --- | --- | --- |
 | `oracle_write` | 0.000 | 0.000 | 0.000 |
 | `oracle_compression` | 0.000 | 0.000 | 0.000 |
@@ -171,15 +169,15 @@ For the taxonomy as a whole, the review inspects:
 | `injection_oracle` | 0.000 | 0.000 | 0.000 |
 | `evidence_given_reasoning` | 0.000 | 0.000 | 0.000 |
 
-**Boundary assessment**: Clean single-replay recovery. Oracle Retrieval recovers `mem-301` because: (a) `source_memory_id` exists, (b) `mem-301` is not in baseline `retrieved_memory_ids` (baseline retrieved `mem-302`), and (c) `mem-301.text` satisfies `evidence_recall_from_text` for the required phrases. Injection-Oracle has zero gain because the baseline did not retrieve the correct Memory Item.
+**边界评估**：干净的单重放恢复。Oracle Retrieval 恢复 `mem-301` 因为：(a) `source_memory_id` 存在，(b) `mem-301` 不在基线 `retrieved_memory_ids` 中（基线检索到了 `mem-302`），(c) `mem-301.text` 对所需短语满足 `evidence_recall_from_text`。Injection-Oracle 增益为零因为基线未检索到正确的 Memory Item。
 
-### Case v0-injection-001 (`injection_error`)
+### 案例 v0-injection-001（`injection_error`）
 
-**Fixture design**: Gold evidence points to `source_memory_id: "mem-401"`. Extracted memory `mem-401` correctly preserves "Lina chose Oslo for the launch rehearsal." Baseline vector_memory retrieves `mem-401` but the `injected_context` says "A launch rehearsal memory was retrieved, but the evidence block omitted the city" — the correct memory was retrieved but the context injection lost the evidence.
+**夹具设计**：黄金证据指向 `source_memory_id: "mem-401"`。提取内存 `mem-401` 正确保存了 "Lina chose Oslo for the launch rehearsal"。基线 vector_memory 检索到了 `mem-401`，但 `injected_context` 说 "A launch rehearsal memory was retrieved, but the evidence block omitted the city"——正确的内存被检索到，但上下文注入丢失了证据。
 
-**Replay gain pattern**:
+**重放增益模式**：
 
-| Replay | answer_score | evidence_score | recovery_gain |
+| 重放 | answer_score | evidence_score | recovery_gain |
 | --- | --- | --- | --- |
 | `oracle_write` | 0.000 | 0.000 | 0.000 |
 | `oracle_compression` | 0.000 | 0.000 | 0.000 |
@@ -188,17 +186,17 @@ For the taxonomy as a whole, the review inspects:
 | `injection_oracle` | 1.000 | 1.000 | 1.000 |
 | `evidence_given_reasoning` | 0.000 | 0.000 | 0.000 |
 
-**Boundary assessment**: Clean single-replay recovery. Injection-Oracle recovers because: (a) `source_memory_id` exists and points to `mem-401`, (b) the baseline retrieved `mem-401` (it's in `retrieved_memory_ids`), and (c) the baseline `injected_context` does NOT recall all gold evidence (evidence_score is 0.0). Oracle Retrieval has zero gain because `_recover_extracted_gold_evidence` skips gold evidence items whose `source_memory_id` is already in the baseline's `retrieved_memory_ids` — the correct memory was retrieved, so the failure is not retrieval.
+**边界评估**：干净的单重放恢复。Injection-Oracle 恢复成功因为：(a) `source_memory_id` 存在并指向 `mem-401`，(b) 基线检索到了 `mem-401`（在 `retrieved_memory_ids` 中），(c) 基线 `injected_context` 未召回全部黄金证据（evidence_score 为 0.0）。Oracle Retrieval 增益为零因为 `_recover_extracted_gold_evidence` 跳过了 `source_memory_id` 已在基线 `retrieved_memory_ids` 中的黄金证据项——正确的内存已被检索，因此故障不在检索。
 
-**Why this is not `retrieval_error`**: The baseline did retrieve the correct Memory Item. The failure happened when the evidence was formatted into the model context. Injection-Oracle checks this by looking at whether the retrieved Memory Item text contains gold evidence that the injected context lost.
+**为什么不是 `retrieval_error`**：基线确实检索到了正确的 Memory Item。故障发生在证据被格式化注入模型上下文时。Injection-Oracle 通过检查检索到的 Memory Item 文本是否包含注入上下文丢失的黄金证据来判断这一点。
 
-### Case v0-reasoning-001 (`reasoning_error`)
+### 案例 v0-reasoning-001（`reasoning_error`）
 
-**Fixture design**: Gold evidence points to `source_memory_id: "mem-501"`. Extracted memory `mem-501` correctly preserves "Pavel chose Dublin for the finance sync." Baseline vector_memory retrieves `mem-501` and the `injected_context` correctly contains "Pavel chose Dublin for the finance sync" with `evidence_score: 1.0`. But the baseline answer is "Cork" — wrong reasoning over correct evidence.
+**夹具设计**：黄金证据指向 `source_memory_id: "mem-501"`。提取内存 `mem-501` 正确保存了 "Pavel chose Dublin for the finance sync"。基线 vector_memory 检索到了 `mem-501`，`injected_context` 正确包含 "Pavel chose Dublin for the finance sync"，`evidence_score: 1.0`。但基线答案是 "Cork"——对正确证据的错误推理。
 
-**Replay gain pattern**:
+**重放增益模式**：
 
-| Replay | answer_score | evidence_score | recovery_gain |
+| 重放 | answer_score | evidence_score | recovery_gain |
 | --- | --- | --- | --- |
 | `oracle_write` | 0.000 | 0.000 | 0.000 |
 | `oracle_compression` | 0.000 | 0.000 | 0.000 |
@@ -207,15 +205,15 @@ For the taxonomy as a whole, the review inspects:
 | `injection_oracle` | 0.000 | 0.000 | 0.000 |
 | `evidence_given_reasoning` | 1.000 | 1.000 | 1.000 |
 
-**Boundary assessment**: Clean single-replay recovery. Evidence-Given Reasoning recovers because: (a) the baseline `injected_context` already recalls all gold evidence (`evidence_score: 1.0` — "Pavel chose Dublin for the finance sync" contains all required phrases), and (b) `baseline.answer_score < 1.0` (answer is "Cork", not "Dublin").
+**边界评估**：干净的单重放恢复。Evidence-Given Reasoning 恢复成功因为：(a) 基线 `injected_context` 已召回全部黄金证据（`evidence_score: 1.0`——"Pavel chose Dublin for the finance sync"包含所有所需短语），(b) `baseline.answer_score < 1.0`（答案是 "Cork" 而非 "Dublin"）。
 
-**Why this is not `injection_error`**: The baseline already has correct evidence in context. The failure is in the final reasoning step over valid evidence. Evidence-Given Reasoning uses the baseline's own injected context as the evidence block, confirming that the context was sufficient but the answer was wrong.
+**为什么不是 `injection_error`**：基线已在上下文中具有正确证据。故障在于对有效证据的最终推理步骤。Evidence-Given Reasoning 使用基线自身的注入上下文作为证据块，确认上下文已充分但答案错误。
 
-## Cross-Case Pattern Analysis
+## 跨案例模式分析
 
-### Confusion Matrix Audit
+### 混淆矩阵审计
 
-The `artifacts/attribution_confusion_matrix.csv` shows a perfect diagonal:
+`artifacts/attribution_confusion_matrix.csv` 显示完美的对角线：
 
 | gold_label | write | compression | premature_extraction | retrieval | injection | reasoning |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -226,13 +224,13 @@ The `artifacts/attribution_confusion_matrix.csv` shows a perfect diagonal:
 | injection_error | 0 | 0 | 0 | 0 | 1 | 0 |
 | reasoning_error | 0 | 0 | 0 | 0 | 0 | 1 |
 
-**Finding**: Zero off-diagonal confusions. This is expected for a six-case smoke suite where each case is designed to trigger exactly one replay path. The confusion matrix is not yet stress-tested with coupled failures or ambiguous cases.
+**发现**：零非对角线混淆。对于六例烟雾套件（每例设计为恰好触发一条重放路径），这是预期结果。混淆矩阵尚未经受耦合故障或歧义案例的压力测试。
 
-**Implication for top-2 behavior**: The `tie_margin=0.05` and `is_ambiguous` logic is correctly implemented but untested by the current smoke suite. Every case has a single replay with gain=1.0 and all others at 0.0 — a 1.0 delta that far exceeds the 0.05 tie margin. The top-2 logic will need validation when richer probe cases with genuinely coupled failures are added (planned for issue 0005).
+**对 Top-2 行为的启示**：`tie_margin=0.05` 和 `is_ambiguous` 逻辑实现正确但未被当前烟雾套件测试。每例只有一条重放的 gain=1.0，其余均为 0.0——1.0 的差值远超 0.05 的 tie margin。当加入真正耦合故障的更丰富探针案例时（计划于 issue 0005），Top-2 逻辑将被验证。
 
-### Comparator Separation Audit
+### 比较器分离审计
 
-The `artifacts/comparison_metrics.csv` confirms separation:
+`artifacts/comparison_metrics.csv` 确认分离：
 
 | system_name | attribution_accuracy | macro_f1 | top2_accuracy | cost_per_diagnosis |
 | --- | --- | --- | --- | --- |
@@ -241,105 +239,105 @@ The `artifacts/comparison_metrics.csv` confirms separation:
 | subagent_judge | 0.833 | 0.778 | 0.833 | 1.000 |
 | random_label | 0.167 | 0.167 | 0.667 | 0.010 |
 
-**Finding**: CMD-Audit outperforms all comparators on the smoke suite (1.0 vs 0.833 macro F1). The 0.167 gap between CMD and evidence_recall/subagent_judge is meaningful on the smoke suite because the comparators are observational (they read the failed trace without counterfactual intervention), while CMD runs actual replay interventions. This gap is expected to widen with richer probe cases that have genuinely ambiguous failure signatures.
+**发现**：CMD-Audit 在烟雾套件上优于所有比较器（1.0 vs 0.833 宏 F1）。CMD 与 evidence_recall/subagent_judge 之间 0.167 的差距在烟雾套件上是有意义的，因为比较器是观测性的（读取失败轨迹但不进行反事实干预），而 CMD 运行实际的重放干预。这一差距预计会随着具有真正歧义故障签名的更丰富探针案例而扩大。
 
-**Subagent Judge Monitor separation**: The monitor's `to_payload()` output is included in `BaselineSuiteResult.monitor` but never flows into `attribution.predicted_label`. The monitor decision (`should_trigger_replay`, `risk_score`, `anomaly_reason`, `evidence_pointers`) is structurally separate from the attribution result (`predicted_label`, `top_replay`, `recovery_gain`). The `harness.diagnosis_predictions()` function builds CMD-Audit predictions from `result.attribution`, not from `result.baseline_suite.monitor`.
+**Subagent Judge Monitor 分离**：Monitor 的 `to_payload()` 输出包含在 `BaselineSuiteResult.monitor` 中，但绝不会流入 `attribution.predicted_label`。Monitor 决策（`should_trigger_replay`、`risk_score`、`anomaly_reason`、`evidence_pointers`）在结构上与归因结果（`predicted_label`、`top_replay`、`recovery_gain`）分离。`harness.diagnosis_predictions()` 函数从 `result.attribution` 而非 `result.baseline_suite.monitor` 构建 CMD-Audit 预测。
 
-### Bad Memory Item Exclusion Audit
+### 坏内存项排除审计
 
-Verified across all three artifacts:
+跨所有三个工件验证：
 
-- `attribution_table.csv`: `predicted_label` column contains only the six V0 pipeline labels.
-- `comparison_metrics.csv`: No item labels appear as system names or metric dimensions.
-- `attribution_confusion_matrix.csv`: Row and column headers are only the six V0 pipeline labels.
+- `attribution_table.csv`：`predicted_label` 列仅包含六种 V0 管线标签。
+- `comparison_metrics.csv`：没有项目标签作为系统名称或指标维度出现。
+- `attribution_confusion_matrix.csv`：行列标题仅为六种 V0 管线标签。
 
-**Finding**: Bad memory item labels (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) are absent from all V0 output artifacts. The `validate_v0_label()` function in `cmd_audit/labels.py` enforces this at the code boundary: any attempt to use an item label raises `LabelValidationError`.
+**发现**：所有 V0 输出工件中均无坏内存项标签（`item_wrong`、`item_stale`、`item_conflict`、`item_poisoned`、`item_compression_distorted`）。`cmd_audit/labels.py` 中的 `validate_v0_label()` 函数在代码边界强制此规则：任何使用项目标签的尝试都会引发 `LabelValidationError`。
 
-## Grill-Session Crossover Edge Cases
+## Grill-Session 交叉边界案例
 
-### Edge Case A: Both Verbatim Event Oracle and Oracle Retrieval Recover
+### 边界案例 A：Verbatim Event Oracle 和 Oracle Retrieval 均恢复
 
-**Scenario**: A probe case where raw events contain the evidence AND an extracted Memory Item also preserves it. Both Verbatim Event Oracle and Oracle Retrieval produce positive recovery gains.
+**场景**：一个探针案例，其中原始事件包含证据，且提取的 Memory Item 也保存了证据。Verbatim Event Oracle 和 Oracle Retrieval 均产生正向恢复增益。
 
-**Governing rule**: `assign_attribution()` sorts replay results by `recovery_gain` descending. The replay with the highest gain wins. If both have gain=1.0, the first in sort order wins (stable sort). `tie_margin=0.05` means both labels appear in `top2_labels` and `is_ambiguous=True`.
+**裁决规则**：`assign_attribution()` 按 `recovery_gain` 降序排列重放结果。增益最高的重放获胜。如果两者增益均为 1.0，排序顺序中的第一个获胜（稳定排序）。`tie_margin=0.05` 意味着两个标签都会出现在 `top2_labels` 中且 `is_ambiguous=True`。
 
-**Assessment**: Not observed in the smoke suite (all cases have exactly one replay at gain=1.0). When richer probe cases are added, this edge case will naturally exercise the top-2 logic. No taxonomy change needed — gain ranking is the correct arbiter.
+**评估**：烟雾套件中未观察到（所有案例恰好一条重放 gain=1.0）。当添加更丰富的探针案例时，此边界情况将自然触发 Top-2 逻辑。无需分类更改——增益排序是正确的仲裁方式。
 
-**Recorded in**: `CONTEXT.md` Flagged Ambiguities.
+**记录于**：`CONTEXT.md` Flagged Ambiguities。
 
-### Edge Case B: Both Verbatim Event Oracle and Oracle Retrieval Fail, Oracle Compression Succeeds
+### 边界案例 B：Verbatim Event Oracle 和 Oracle Retrieval 均失败，Oracle Compression 成功
 
-**Scenario**: Raw events don't directly contain the evidence (scattered across multiple events), and no extracted Memory Item preserves it either. But a Memory Item exists whose pre-compression text would have contained it. Oracle Compression recovers while the first two replays do not.
+**场景**：原始事件不直接包含证据（分散在多个事件中），提取的 Memory Item 也未保存。但存在一个 Memory Item，其压缩前文本本应包含证据。Oracle Compression 恢复成功而前两条重放不成功。
 
-**Assessment**: Not observed in the smoke suite. The diagnosis cost of running two non-recovering replays (Verbatim Event Oracle + Oracle Retrieval) before Oracle Compression finds the root cause is $2.0 extra (2 × default cost_units of 1.0). This is design-internal and bounded within the six-replay smoke suite ($6.2 total). No taxonomy change needed.
+**评估**：烟雾套件中未观察到。运行两条无恢复的重放（Verbatim Event Oracle + Oracle Retrieval）之后 Oracle Compression 才找到根因的额外诊断成本为 $2.0（2 × 默认 cost_units 1.0）。这在六重放烟雾套件（总计 $6.2）范围内是可接受的内部设计。无需分类更改。
 
-**Recorded in**: `CONTEXT.md` Flagged Ambiguities and `cmd_innovation_core/knowledge/current-memory.md`.
+**记录于**：`CONTEXT.md` Flagged Ambiguities 和 `cmd_innovation_core/knowledge/current-memory.md`。
 
-## Deferred Label Registration Audit
+## 延迟标签注册审计
 
 ### `ingestion_error`
 
-**Status**: Registered as a deferred V1 label in three locations:
-- `cmd_innovation_core/CONTEXT.md`: Language section definition + deferred labels list
-- `cmd_innovation_core/prd/cmd_minimal_probe_prd.md`: V0 Scope deferred labels + AC5
-- `cmd_audit/labels.py`: `DEFERRED_PIPELINE_LABELS` frozenset
+**状态**：在三个位置注册为延迟 V1 标签：
+- `cmd_innovation_core/CONTEXT.md`：语言章节定义 + 延迟标签列表
+- `cmd_innovation_core/prd/cmd_minimal_probe_prd.md`：V0 范围延迟标签 + AC5
+- `cmd_audit/labels.py`：`DEFERRED_PIPELINE_LABELS` frozenset
 
-**V0 subsumption rule**: Cases where evidence never reached the agent are subsumed under `write_error` in V0. The counterfactual intervention (Oracle Write) is identical for both "evidence not written" and "evidence never arrived." V1 may split `ingestion_error` if these cases prove to have distinct repair paths.
+**V0 归入规则**：在 V0 中，证据从未到达 agent 的案例归入 `write_error`。"证据未写入"和"证据从未到达"的反事实干预（Oracle Write）是相同的。如果这些案例被证明有不同的修复路径，V1 可能拆分出 `ingestion_error`。
 
-**Validation**: `validate_v0_label("ingestion_error")` raises `LabelValidationError` with the message that it is deferred to V1/V2. The label is not accepted in V0 attribution or comparator predictions.
+**验证**：`validate_v0_label("ingestion_error")` 引发 `LabelValidationError`，提示其被延迟到 V1/V2。该标签在 V0 归因或比较器预测中不被接受。
 
-### Other Deferred Labels
+### 其他延迟标签
 
-| Label | Status |
+| 标签 | 状态 |
 | --- | --- |
-| `granularity_error` | Registered in `DEFERRED_PIPELINE_LABELS`. Rejected by `validate_v0_label`. |
-| `route_error` | Registered in `DEFERRED_PIPELINE_LABELS`. Rejected by `validate_v0_label`. |
-| `graph_error` | Registered in `DEFERRED_PIPELINE_LABELS`. Rejected by `validate_v0_label`. |
-| `safety_error` | Registered in `DEFERRED_PIPELINE_LABELS`. Rejected by `validate_v0_label`. |
-| `ingestion_error` | Registered in `DEFERRED_PIPELINE_LABELS`. Rejected by `validate_v0_label`. |
+| `granularity_error` | 在 `DEFERRED_PIPELINE_LABELS` 中注册。被 `validate_v0_label` 拒绝。 |
+| `route_error` | 在 `DEFERRED_PIPELINE_LABELS` 中注册。被 `validate_v0_label` 拒绝。 |
+| `graph_error` | 在 `DEFERRED_PIPELINE_LABELS` 中注册。被 `validate_v0_label` 拒绝。 |
+| `safety_error` | 在 `DEFERRED_PIPELINE_LABELS` 中注册。被 `validate_v0_label` 拒绝。 |
+| `ingestion_error` | 在 `DEFERRED_PIPELINE_LABELS` 中注册。被 `validate_v0_label` 拒绝。 |
 
-## ECS Cause Item-State Description Rules
+## ECS Cause 项目状态描述规则
 
-**Rule**: ECS `cause` may describe item state in natural language (e.g., "stored preference was outdated relative to ground truth") but must not use V0-forbidden item label names (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) or re-declare them through natural language equivalents (e.g., "the memory item is stale").
+**规则**：ECS `cause` 可以用自然语言描述项目状态（例如 "stored preference was outdated relative to ground truth"），但不得使用 V0 禁止的项目标签名称（`item_wrong`、`item_stale`、`item_conflict`、`item_poisoned`、`item_compression_distorted`）或通过自然语言等价语重新声明它们（例如 "the memory item is stale"）。
 
-**Status**: Rule is documented in `CONTEXT.md` Flagged Ambiguities, `PRD` AC7, `current-memory.md` decision #10, and `TASK.md` Boundary Acceptance Conditions. Enforcement will be implemented in issue 0007 (ECS Failure Memory) when ECS records are first constructed.
+**状态**：规则已记录在 `CONTEXT.md` Flagged Ambiguities、`PRD` AC7、`current-memory.md` 决策 #10 和 `TASK.md` 边界验收条件中。强制执行将在 issue 0007（ECS Failure Memory）中首次构建 ECS 记录时实施。
 
-## Test Coverage
+## 测试覆盖
 
-| Test | What it verifies for issue 0004 |
+| 测试 | 对 Issue 0004 的验证 |
 | --- | --- |
-| `test_verbatim_event_oracle_beats_oracle_retrieval_for_extraction_loss` | Verbatim Event Oracle recovers + Oracle Retrieval does not = `premature_extraction_error`. The most important V0 boundary. |
-| `test_raw_event_only_evidence_is_valid_probe_case` | Raw-event-only gold evidence (no `source_memory_id`) loads as a valid probe case. |
-| `test_issue3_suite_attributes_all_v0_pipeline_labels` | All six V0 labels are covered by the smoke suite; each maps to the expected top replay. |
-| `test_confusion_matrix_contains_one_diagonal_count_per_v0_label` | Confusion matrix has exactly one diagonal count per V0 label in the smoke suite. |
-| `test_v0_accepts_only_pipeline_labels` | `validate_v0_label` accepts all six V0 pipeline labels and rejects item labels + deferred labels. |
-| `test_issue2_baseline_suite_keeps_comparators_separate_from_cmd` | BaselineSuiteResult comparators are structurally separate from CMD replay attribution. |
-| `test_monitor_payload_can_trigger_replay_without_forbidden_outputs` | Monitor payload triggers replay without containing forbidden fields. |
-| `test_monitor_rejects_final_labels_ecs_memory_writes_gold_answers_and_full_traces` | Monitor rejects payloads with forbidden field names. |
+| `test_verbatim_event_oracle_beats_oracle_retrieval_for_extraction_loss` | Verbatim Event Oracle 恢复 + Oracle Retrieval 不恢复 = `premature_extraction_error`。最重要的 V0 边界。 |
+| `test_raw_event_only_evidence_is_valid_probe_case` | 仅有原始事件的黄金证据（无 `source_memory_id`）作为有效探针案例加载。 |
+| `test_issue3_suite_attributes_all_v0_pipeline_labels` | 烟雾套件覆盖全部六种 V0 标签；每种映射到预期的 top 重放。 |
+| `test_confusion_matrix_contains_one_diagonal_count_per_v0_label` | 烟雾套件混淆矩阵每种 V0 标签恰有一个对角线计数。 |
+| `test_v0_accepts_only_pipeline_labels` | `validate_v0_label` 接受全部六种 V0 管线标签，拒绝项目标签 + 延迟标签。 |
+| `test_issue2_baseline_suite_keeps_comparators_separate_from_cmd` | BaselineSuiteResult 比较器在结构上与 CMD 重放归因分离。 |
+| `test_monitor_payload_can_trigger_replay_without_forbidden_outputs` | Monitor 载荷触发重放且不包含禁止字段。 |
+| `test_monitor_rejects_final_labels_ecs_memory_writes_gold_answers_and_full_traces` | Monitor 拒绝包含禁止字段名的载荷。 |
 
-## HITL Verdict
+## HITL 裁决
 
-**Date**: 2026-05-09
+**日期**：2026-05-09
 
-**Decision**: V0 six-label taxonomy is confirmed. No boundary changes needed.
+**决定**：确认 V0 六标签分类体系。无需边界更改。
 
-**Evidence**:
-1. All six V0 labels show clean single-replay recovery in the smoke suite (no confusions, no near-confusions).
-2. `premature_extraction_error` remains distinct from `retrieval_error` — the Verbatim Event Oracle boundary is validated by fixture and test.
-3. Top-2 and `is_ambiguous` logic is correctly implemented and will activate when richer probe cases with coupled failures are added.
-4. Subagent Judge Baseline and Monitor remain structurally separate from CMD-Audit attribution in all artifacts.
-5. Bad memory item labels are absent from all V0 output artifacts.
-6. `ingestion_error` is properly registered as deferred; V0 subsumption under `write_error` is documented.
-7. Grill-session crossover edge cases A and B are documented and judged non-problematic.
-8. ECS cause item-state description rules are documented for future enforcement in issue 0007.
+**证据**：
+1. 全部六种 V0 标签在烟雾套件中显示干净的单重放恢复（无混淆、无近似混淆）。
+2. `premature_extraction_error` 保持与 `retrieval_error` 的区分——Verbatim Event Oracle 边界已通过夹具和测试验证。
+3. Top-2 和 `is_ambiguous` 逻辑实现正确，将在具有耦合故障的更丰富探针案例添加时激活。
+4. Subagent Judge Baseline 和 Monitor 在所有工件中与 CMD-Audit 归因保持结构分离。
+5. 所有 V0 输出工件中无坏内存项标签。
+6. `ingestion_error` 已正确注册为延迟；V0 归入 `write_error` 已记录。
+7. Grill-session 交叉边界案例 A 和 B 已记录，判定为无问题。
+8. ECS cause 项目状态描述规则已记录，供 issue 0007 强制执行。
 
-**Next step**: Proceed to issue 0005 — Validate Post-Repair Context Replay with three-value `repair_assessment`.
+**下一步**：进入 issue 0005——验证具有三值 `repair_assessment` 的 Post-Repair Context Replay。
 
-## Remaining Work After Issue 0004
+## Issue 0004 之后的剩余工作
 
-Issue 0004 is the HITL gate before Post-Repair Context Replay. The next slices:
+Issue 0004 是 Post-Repair Context Replay 之前的 HITL 关口。后续切片：
 
-- Issue 0005: Post-Repair Context Replay with three-value `repair_assessment`.
-- Issue 0006: Targeted memory fixes mapped from attribution labels.
-- Issue 0007: ECS Failure Memory recurrence reduction (enforces ECS cause item-label-name rules).
-- Issue 0010: Evidence-driven version gates (HITL, blocked by 0004/0005/0007).
+- Issue 0005：具有三值 `repair_assessment` 的 Post-Repair Context Replay。
+- Issue 0006：从归因标签映射的定向内存修复。
+- Issue 0007：ECS Failure Memory 复发减少（强制执行 ECS cause 项目标签名称规则）。
+- Issue 0010：证据驱动的版本关口（HITL，被 0004/0005/0007 阻塞）。
