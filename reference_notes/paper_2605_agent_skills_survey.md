@@ -1,0 +1,7 @@
+# A Survey on Agent Skills for LLMs: A Lifecycle Perspective from Construction to Ecosystems
+
+- **来源**: yang, wang, Song, Chaoda, Li, Xinpeng, Wang, Shouren, Wang, Nengbo, Zhang, Yanyan, Ma, Chuang, Ganguly, Debargha, Singh, Vikash, Xu, Shuai. Zenodo preprint, 2026-05-11.
+- **核心贡献**: Introduces a lifecycle-oriented taxonomy of agent skills along four axes (representation, source, granularity, role). Organizes the landscape into six dimensions: Construction and Evolution, Access and Composition, Model Integration via Training, Safety, Evaluation and Feedback, Skill-Native Systems and Ecosystems. Identifies structural challenges: lifecycle management, compositional safety, dynamic utility evaluation, ecosystem standardization.
+- **关键概念**: agent skill lifecycle, skill representation/granularity/role, compositional safety, dynamic utility evaluation, skill-native systems
+- **CMD 相关性**: MEDIUM. Provides a framework for CMD's V2 skill evolution. CMD's Failure Memory is essentially a repair-skill store, and ECS records are repair skills. The six-dimension framework can structure CMD's V2 design: Construction (ECS generation), Access (Failure Memory retrieval), Safety (Post-Repair validation), Evaluation (repair success tracking).
+- **开放空白**: Survey covers skill construction broadly but does not address counterfactual validation of repair skills. CMD's Post-Repair Context Replay is a specific instantiation of "evaluation and feedback" for repair skills that the survey doesn't cover.

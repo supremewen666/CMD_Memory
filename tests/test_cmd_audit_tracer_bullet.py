@@ -22,7 +22,9 @@ class RetrievalFailureTracerBulletTest(unittest.TestCase):
         self.assertEqual(case.primary_baseline.baseline_name, "vector_memory")
         self.assertEqual(case.primary_baseline.retrieved_memory_ids, ("mem-002",))
 
-    def test_oracle_retrieval_recovers_answer_and_attributes_retrieval_error(self) -> None:
+    def test_oracle_retrieval_recovers_answer_and_attributes_retrieval_error(
+        self,
+    ) -> None:
         case = load_probe_cases(FIXTURE)[0]
 
         result = run_case(case)
@@ -56,13 +58,16 @@ class V0LabelBoundaryTest(unittest.TestCase):
         with self.assertRaises(LabelValidationError):
             validate_v0_label("route_error")
 
-    def test_probe_case_rejects_gold_evidence_missing_from_extracted_memory(self) -> None:
+    def test_probe_case_rejects_gold_evidence_missing_from_extracted_memory(
+        self,
+    ) -> None:
         raw = load_probe_cases(FIXTURE)[0]
         broken = {
             "case_id": raw.case_id,
             "query": raw.query,
             "raw_events": [
-                {"event_id": event.event_id, "text": event.text} for event in raw.raw_events
+                {"event_id": event.event_id, "text": event.text}
+                for event in raw.raw_events
             ],
             "extracted_memory": [
                 {
@@ -84,7 +89,9 @@ class V0LabelBoundaryTest(unittest.TestCase):
                 {
                     "baseline_name": raw.primary_baseline.baseline_name,
                     "answer": raw.primary_baseline.answer,
-                    "retrieved_memory_ids": list(raw.primary_baseline.retrieved_memory_ids),
+                    "retrieved_memory_ids": list(
+                        raw.primary_baseline.retrieved_memory_ids
+                    ),
                     "answer_score": raw.primary_baseline.answer_score,
                     "evidence_score": raw.primary_baseline.evidence_score,
                 }

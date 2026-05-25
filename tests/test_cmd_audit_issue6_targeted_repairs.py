@@ -14,11 +14,10 @@ from cmd_audit import (
     get_targeted_repair_action,
     load_probe_cases,
     make_repair_comparison,
-    run_case_full,
     run_cases_full,
-    write_repair_success_table,
     write_repair_success_table_from_full,
     V0_PIPELINE_LABEL_ORDER,
+    V1_PIPELINE_LABEL_ORDER,
 )
 from cmd_audit.labels import LabelValidationError
 
@@ -38,13 +37,25 @@ class LabelToRepairMappingTest(unittest.TestCase):
                 action = get_targeted_repair_action(label)
                 self.assertIsInstance(action, TargetedRepairAction)
                 self.assertEqual(action.label, label)
-                self.assertTrue(action.action_name, f"{label}: action_name must not be empty")
-                self.assertTrue(action.description, f"{label}: description must not be empty")
-                self.assertTrue(action.intervention_summary, f"{label}: intervention_summary must not be empty")
+                self.assertTrue(
+                    action.action_name, f"{label}: action_name must not be empty"
+                )
+                self.assertTrue(
+                    action.description, f"{label}: description must not be empty"
+                )
+                self.assertTrue(
+                    action.intervention_summary,
+                    f"{label}: intervention_summary must not be empty",
+                )
 
     def test_targeted_repair_actions_are_distinct(self) -> None:
-        names = {label: get_targeted_repair_action(label).action_name for label in V0_PIPELINE_LABEL_ORDER}
-        self.assertEqual(len(names), 6, "All six labels must have distinct repair action names")
+        names = {
+            label: get_targeted_repair_action(label).action_name
+            for label in V0_PIPELINE_LABEL_ORDER
+        }
+        self.assertEqual(
+            len(names), 6, "All six labels must have distinct repair action names"
+        )
 
     def test_get_targeted_repair_rejects_invalid_label(self) -> None:
         with self.assertRaises((LabelValidationError, ValueError)):
@@ -53,8 +64,11 @@ class LabelToRepairMappingTest(unittest.TestCase):
     def test_each_repair_action_describes_targeted_intervention(self) -> None:
         for label in V0_PIPELINE_LABEL_ORDER:
             action = get_targeted_repair_action(label)
-            self.assertNotIn("all extracted memory", action.description.casefold(),
-                             f"{label} repair must not describe undifferentiated hard-case update")
+            self.assertNotIn(
+                "all extracted memory",
+                action.description.casefold(),
+                f"{label} repair must not describe undifferentiated hard-case update",
+            )
 
 
 # ── Repair Comparison Row ──────────────────────────────────────────────
@@ -82,14 +96,21 @@ class RepairComparisonRowTest(unittest.TestCase):
                 self.assertIsInstance(row.targeted_assessment, str)
                 self.assertIsInstance(row.hard_case_assessment, str)
                 self.assertIsInstance(row.targeted_better, bool)
-                self.assertIn(row.targeted_assessment, ("recovered", "partial", "failed"))
-                self.assertIn(row.hard_case_assessment, ("recovered", "partial", "failed"))
+                self.assertIn(
+                    row.targeted_assessment, ("recovered", "partial", "failed")
+                )
+                self.assertIn(
+                    row.hard_case_assessment, ("recovered", "partial", "failed")
+                )
 
     def test_repair_action_matches_predicted_label(self) -> None:
         for row in self.rows:
             expected = get_targeted_repair_action(row.predicted_label).action_name
-            self.assertEqual(row.repair_action, expected,
-                             f"{row.case_id}: repair_action should match predicted_label")
+            self.assertEqual(
+                row.repair_action,
+                expected,
+                f"{row.case_id}: repair_action should match predicted_label",
+            )
 
     def test_targeted_and_hard_case_have_independent_results(self) -> None:
         for row in self.rows:
@@ -105,11 +126,15 @@ class RepairComparisonRowTest(unittest.TestCase):
             t_rank = order[row.targeted_assessment]
             h_rank = order[row.hard_case_assessment]
             if t_rank < h_rank:
-                self.assertTrue(row.targeted_better,
-                                f"{row.case_id}: targeted better rank but flag is False")
+                self.assertTrue(
+                    row.targeted_better,
+                    f"{row.case_id}: targeted better rank but flag is False",
+                )
             elif t_rank > h_rank:
-                self.assertFalse(row.targeted_better,
-                                 f"{row.case_id}: hard-case better rank but targeted_better is True")
+                self.assertFalse(
+                    row.targeted_better,
+                    f"{row.case_id}: hard-case better rank but targeted_better is True",
+                )
 
 
 # ── Repair Success Summary ─────────────────────────────────────────────
@@ -134,17 +159,23 @@ class RepairSuccessSummaryTest(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertEqual(
                     summary.total_cases,
-                    summary.targeted_recovered + summary.targeted_partial + summary.targeted_failed,
+                    summary.targeted_recovered
+                    + summary.targeted_partial
+                    + summary.targeted_failed,
                     f"{label}: targeted counts must sum to total_cases",
                 )
                 self.assertEqual(
                     summary.total_cases,
-                    summary.hard_case_recovered + summary.hard_case_partial + summary.hard_case_failed,
+                    summary.hard_case_recovered
+                    + summary.hard_case_partial
+                    + summary.hard_case_failed,
                     f"{label}: hard-case counts must sum to total_cases",
                 )
                 self.assertEqual(
                     summary.total_cases,
-                    summary.targeted_better_count + summary.hard_case_better_count + summary.same_outcome_count,
+                    summary.targeted_better_count
+                    + summary.hard_case_better_count
+                    + summary.same_outcome_count,
                     f"{label}: better/same counts must sum to total_cases",
                 )
 
@@ -161,6 +192,29 @@ class RepairSuccessSummaryTest(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertGreater(summary.avg_targeted_token_cost, 0.0)
                 self.assertGreater(summary.avg_hard_case_token_cost, 0.0)
+
+    def test_v1_only_label_is_aggregated(self) -> None:
+        row = RepairComparisonRow(
+            case_id="v1-route-001",
+            perturbation_label="route_error",
+            predicted_label="route_error",
+            repair_action="Oracle Route Repair",
+            pre_repair_answer_score=0.0,
+            pre_repair_evidence_score=0.0,
+            targeted_assessment="recovered",
+            targeted_answer_score=1.0,
+            targeted_evidence_score=1.0,
+            targeted_token_cost=10.0,
+            hard_case_assessment="failed",
+            hard_case_answer_score=0.0,
+            hard_case_evidence_score=0.0,
+            hard_case_token_cost=20.0,
+            targeted_better=True,
+        )
+        summaries = compute_repair_success_summary([row])
+        self.assertIn("route_error", summaries)
+        self.assertEqual(summaries["route_error"].targeted_recovered, 1)
+        self.assertIn("route_error", V1_PIPELINE_LABEL_ORDER)
 
 
 # ── Claim Ledger ───────────────────────────────────────────────────────
@@ -206,7 +260,10 @@ class ClaimLedgerTest(unittest.TestCase):
         token_saving = self.ledger.avg_targeted_token_saving_pct
 
         expected = targeted_any >= hard_case_any and token_saving > 0.0
-        expected = expected or self.ledger.targeted_recovery_rate > self.ledger.hard_case_recovery_rate
+        expected = (
+            expected
+            or self.ledger.targeted_recovery_rate > self.ledger.hard_case_recovery_rate
+        )
         self.assertEqual(self.ledger.claim_supported, expected)
 
 
@@ -226,14 +283,23 @@ class RepairSuccessTableTest(unittest.TestCase):
             sandbox = Path(tmpdir) / "sandbox"
             sandbox.mkdir()
             output = sandbox / "repair_success_table.csv"
-            write_repair_success_table_from_full(self.full_results, output, sandbox_root=sandbox)
+            write_repair_success_table_from_full(
+                self.full_results, output, sandbox_root=sandbox
+            )
 
             self.assertTrue(output.exists())
             header = output.read_text(encoding="utf-8").splitlines()[0]
             required = [
-                "case_id", "perturbation_label", "predicted_label", "repair_action",
-                "targeted_assessment", "targeted_answer_score", "targeted_evidence_score",
-                "hard_case_assessment", "hard_case_answer_score", "hard_case_evidence_score",
+                "case_id",
+                "perturbation_label",
+                "predicted_label",
+                "repair_action",
+                "targeted_assessment",
+                "targeted_answer_score",
+                "targeted_evidence_score",
+                "hard_case_assessment",
+                "hard_case_answer_score",
+                "hard_case_evidence_score",
                 "targeted_better",
             ]
             for col in required:
@@ -245,7 +311,9 @@ class RepairSuccessTableTest(unittest.TestCase):
             sandbox = Path(tmpdir) / "sandbox"
             sandbox.mkdir()
             output = sandbox / "repair_success_table.csv"
-            write_repair_success_table_from_full(self.full_results, output, sandbox_root=sandbox)
+            write_repair_success_table_from_full(
+                self.full_results, output, sandbox_root=sandbox
+            )
 
             summary_path = sandbox / "repair_label_summary.csv"
             self.assertTrue(summary_path.exists())
@@ -259,12 +327,14 @@ class RepairSuccessTableTest(unittest.TestCase):
             sandbox = Path(tmpdir) / "sandbox"
             sandbox.mkdir()
             output = sandbox / "repair_success_table.csv"
-            write_repair_success_table_from_full(self.full_results, output, sandbox_root=sandbox)
+            write_repair_success_table_from_full(
+                self.full_results, output, sandbox_root=sandbox
+            )
 
             ledger_path = sandbox / "repair_claim_ledger.txt"
             self.assertTrue(ledger_path.exists())
             ledger_text = ledger_path.read_text(encoding="utf-8")
-            self.assertIn("CMD V0 Repair Claim Ledger", ledger_text)
+            self.assertIn("CMD V1 Repair Claim Ledger", ledger_text)
             self.assertIn("Claim supported:", ledger_text)
 
     def test_repair_success_table_rejects_outside_sandbox(self) -> None:
@@ -274,7 +344,9 @@ class RepairSuccessTableTest(unittest.TestCase):
             outside = Path(tmpdir) / "outside" / "repair_success_table.csv"
             outside.parent.mkdir()
             with self.assertRaises(ValueError):
-                write_repair_success_table_from_full(self.full_results, outside, sandbox_root=sandbox)
+                write_repair_success_table_from_full(
+                    self.full_results, outside, sandbox_root=sandbox
+                )
 
 
 # ── End-to-End: Full Pipeline Per Label ────────────────────────────────
@@ -296,18 +368,27 @@ class FullPipelinePerLabelTest(unittest.TestCase):
     def test_all_cases_have_valid_attribution(self) -> None:
         for fr in self.full_results:
             with self.subTest(case_id=fr.audit.case_id):
-                self.assertEqual(fr.audit.perturbation_label, fr.audit.attribution.predicted_label,
-                                 f"{fr.audit.case_id}: attribution must match perturbation label")
+                self.assertEqual(
+                    fr.audit.perturbation_label,
+                    fr.audit.attribution.predicted_label,
+                    f"{fr.audit.case_id}: attribution must match perturbation label",
+                )
 
     def test_targeted_repair_differs_from_hard_case_baseline(self) -> None:
         for fr in self.full_results:
             with self.subTest(case_id=fr.audit.case_id):
                 ecs = fr.ecs_draft
                 ctx = fr.repaired_context
-                self.assertNotIn("all extracted memory", ecs.repair_guidance.casefold(),
-                                 "ECS repair guidance must not describe hard-case update")
-                self.assertNotIn("Hard-case update", ctx.repair_guidance,
-                                 "Repaired context must not use hard-case update language")
+                self.assertNotIn(
+                    "all extracted memory",
+                    ecs.repair_guidance.casefold(),
+                    "ECS repair guidance must not describe hard-case update",
+                )
+                self.assertNotIn(
+                    "Hard-case update",
+                    ctx.repair_guidance,
+                    "Repaired context must not use hard-case update language",
+                )
 
     def test_partial_assessments_exist_where_expected(self) -> None:
         # At least one post_repair_result should be available;
@@ -320,7 +401,9 @@ class FullPipelinePerLabelTest(unittest.TestCase):
         for fr in self.full_results:
             with self.subTest(case_id=fr.audit.case_id):
                 hard = fr.hard_case_baseline
-                self.assertIn(hard.repair_assessment, ("recovered", "partial", "failed"))
+                self.assertIn(
+                    hard.repair_assessment, ("recovered", "partial", "failed")
+                )
                 self.assertGreaterEqual(hard.token_cost, 0.0)
 
 

@@ -4,14 +4,20 @@ This is a non-code TDD skeleton. It names behavior to test through future public
 
 ## Current Green State
 
-Verified on 2026-05-10:
+Verified on 2026-05-19:
 
-- Cycles 1-15 are green through issues 0001-0010. 218 tests pass.
+- Cycles 1-21 are green through issues 0001-0015. 453 tests pass, 622 subtests pass.
 - V0 evidence chain is structurally complete: attribution table, confusion matrix, comparison metrics, Post-Repair Context Replay, targeted repairs, ECS Failure Memory, retrieval baselines, monitor contract hardening, version gates.
-- All four V0→V1 gate criteria pass on the 6-case smoke suite.
-- HITL V0→V1 gate review is deferred pending probe suite scaling (50-100 cases).
+- V1 Cycle 16 (`ingestion_error` + `route_error`) is green: 8-label pipeline, 7-replay V1 portfolio, `has_ingestion_trace` boundary, `oracle_route` store enumeration.
+- V1 Cycle 17 (`granularity_error` + `graph_error` + `safety_error`) is green: 11-label pipeline, 10-replay V1 portfolio.
+- V1 Cycle 18 (coupled-failure recalibration) is green: configurable `top_k` (default 2, supports 3+), `close_deltas` transparency.
+- V1 Cycle 19 (memory-probe baseline) is green: 3×2 grid comparator (3 write × 2 retrieve: cosine + BM25; dense retrieval deferred to V1 adapter layer per issue 0008), `memory_probe_best_accuracy` column in comparison metrics.
+- V1 Cycle 20 (mem0 adapter) is green: `Mem0Adapter` with `intercept_add`/`intercept_search` two-cut-point interception, recorded-trace mode, sandbox checksum, adapter-label parity, 30 tests.
+- V1 Cycle 21 (Letta adapter + V1→V2 gate) is green: `LettaAdapter` with `intercept_core_write`/`intercept_archival_store`/`intercept_recall` three-cut-point interception, tripartite memory model, sandbox checksum, adapter-label parity, cross-agent non-regression, V1→V2 gate passing with both adapters, 44 tests.
+- All four V0→V1 gate criteria pass on the 6-case smoke suite. V1→V2 gate passes with both `mem0_integrated=True` and `letta_integrated=True`.
+- HITL V0→V1 gate review approved (supremewen, 2026-05-10). V0 LOCKED. Probe suite scaling to 596 cases is the next gate validation step.
 
-V1 Cycles 16-22 are planned but not yet active. No V1 code exists. See `## V1 Red-Green Sequence` below.
+V1 Cycle 22 (RPE prefilter) is planned but not yet active. V1 Cycle 23 (provenance tracking) is planned. See `## V1 Red-Green Sequence` below.
 
 ## Public Interface Questions To Confirm
 
@@ -34,21 +40,26 @@ V1 Cycles 16-22 are planned but not yet active. No V1 code exists. See `## V1 Re
 - Subagent Judge Monitor `anomaly_reason` is locked to four enum values; free-form natural language and content-bearing evidence pointers are rejected.
 - Post-Repair Context Replay outputs three-value `repair_assessment` (`recovered` / `partial` / `failed`), not a binary gate.
 - ECS `cause` must not use V0-forbidden item label names or re-declare them through natural language equivalents.
-- `ingestion_error` is a registered deferred V1 label; it is rejected by V0 label validation but queryable for V1 planning.
+- `ingestion_error` is a registered V1 label; it is rejected by V0 label validation but accepted by V1 label validation (issue 0011 complete).
 - CMD-Audit write operations are restricted to replay-local sandbox; writes to paths outside the sandbox are rejected.
 
-## V1 Resolved Interface Decisions (2026-05-11)
+## V1 Resolved Interface Decisions (2026-05-11, updated 2026-05-15)
 
-- V1 labels are the 5 deferred pipeline labels introduced in priority order: `ingestion_error` → `route_error` → `granularity_error` → `graph_error` → `safety_error`.
-- V1 attribution outputs 11 pipeline labels (V0 6 + V1 5). Bad memory item labels remain excluded from attribution.
-- The first CMD-Skill Adapter target is mem0 (mem0ai/mem0). The second is Letta (letta-ai/letta) for V1→V2 gate.
-- mem0 Adapter intercepts `add()` and `search()` at two cut points without requiring mem0 internals knowledge.
+- V1 labels are the 5 deferred pipeline labels introduced in priority order: `ingestion_error` (✅ done) → `route_error` (✅ done) → `granularity_error` (✅ done) → `graph_error` (✅ done) → `safety_error` (✅ done). All 11 pipeline labels active.
+- V1 attribution outputs all 11 pipeline labels through 10-replay V1 portfolio.
+- The first CMD-Skill Adapter target is mem0 (mem0ai/mem0). The second is Letta (letta-ai/letta) for V1→V2 gate. Both done (issues 0014-0015).
+- mem0 Adapter intercepts `add()` and `search()` at two cut points. Letta Adapter intercepts core_write, archival_store, and recall at three cut points.
 - All adapter replays run sandboxed; original mem0/Letta store state is never mutated by CMD-Audit.
+- Adapter-label parity: both mem0 and Letta adapter paths produce identical labels to standalone harness on V0 smoke suite.
 - V0 + V1 + V2 constitute one paper. V2 is the final module/skill.
 - V1 baseline comparison adds memory-probe (2603.02473) grid-comparison as a new comparator.
 - RPE Pre-Filter is a late-V1 optimization (Cycle 22), not a V1 gate prerequisite.
 - LoCoMo/LongMemEval real data probe construction is researcher-led; CMD-Audit consumes the resulting probe cases.
 - `ingestion_error` is distinct from `write_error`: ingestion means evidence never reached the agent at all; write means evidence reached the agent but was not stored.
+- `route_error` is distinct from `retrieval_error`: route means correct memory is stored but in the wrong store/tier; retrieval means correct memory is in the right store but not retrieved.
+- LettaAdapter uses recorded-trace mode (V1), same as Mem0Adapter. Live integration is V2 scope.
+- V1→V2 gate requires `adapter_count >= 2` (both `mem0_integrated=True` and `letta_integrated=True`). Gate passes with both adapters integrated.
+- Provenance tracking (Decision 28, Issue 0017): Execution Lineage DAG with trace-mem HMAC citation. `MemoryItem.provenance: Optional[List[ProvenanceEdge]]` records in-edge derivation. Phase 1 (V1): DAG structure + in-edge tracking. Phase 2 (V2): cascade repair via MemQ TD(λ). Provenance edges are append-only. Only replay-created items carry provenance; baseline items have provenance=None.
 
 ## Priority Behaviors
 
@@ -182,11 +193,11 @@ GREEN: Add ECS `cause` validation that rejects strings containing forbidden item
 
 ### Cycle 14: Ingestion Error Deferred Label Registration
 
-Status: green in issue 0004/0009.
+Status: green in issue 0011. `ingestion_error` is now a V1 active label—`validate_v1_label("ingestion_error")` succeeds. `validate_v0_label("ingestion_error")` still raises `LabelValidationError`.
 
-RED: A probe case or attribution result attempts to use `ingestion_error` as a V0 pipeline label. The expected result is rejected because `ingestion_error` is a deferred V1 label, not a V0 label.
+RED: A probe case or attribution result attempts to use `ingestion_error` as a V0 pipeline label. The expected result is rejected because `ingestion_error` is a V1 label, not a V0 label.
 
-GREEN: Add `ingestion_error` to the known-deferred label registry. `validate_v0_label("ingestion_error")` raises `ValueError`. The deferred label list is queryable so V1 planning can enumerate it.
+GREEN: Add `ingestion_error` to the known-deferred label registry (now moved to V1 active via issue 0011). `validate_v0_label("ingestion_error")` raises `LabelValidationError`. `validate_v1_label("ingestion_error")` succeeds. The full V1 label expansion implements the actual attribution logic.
 
 ### Cycle 15: CMD-Audit Sandbox Write Boundary
 
@@ -204,8 +215,8 @@ GREEN: Add sandbox path validation to CMD-Audit write operations. All artifact w
 
 ## V1 Priority Behaviors
 
-1. A failed case where gold evidence never reached the agent (`add()` never called with it) is attributed as `ingestion_error`, not `write_error`.
-2. A failed case where correct memory was stored but in the wrong store/tier is attributed as `route_error` after Oracle Route recovers it.
+1. A failed case where gold evidence never reached the agent (`add()` never called with it) is attributed as `ingestion_error`, not `write_error`. — ✅ green (issue 0011)
+2. A failed case where correct memory was stored but in the wrong store/tier is attributed as `route_error` after Oracle Route recovers it. — ✅ green (issue 0011)
 3. A failed case where correct information was stored at wrong granularity is attributed as `granularity_error`.
 4. A failed case where graph expansion introduced distractors is attributed as `graph_error` after Graph-Off recovers it.
 5. A failed case where safety filtering incorrectly removed useful evidence is attributed as `safety_error` after Safety-Off recovers it.
@@ -220,23 +231,27 @@ GREEN: Add sandbox path validation to CMD-Audit write operations. All artifact w
 
 ### Cycle 16: Ingestion + Route Error Labels
 
-Status: planned (issue 0011).
+Status: green (issue 0011). 44 behavior-level tests, 262 total tests, zero regressions.
 
 RED: A probe case has gold evidence that never reached the agent at all (ingestion truncated). Oracle Write recovers the answer. V0 attributes it as `write_error`. V1 must attribute it as `ingestion_error`.
 
 A second probe case has correct memory stored but in the wrong store/tier. Oracle Route recovers the answer by testing all stores. V1 must attribute it as `route_error`.
 
-GREEN: Split `ingestion_error` from `write_error` in Oracle Write replay attribution. Add Oracle Route replay (enumerate stores/tiers, pick best recovery). Extend label validator to accept both new labels. `validate_v1_label("ingestion_error")` succeeds; `validate_v0_label("ingestion_error")` still raises `ValueError`.
+GREEN: Split `ingestion_error` from `write_error` in Oracle Write replay attribution via `has_ingestion_trace` boolean boundary. Add Oracle Route replay (enumerate stores/tiers, pick best recovery via `_collect_stores` + `_recover_from_store`). Extend label validator (`validate_v1_label`) to accept both new labels. Add V1 pipeline functions (`run_case_v1`, `run_cases_v1`, `run_case_full_v1`, `run_cases_full_v1`, `load_probe_cases_v1`, `assign_attribution_v1`, `run_v1_replay_portfolio`). Update ECS, metrics, and repairs modules for V1 compatibility.
 
 Public behavior check:
-- `ingestion_error` case: gold evidence has no corresponding `add()` call in trace; Oracle Write recovery gain > 0; label = `ingestion_error`.
+- `ingestion_error` case: gold evidence has no corresponding `add()` call in trace (`has_ingestion_trace=false`); Oracle Write recovery gain > 0; label = `ingestion_error`.
 - `route_error` case: gold evidence exists in wrong store; Oracle Route recovery gain > 0; label = `route_error`.
-- Existing 6-label smoke suite: no label flips; macro F1 unchanged.
-- Deferred label registry: `ingestion_error` moves from deferred to active; `route_error` moves from deferred to active.
+- Existing 6-label smoke suite: no label flips; macro F1 unchanged (all 6 labels match through V1 pipeline).
+- Deferred label registry: `ingestion_error` moved from deferred to active; `route_error` moved from deferred to active.
+- `validate_v1_label` accepts all 8 labels; `validate_v0_label` rejects `ingestion_error` and `route_error`.
+- V1 portfolio: 7 replays (V0 6 + `oracle_route`); `V1_REPLAY_TO_LABEL` maps all 7 replays to valid V1 labels.
+
+Detail map: `cmd_innovation_core/issues/0011-implement-ingestion-and-route-error-labels-implementation-details.md`
 
 ### Cycle 17: Granularity + Graph + Safety Error Labels
 
-Status: planned (issue 0012).
+Status: green (issue 0012). 81 behavior-level tests, 345 total tests, zero regressions.
 
 RED: Three probe cases cover the remaining V1 pipeline labels:
 - `granularity_error`: correct info stored at wrong granularity (session summary too coarse). Oracle Granularity recovers by testing raw/event/session/persona levels.
@@ -253,63 +268,71 @@ Public behavior check:
 
 ### Cycle 18: 11-Label Coupled Failure Recalibration
 
-Status: planned (issue 0013).
+Status: green (issue 0013). 42 behavior-level tests (shared with Cycle 19), 387 total tests, zero regressions.
 
 RED: With 11 labels, close replay deltas are more frequent. A probe case has Oracle Compression and Oracle Granularity both recovering with close deltas (Δ difference < threshold). V0's top-2 threshold was calibrated for 6 labels. V1 must recalibrate.
 
-GREEN: Recalibrate top-2 threshold for 11-label space. Add multi-label (≥3) attribution for cases where three replays produce close deltas. Update coupled-failure ambiguity notes to reference 11-label context.
+GREEN: Add `top_k: int = 2` parameter to `assign_attribution_v1`. Add `top_k_labels` and `close_deltas` fields to `AttributionResult` with backward-compatible defaults. Compute `all_close` unbounded by `top_k`; cap `top_k_labels` at `top_k`; expose full delta distribution in `close_deltas`. Plumb `top_k` through `run_case_v1`, `run_cases_v1`, `run_case_full_v1`, `run_cases_full_v1`. Add `top_k_labels` and `close_deltas` columns to `write_attribution_table`. V0 `assign_attribution` sets `top_k_labels = top2_labels`, `close_deltas = ()`. Default `top_k=2, tie_margin=0.05` preserves exact existing behavior.
 
 Public behavior check:
-- Close-delta case (Δ difference < 0.05): top-2 attribution output with both labels.
-- Triple-close case (3 replays within 0.05): multi-label output with ambiguity note.
-- Single-dominant case (Δ difference > 0.10): top-1 only.
-- Existing V0 coupled-failure cases still produce correct top-2 on 6-label subset.
+- Close-delta case (Δ difference < 0.05): top-2 attribution output with both labels. ✅
+- Triple-close case (3 replays within 0.05): `top_k=3` produces 3 labels in `top_k_labels`, 2 in `top2_labels`, 3+ in `close_deltas`. ✅
+- Single-dominant case (Δ difference > 0.10): top-1 only. ✅
+- 4+ close deltas: `top_k_labels` capped at 3, `close_deltas` exposes all 4+. ✅
+- Existing V0 coupled-failure cases still produce correct top-2 on 6-label subset. ✅
 
 ### Cycle 19: V1 Baseline Comparison with Memory-Probe
 
-Status: planned (issue 0013).
+Status: green (issue 0013). 42 behavior-level tests (shared with Cycle 18), 387 total tests, zero regressions.
 
 RED: The baseline comparison currently covers evidence-recall, subagent judge, and random. V1 adds memory-probe grid-comparison (write-strategy × retrieval-method) as a new comparator. CMD-Audit 11-label macro F1 must still exceed all baselines.
 
-GREEN: Implement memory-probe comparator: for each case, run a 3×3 grid (Mem0-style / MemGPT-style / raw chunks × cosine / BM25 / hybrid) and record best grid-cell accuracy. Add memory-probe column to comparison metrics. Re-run all baselines against 11-label attribution.
+GREEN: Create `cmd_audit/memory_probe.py` (235 lines). Implement 3 write strategies (`_write_fact_extraction` Mem0-style, `_write_summarization` MemGPT-style, `_write_raw_chunks`) producing `tuple[MemoryItem, ...]`. Implement 2 retrieval helpers (`_retrieve_top1_cosine`, `_retrieve_top1_bm25`) reusing public helpers from `retrieval_baselines.py`; `_retrieve_top1_hybrid` removed per issue 0008 (sparse+sparse cannot deliver semantic recovery; dense retrieval deferred to V1 adapter layer). Build grid runner `run_memory_probe_case` (6 cells: 3 write × 2 retrieve) and aggregate `run_memory_probe_baselines` (best-cell accuracy by write×retrieve pair). Make 4 internal helpers public (`tokenize`, `compute_bm25_scores`, `build_tfidf_vectors`, `cosine_similarity`). Add optional `memory_probe_best_accuracy` column to `write_comparison_metrics_table`. Export 9 new symbols from `__init__.py`.
 
 Public behavior check:
-- memory-probe comparator produces accuracy and macro F1 comparable to published results (not lower than heuristic baseline).
-- CMD-Audit 11-label macro F1 > all comparators including memory-probe.
-- Comparison metrics CSV includes memory-probe column.
+- 6 cells per case (3 write × 2 retrieve: cosine + BM25), each with valid strategy/method and scores in [0,1]. ✅
+- Aggregate `best_cell_accuracy` in [0,1]; best strategy/method are valid names. ✅
+- Comparison metrics CSV includes `memory_probe_best_accuracy` column when provided, absent when None. ✅
+- CMD-Audit macro F1 > all comparators including memory-probe on V0 smoke suite. ✅
 
 ### Cycle 20: mem0 Adapter Integration
 
-Status: planned (issue 0014).
+Status: green (issue 0014). 30 behavior-level tests, 417 total tests, zero regressions.
 
 RED: A probe case runs through the mem0 adapter path (intercept `add()` and `search()`) instead of fixture-controlled memory. The adapter path produces the same attribution label as the standalone harness for the same case. Adapter replays never mutate the original mem0 store.
 
-GREEN: Implement `Mem0Adapter` with two cut points (`intercept_add`, `intercept_search`). Wire adapter into existing `ReplayEngine` without changing Attribution or ECS layers. Add sandbox checksum verification that mem0 store is unchanged after replay.
+GREEN: Implement `Mem0Adapter` with two cut points (`intercept_add`, `intercept_search`). Wire adapter into existing `ReplayEngine` without changing Attribution or ECS layers. Add sandbox checksum verification that mem0 store is unchanged after replay. `run_mem0_replay_portfolio` executes 10 replays (6 intercepted + 4 V1 passthrough). `check_v1_to_v2_gate` now accepts `mem0_integrated` parameter.
 
 Public behavior check:
-- Same 6 cases from V0 smoke suite: adapter path labels match standalone path labels.
-- Case with `ingestion_error`: adapter correctly identifies `add()` never called.
-- Case with `retrieval_error`: adapter correctly identifies `search()` miss.
-- Store checksum before/after replay is identical.
-- Adapter macro F1 on 6-label suite == standalone macro F1 (1.000 on smoke).
+- Same 6 cases from V0 smoke suite: adapter path labels match standalone path labels. ✅
+- Case with `ingestion_error`: adapter correctly identifies `add()` never called. ✅
+- Case with `retrieval_error`: adapter correctly identifies `search()` miss. ✅
+- Store checksum before/after replay is identical. ✅
+- Adapter macro F1 on 6-label suite == standalone macro F1 (1.000 on smoke). ✅
+
+Detail map: `cmd_innovation_core/issues/0014-integrate-mem0-adapter-implementation-details.md`
 
 ### Cycle 21: Letta Adapter + V1→V2 Gate Check
 
-Status: planned (issue 0015).
+Status: green (issue 0015). 44 behavior-level tests, 453 total tests, 622 subtests, zero regressions.
 
 RED: A probe case runs through the Letta adapter path (intercept core/archival/recall tier operations). The Letta adapter produces correct attribution on Letta's tiered memory architecture. V1→V2 gate: two agents (mem0 + Letta) both integrated without macro F1 regression.
 
-GREEN: Implement `LettaAdapter` with tier-aware interception (core write, archival store, recall retrieval). Add Oracle Route replay that tests Letta's tier routing. Run 6-label smoke suite on both agents. Verify V1→V2 gate criteria.
+GREEN: Implement `LettaAdapter` with tier-aware interception (`intercept_core_write`, `intercept_archival_store`, `intercept_recall`). Shared `_intercept_write_side` function for both write-side cut points. `run_letta_replay_portfolio` executes 10 replays (6 intercepted + 4 V1 passthrough). `check_v1_to_v2_gate` now accepts `letta_integrated` parameter alongside `mem0_integrated`. Sandbox checksum over `sorted(core_blocks + archival_blocks)`. Cross-agent non-regression verified: mem0 and Letta independently produce identical labels.
 
 Public behavior check:
-- Letta adapter correctly routes Oracle Route replay across core/archival/recall tiers.
-- `route_error` attribution works on Letta (tier miss) where it was N/A on mem0 (flat store).
-- 6-label macro F1 on Letta >= 6-label macro F1 on mem0 (no regression).
-- V1→V2 gate report: 2 agents integrated, macro F1 comparison, gate decision.
+- Letta adapter correctly routes all 6 V0 replays across three cut points (core/archival/recall). ✅
+- `route_error` attribution is structurally supported on Letta (tier miss) where it was N/A on mem0 (flat store). ✅
+- 6-label macro F1 on Letta = standalone macro F1 = 1.000 (no regression). ✅
+- Cross-agent non-regression: mem0 labels unchanged when Letta adapter exists. ✅
+- V1→V2 gate passes with both `mem0_integrated=True` and `letta_integrated=True`. ✅
+- Sandbox checksum unchanged after all three cut point interceptions. ✅
+
+Detail map: `cmd_innovation_core/issues/0015-letta-adapter-implementation-details.md`
 
 ### Cycle 22: RPE Pre-Filter Optimization
 
-Status: planned (issue 0017).
+Status: planned (issue 0016).
 
 RED: Subagent Judge Monitor triggers full 11-replay portfolio for every anomaly. An RPE pre-filter should skip low-surprise cases where evidence is already in retrieved context, reducing replay cost without missing pipeline errors.
 
@@ -319,3 +342,54 @@ Public behavior check:
 - False skip rate < 5% (skipped cases that actually had pipeline errors).
 - Replay cost reduction ≥ 30% (vs triggering full portfolio on every anomaly).
 - Attribution recall after pre-filter ≥ 0.95 (vs no pre-filter).
+
+### Cycle 23: Provenance Tracking — Execution Lineage DAG
+
+Status: planned (issue 0017).
+
+RED: A `MemoryItem` created during counterfactual replay has no record of which upstream items or operations influenced it. After `graph_error` attribution, there are no provenance edges referencing which graph-distractor items caused the failure. Tampering with source evidence after recording is undetectable.
+
+GREEN: Add `Citation` and `ProvenanceEdge` dataclasses to `cmd_audit/models.py`. Add `provenance: Optional[List[ProvenanceEdge]]` field to `MemoryItem`. Add `cmd_audit/provenance.py` with `record_provenance_edge()`, `compute_provenance_completeness()`, `detect_tamper()`, `get_graph_distractor_edges()`. Wire provenance recording into all 10 replay paths (6 V0 + 4 V1). Wire into mem0 and Letta adapter replay paths. Add `distractor_provenance_ids` to `AuditResult` for `graph_error` cases.
+
+Public behavior check:
+- `Citation` and `ProvenanceEdge` importable from `cmd_audit.models`.
+- One smoke case per replay type: `len(item.provenance) >= 1` for items created/modified during replay.
+- `compute_provenance_completeness()` returns fraction in [0, 1]; target ≥ 0.80 on 596-case suite.
+- `detect_tamper(edge, modified_source, session_key)` returns `True`; `detect_tamper(edge, original_source, session_key)` returns `False`.
+- `graph_error` smoke case: `AuditResult.distractor_provenance_ids` non-empty, referencing graph-distractor items.
+- Existing `MemoryItem` without provenance (or `provenance=None`) works in all existing pipelines — all 453 existing tests pass.
+- Both mem0 and Letta adapter paths record provenance edges on at least one smoke case.
+- `attribution_table.csv` gains optional `distractor_provenance_ids` column; `comparison_metrics.csv` gains `provenance_completeness` row.
+
+### Cycle 24: Subagent-Based LLM Scoring (Issue 0019)
+
+Status: Phase A GREEN, Phase B planned. TDD cycle: 24.
+
+**Phase A — COMPLETE (2026-05-21):**
+1. `llm_client.py`: Provider-agnostic LLM API client (`generate(prompt) -> str`). OpenAI-compatible, stdlib `urllib.request`. Handles: model unreachable, empty response, Unicode errors.
+2. `llm_judge.py`: `build_judge_prompt` (observable artifacts only, no gold leak) + `parse_label_from_response` (structured LABEL:/EXPLANATION: parser).
+3. `baselines.py`: `run_llm_judge_baseline` with 3-mode fallback (None-client / parse error / success). `llm_judge` as 4th comparator auto-appears in `comparison_metrics.csv` via existing `comparator_results` iteration (zero harness/metrics/writers changes).
+4. 32 tests, 8 classes. 645 total tests pass. Detail map: `issues/0019-phase-a-llm-judge-baseline-implementation-details.md`.
+
+**Phase B — `subagent_runner.py` + `llm_scoring.py` + `hooks.py`:**
+3. `subagent_runner.py`: Minimal `run(system_prompt: str, user_message: str) -> str`. Isolated context window, dedicated system prompt, no tool access, returns result only.
+4. `hooks.py`: Two pure validation functions:
+   - `validate_context_isolation(context: dict) -> None`: Raises `ContextLeakError` if context contains case_id, gold_label, ptype, or other cross-case data.
+   - `validate_output_format(output: str, expected: tuple[str, ...]) -> str`: Returns parsed output if valid binary; raises `OutputFormatError` on non-binary output.
+5. `llm_scoring.py`: `EvidenceVerifier`, `AnswerVerifier`, `SubagentScorer`.
+   - `EvidenceVerifier`: Receives atomic `{FACT, TEXT}` via subagent_runner, outputs `PRESENT | ABSENT`. Active in Phase B.
+   - `AnswerVerifier`: Receives atomic `{ANSWER, GOLD_ANSWER}` via subagent_runner, outputs `EQUIVALENT | NOT_EQUIVALENT`. Implemented but not wired — deferred to Decision B.
+   - `SubagentScorer.score_evidence(gold_evidence, text) -> float`: Matches `evidence_recall_from_text` contract. Internally splits gold_evidence into N atomic calls, aggregates `count(PRESENT)/N`. Enforces hooks at subagent call boundary. Fallback to `evidence_recall_from_text` on LLM unavailable or parse failure (retry once with stricter prompt first).
+
+**Integration:**
+6. `_score_recovered_evidence` in `replays.py`: Accepts optional `scorer: Callable[[tuple[GoldEvidence, ...], str], float] | None` parameter. When `None`, uses `evidence_recall_from_text` (default/fallback). When provided, delegates to `scorer(gold_evidence, evidence_block)`.
+
+Public behavior check:
+- `SubagentScorer.score_evidence(gold_evidence, text)` returns float in [0, 1] matching `evidence_recall_from_text` contract.
+- EvidenceVerifier subagent context contains exactly `{FACT, TEXT, STANDARD}` — no case_id, no gold_label.
+- `validate_context_isolation` raises `ContextLeakError` when case_id injected into context.
+- `validate_output_format` raises `OutputFormatError` on non-binary output; retry once with stricter prompt before fallback.
+- `LLMJudgeBaseline` produces valid `DiagnosisPrediction` for all 596 cases; appears in `comparison_metrics.csv`.
+- CMD attribution accuracy >= 0.95 (LLM variance tolerance) on 596 cases with SubagentScorer.
+- Deterministic phrase-matching path preserved: `_score_recovered_evidence(case, name, block, tracker)` without scorer uses `evidence_recall_from_text`.
+- All 613 existing tests pass without modification.

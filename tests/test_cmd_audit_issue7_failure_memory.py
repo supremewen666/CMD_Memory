@@ -5,10 +5,8 @@ from pathlib import Path
 import unittest
 
 from cmd_audit import (
-    ECSDraft,
     FailureMemoryRecord,
     FailureMemoryStore,
-    RecurrenceComparisonRow,
     RecurrenceSummary,
     build_failure_memory_context,
     compute_recurrence_summary,
@@ -16,7 +14,6 @@ from cmd_audit import (
     load_probe_cases,
     run_case,
     run_case_full,
-    run_recurrence_comparison,
     run_recurrence_comparisons,
     write_recurrence_comparison_table,
     V0_PIPELINE_LABEL_ORDER,
@@ -67,7 +64,7 @@ class FailureMemoryRecordCreationTest(unittest.TestCase):
     def test_record_rejects_invalid_error_type(self) -> None:
         case = self.cases[0]
         audit = run_case(case)
-        ecs = draft_ecs(case, audit)
+        _ = draft_ecs(case, audit)
 
         with self.assertRaises((LabelValidationError, ValueError)):
             FailureMemoryRecord(
@@ -132,14 +129,20 @@ class FailureMemoryStoreRetrieveTest(unittest.TestCase):
 
     def test_retrieve_by_matching_query_returns_records(self) -> None:
         results = self.store.retrieve("Which city did Mira choose for the Q3 offsite?")
-        self.assertGreater(len(results), 0, "Should retrieve at least one matching record")
+        self.assertGreater(
+            len(results), 0, "Should retrieve at least one matching record"
+        )
 
     def test_retrieve_returns_related_label_records(self) -> None:
-        results = self.store.retrieve("What location was picked for the offsite meeting?")
+        results = self.store.retrieve(
+            "What location was picked for the offsite meeting?"
+        )
         self.assertGreater(len(results), 0)
 
     def test_retrieve_unrelated_query_returns_empty(self) -> None:
-        results = self.store.retrieve("completely unrelated query about weather patterns")
+        results = self.store.retrieve(
+            "completely unrelated query about weather patterns"
+        )
         self.assertEqual(len(results), 0)
 
     def test_empty_store_retrieve_returns_empty(self) -> None:
@@ -256,16 +259,21 @@ class RecurrenceComparisonRowTest(unittest.TestCase):
                 self.assertIsInstance(row.corrected_guidance_answer_score, float)
                 self.assertIsInstance(row.corrected_guidance_evidence_score, float)
                 self.assertIsInstance(row.corrected_guidance_better_than_none, bool)
-                self.assertIsInstance(row.corrected_guidance_better_than_full_trace, bool)
+                self.assertIsInstance(
+                    row.corrected_guidance_better_than_full_trace, bool
+                )
                 self.assertIsInstance(row.failure_memory_useful, bool)
 
     def test_scores_are_in_range(self) -> None:
         for row in self.rows:
             with self.subTest(case_id=row.case_id):
                 for score in [
-                    row.no_fm_answer_score, row.no_fm_evidence_score,
-                    row.full_trace_answer_score, row.full_trace_evidence_score,
-                    row.corrected_guidance_answer_score, row.corrected_guidance_evidence_score,
+                    row.no_fm_answer_score,
+                    row.no_fm_evidence_score,
+                    row.full_trace_answer_score,
+                    row.full_trace_evidence_score,
+                    row.corrected_guidance_answer_score,
+                    row.corrected_guidance_evidence_score,
                 ]:
                     self.assertGreaterEqual(score, 0.0)
                     self.assertLessEqual(score, 1.0)
@@ -286,7 +294,8 @@ class RecurrenceComparisonRowTest(unittest.TestCase):
         # so pollution risk should be high (>= 0.5) for most cases.
         high_pollution = sum(1 for r in self.rows if r.full_trace_pollution_risk >= 0.5)
         self.assertGreaterEqual(
-            high_pollution, 1,
+            high_pollution,
+            1,
             "At least one case should show high pollution risk from full traces",
         )
 
@@ -294,13 +303,16 @@ class RecurrenceComparisonRowTest(unittest.TestCase):
         for row in self.rows:
             expected = row.corrected_guidance_better_than_none
             self.assertEqual(
-                row.failure_memory_useful, expected,
+                row.failure_memory_useful,
+                expected,
                 f"{row.case_id}: fm_useful must equal corrected_guidance_better_than_none",
             )
 
     def test_any_fm_improvement_property(self) -> None:
         for row in self.rows:
-            self.assertEqual(row.any_fm_improvement, row.corrected_guidance_better_than_none)
+            self.assertEqual(
+                row.any_fm_improvement, row.corrected_guidance_better_than_none
+            )
 
 
 # ── Recurrence Summary ──────────────────────────────────────────────────
@@ -371,11 +383,16 @@ class RecurrenceTableOutputTest(unittest.TestCase):
             self.assertTrue(output.exists())
             header = output.read_text(encoding="utf-8").splitlines()[0]
             required = [
-                "case_id", "perturbation_label",
-                "no_fm_answer_score", "no_fm_evidence_score",
-                "full_trace_answer_score", "full_trace_evidence_score",
-                "corrected_guidance_answer_score", "corrected_guidance_evidence_score",
-                "full_trace_pollution_risk", "failure_memory_useful",
+                "case_id",
+                "perturbation_label",
+                "no_fm_answer_score",
+                "no_fm_evidence_score",
+                "full_trace_answer_score",
+                "full_trace_evidence_score",
+                "corrected_guidance_answer_score",
+                "corrected_guidance_evidence_score",
+                "full_trace_pollution_risk",
+                "failure_memory_useful",
             ]
             for col in required:
                 with self.subTest(column=col):
@@ -401,7 +418,9 @@ class RecurrenceTableOutputTest(unittest.TestCase):
             outside = Path(tmpdir) / "outside" / "recurrence.csv"
             outside.parent.mkdir()
             with self.assertRaises(ValueError):
-                write_recurrence_comparison_table(self.rows, outside, sandbox_root=sandbox)
+                write_recurrence_comparison_table(
+                    self.rows, outside, sandbox_root=sandbox
+                )
 
 
 # ── Full Pipeline: CMD → ECS → FM → Recurrence ─────────────────────────
@@ -421,7 +440,9 @@ class FullPipelineRecurrenceTest(unittest.TestCase):
         # Build Failure Memory
         cls.store = FailureMemoryStore()
         for fr in cls.full_results:
-            record = FailureMemoryRecord.from_ecs_draft(fr.ecs_draft, cls.original_cases[0])
+            record = FailureMemoryRecord.from_ecs_draft(
+                fr.ecs_draft, cls.original_cases[0]
+            )
             cls.store = cls.store.add(record)
 
         # Actually build store properly per case
@@ -439,9 +460,12 @@ class FullPipelineRecurrenceTest(unittest.TestCase):
                 self.assertIn(row.perturbation_label, V0_PIPELINE_LABEL_ORDER)
 
     def test_corrected_guidance_outperforms_full_trace(self) -> None:
-        better_count = sum(1 for r in self.rows if r.corrected_guidance_better_than_full_trace)
+        better_count = sum(
+            1 for r in self.rows if r.corrected_guidance_better_than_full_trace
+        )
         self.assertGreaterEqual(
-            better_count, 1,
+            better_count,
+            1,
             "Corrected guidance should outperform full trace for at least one case",
         )
 
@@ -449,7 +473,9 @@ class FullPipelineRecurrenceTest(unittest.TestCase):
         self.assertEqual(len(self.store), 6)
 
     def test_similar_future_case_retrieves_original_record(self) -> None:
-        retrieval_case = [c for c in self.future_cases if c.case_id == "v0-fm-retrieval-001"][0]
+        retrieval_case = [
+            c for c in self.future_cases if c.case_id == "v0-fm-retrieval-001"
+        ][0]
         records = self.store.retrieve(retrieval_case.query)
         self.assertGreater(len(records), 0)
         self.assertIn("retrieval_error", [r.error_type for r in records])
@@ -472,7 +498,13 @@ class FailureMemoryECSCauseValidationTest(unittest.TestCase):
         cls.cases = load_probe_cases(ISSUE_3_CASES)
 
     def test_fm_record_cause_does_not_contain_forbidden_labels(self) -> None:
-        forbidden = {"item_wrong", "item_stale", "item_conflict", "item_poisoned", "item_compression_distorted"}
+        forbidden = {
+            "item_wrong",
+            "item_stale",
+            "item_conflict",
+            "item_poisoned",
+            "item_compression_distorted",
+        }
         for case in self.cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
@@ -481,8 +513,11 @@ class FailureMemoryECSCauseValidationTest(unittest.TestCase):
             with self.subTest(case_id=case.case_id):
                 lowered = record.cause.casefold()
                 for label in forbidden:
-                    self.assertNotIn(label, lowered,
-                                     f"{case.case_id}: FM record cause must not use {label}")
+                    self.assertNotIn(
+                        label,
+                        lowered,
+                        f"{case.case_id}: FM record cause must not use {label}",
+                    )
 
 
 # ── No gold answer leakage in FM ────────────────────────────────────────
@@ -508,13 +543,15 @@ class FailureMemoryNoGoldLeakageTest(unittest.TestCase):
             with self.subTest(case_id=case.case_id):
                 if case.perturbation_label == "reasoning_error":
                     self.assertEqual(
-                        record.corrected_memory, record.wrong_memory,
+                        record.corrected_memory,
+                        record.wrong_memory,
                         f"{case.case_id}: reasoning_error: evidence was correct, "
                         f"repair adds reasoning guidance not new memory",
                     )
                 else:
                     self.assertNotEqual(
-                        record.corrected_memory, record.wrong_memory,
+                        record.corrected_memory,
+                        record.wrong_memory,
                         f"{case.case_id}: corrected_memory must differ from wrong_memory",
                     )
 

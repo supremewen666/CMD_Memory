@@ -1,14 +1,15 @@
 ---
 title: Implement granularity_error, graph_error, and safety_error labels
 labels:
-  - AFK
-type: AFK
+  - done
+type: done
 blocked_by: "0011"
 user_stories:
   - 39
   - 40
   - 41
 tdd_cycle: 17
+status: done
 ---
 
 # Implement granularity_error, graph_error, and safety_error labels
@@ -50,10 +51,10 @@ Add the remaining three V1 pipeline labels with their corresponding counterfactu
 
 ## Acceptance Criteria
 
-- [ ] Oracle Granularity replay enumerates levels and attributes `granularity_error` when best granularity ≠ original.
-- [ ] Graph-Off replay disables graph expansion and attributes `graph_error` when recovery gain > 0.
-- [ ] Safety-Off replay bypasses safety filter and attributes `safety_error` when recovery gain > 0.
-- [ ] All 11 labels validate through `validate_v1_label()`.
-- [ ] Deferred label registry: `granularity_error`, `graph_error`, `safety_error` moved to active.
-- [ ] No regression on V0 6-label + 0011 2-label smoke cases.
-- [ ] Behavior-level tests: one smoke case per new label with correct attribution.
+- [x] Oracle Granularity replay enumerates levels and attributes `granularity_error` when best granularity ≠ original.
+- [x] Graph-Off replay disables graph expansion and attributes `graph_error` when recovery gain > 0.
+- [x] Safety-Off replay bypasses safety filter and attributes `safety_error` when recovery gain > 0.
+- [x] All 11 labels validate through `validate_v1_label()`.
+- [x] Deferred label registry: `granularity_error`, `graph_error`, `safety_error` moved to active.
+- [x] No regression on V0 6-label + 0011 2-label smoke cases.
+- [x] Behavior-level tests: one smoke case per new label with correct attribution.

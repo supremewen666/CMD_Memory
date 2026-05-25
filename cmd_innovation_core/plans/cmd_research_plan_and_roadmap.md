@@ -4,7 +4,7 @@ Project: **Counterfactual Memory Debugger for LLM Agent Memory**
 
 Short name: **CMD**
 
-Date: 2026-05-09
+Date: 2026-05-20 (last updated: Decision 30 acceleration + Rewind positioning)
 
 ## 0. Source Context and Boundary
 
@@ -628,7 +628,7 @@ Boundary test:
 - Retrieval-only oracle.
 - Single-intervention debugger.
 - Generic hard-case update.
-- V0.5 retrieval baselines: lexical/BM25, vector, hybrid, and hybrid+rerank.
+- V0.5 retrieval baselines: lexical/BM25 and vector baselines.
 
 ### Ablations
 
@@ -687,22 +687,93 @@ flowchart TD
   O --> N["Paper artifacts: claim inventory, tables, roadmap, draft"]
 ```
 
-## 14. Timeline
+## 14. Timeline (Accelerated — 2026-06-10 target)
 
-| Week | Output | Gate |
-|------|--------|------|
-| 1 | package-oracle schema + 20 smoke cases | schema complete and manually inspectable |
-| 2 | 50-100 V0 probe cases + fixed-summary/vector baselines | labeled perturbations over six pipeline labels |
-| 3 | replay engine with oracle write/compression/raw-event/retrieval/injection/reasoning | replay table generated |
-| 4 | attribution evaluation vs heuristics/subagent judge | macro F1 and top-2 accuracy |
-| 5 | ECS + post-repair context replay | repaired context beats generic hard-case update |
-| 6 | leak-safe monitor tests | no leakage or final-label override |
-| 7 | Failure Memory recurrence experiment | recurrence reduction table |
-| 8 | paper-ready artifacts | claim inventory and draft outline |
+Decision 30 (2026-05-20): Counterfactual replay is commoditizing from both tooling and academic directions. Timeline accelerated from 2026-06-15 to **2026-06-10 draft deadline**.
 
-V0.5 follow-up issue after Week 2 smoke: add lexical/BM25, vector, hybrid, and hybrid+rerank retrieval baselines; ranked retrieval traces; richer evidence metrics; and hard negative cases. This strengthens retrieval claims without blocking the first minimal harness.
+### V0 (已完成, 2026-05-09 ~ 2026-05-13)
 
-## 15. Implementation Artifacts
+| Week | Output | Status |
+|------|--------|--------|
+| 1 | package-oracle schema + 20 smoke cases | ✅ |
+| 2 | 50-100 V0 probe cases + baselines | ✅ |
+| 3 | replay engine + 6 replays | ✅ |
+| 4 | attribution evaluation vs baselines | ✅ |
+| 5 | ECS + Post-Repair Context Replay | ✅ |
+| 6 | leak-safe monitor tests | ✅ |
+| 7 | Failure Memory recurrence experiment | ✅ |
+| 8 | V0→V1 gate check (4 criteria pass) | ✅ HITL approved |
+
+### V1 (已完成, 2026-05-13 ~ 2026-05-19)
+
+| Week | Output | Status |
+|------|--------|--------|
+| 9-10 | Issues 0011-0012: label expansion (6→11 labels, 6→10 replays) | ✅ |
+| 11 | Issue 0013: coupled-failure recalibration + memory-probe baseline | ✅ |
+| 12 | Issue 0014: mem0 adapter integration | ✅ |
+| 13 | Issue 0015: Letta adapter + V1→V2 gate pass | ✅ |
+
+### V1 Remaining → Paper (2026-05-20 ~ 2026-06-10)
+
+| Date | Output | Owner |
+|------|--------|-------|
+| ✅ 05-22 | Real data integration + at-scale mechanics validation | engineering |
+| ✅ 05-23 | Decision 33 hook implementation + Decision 34 paper-claim repair | engineering / HITL |
+| 05-25~28 | LLM eval infra wiring (`agent_generate`, independent scorer, AnswerVerifier, label strip) | engineering |
+| 05-28~30 | 596-case LLM re-test (all 10 replays, no hook) | engineering |
+| 05-30~01 | 130-case researcher adjudication | researcher |
+| 06-03 | Experiment 2 headline on 130 adjudicated cases | — |
+| 06-06 | Experiment 1: 80 cases x 5 modes with token-control | — |
+| 06-10 | **Paper draft complete**: adjudicated headline + Experiment 1 + layered positioning + supplementary sanity/hook/coupled-failure tables | — |
+
+### V2 (设计完成, post-paper implementation)
+
+Runtime repair loop, contrastive context mode, Failure Memory skill evolution. Architecture defined but implementation deferred to post-paper.
+
+## 15. Competitive Positioning: CMD vs Generic Agent Debuggers (Rewind)
+
+Decision 30 (2026-05-20) originally required head-to-head differentiation from generic agent debugging tools. Decision 34 (2026-05-23) drops the head-to-head benchmark because Rewind and CMD operate on different layers and do not share an input modality. Counterfactual replay is becoming table stakes — 3+ tools (Culpa, Rewind, TraceForge) + 3+ academic systems (STAR, TraceAudit, CMD) converged on "record→replay→fork→measure" within 2 months. CMD must demonstrate memory-pipeline-specific depth through layered positioning and qualitative boundary examples, not forced shared metrics.
+
+### The Convergence Problem
+
+| Tool | Approach | Granularity |
+|------|----------|-------------|
+| Culpa | Deterministic replay + counterfactual forking | Agent step |
+| Rewind | Time-travel debugger, `rewind fix` command | Agent step |
+| TraceForge | Counterfactual sensitivity scoring | Data input |
+| STAR | Stage-attributed counterfactual repair | Pipeline stage (4) |
+| TraceAudit | Chunk-level counterfactual audit | RAG chunk |
+| **CMD** | Operation-level counterfactual attribution | Memory operation (11) |
+
+### Five-Dimension Depth Differentiation (CMD vs Rewind)
+
+| Dimension | Rewind (agent-step) | CMD (memory-operation) |
+|-----------|---------------------|------------------------|
+| **Granularity** | "Step 5 used stale data" | "`compression_error`: evidence lost during session 3→4 summarization, phrase 'Messi GOAT' dropped from memory item #7" |
+| **Diagnosis** | LLM guesses which step failed | Counterfactual replay produces Recovery Gain ranking over 11 operations |
+| **Repair** | Retry step with different model/prompt | Rewrite specific memory item to restore lost evidence (targeted per-label repair action) |
+| **Validation** | LLM-as-judge score comparison | Post-Repair Context Replay: rerun original query, measure evidence recall |
+| **Learning** | One-shot fix, no retention | ECS → Failure Memory → recurrence prevention via keyword retrieval |
+
+### Decision 34 Update: Layered Positioning, No Head-to-Head
+
+The paper no longer includes a direct benchmark against Rewind. Rewind lives at the runtime layer (agent trace, tool calls, step retry); CMD lives at the memory-pipeline layer (write/compress/extract/retrieve/inject/route/reason). The paper uses a layered-stack section instead: Runtime debugger (Rewind/Culpa/TraceForge) vs Memory debugger (CMD) vs Item-content repair (MemRepair/MemLineage), with qualitative boundary examples.
+
+### Repair Depth Metric (Proposed)
+
+A new metric to operationalize "deeper repair":
+- **Level 0 (Symptom)**: Retry the final step (Rewind-style)
+- **Level 1 (Pipeline)**: Fix the specific memory operation (CMD-style, 11 labels)
+- **Level 2 (Item)**: Fix the specific memory item content (CMD-style, targeted repair)
+- **Level 3 (Cascade)**: Fix the item + all downstream items affected (CMD V2, MEMOREPAIR integration)
+
+CMD V1 achieves Level 1-2. CMD V2 targets Level 3. Rewind achieves Level 0.
+
+### Integration Stance
+
+CMD-Audit is a standalone harness — it does not depend on Culpa/Rewind for operation. But the paper acknowledges them as complementary infrastructure: Rewind captures the agent trace; CMD replays it at memory-operation granularity. The paper cites the counterfactual tooling convergence as validation of the methodology while demonstrating CMD's unique depth.
+
+## 16. Implementation Artifacts
 
 Suggested project structure:
 
@@ -740,39 +811,44 @@ project/
     targeted_fix_results.csv
 ```
 
-## 16. Risks
+## 17. Risks
 
 | Risk | Mitigation |
 |------|------------|
-| replay cost too high | start with small probe, then learn attribution classifier |
-| failure causes are coupled | emit top-2 or multi-label attribution |
-| gold evidence unavailable | begin with synthetic perturbations |
+| replay cost too high | RPE pre-filter (Issue 0016): evidence-surprise scoring selects top-k replays; D-MEM 80% token reduction target |
+| failure causes are coupled | emit top-2 or multi-label attribution; configurable `top_k` (default 2); transparent `close_deltas` |
+| gold evidence unavailable online | document as information-theoretic bound (Limitation #1, `cmd_innovation_core/plans/limitations.md`); two-tier deployment: CMD-Audit (offline, full) vs CMD-Skill Adapter (online, 7/11 + self-supervision) |
 | LLM judge instability | prioritize exact/F1/evidence recall |
 | Failure Memory pollutes context | retrieve only corrected memory and short repair guidance |
 | Subagent monitor leaks trace or gold answer | restrict monitor outputs and test leakage explicitly |
-| V0 scope expands into item-quality diagnosis | exclude bad-memory-item labels from V0 attribution metrics |
+| counterfactual replay commoditized before paper | Decision 30: accelerate timeline (06-10); Decision 34: emphasize layered memory-pipeline depth over generic replay; no forced Rewind benchmark |
+| reviewer dismisses CMD as "just another replay tool" | paper must differentiate along granularity (operation-level, unique), evidence type (causal replay vs observational), and repair depth (Level 1-2 vs Level 0); cite Rewind/Culpa as complementary infrastructure, not competitors |
 | package schema becomes too elaborate | start with 20 smoke cases before 50-100 cases |
 | method becomes too engineering-heavy | first paper focuses on formulation, taxonomy, benchmark, and diagnostic value |
 | stronger retrievers blur extraction vs retrieval failures | preserve the raw-event-oracle priority rule for `premature_extraction_error` |
+| reviewer challenges gold evidence gap as fatal | preempt with honest limitation positioning: 4/11 labels affected (content-absence diagnosis), 7/11 unaffected (structure/access diagnosis); gap is measurable, bounded, and improves with success-trace corpus; comparison is CMD-online vs status quo (zero attribution), not CMD vs CMD-with-gold |
 
-## 17. Next Action
+## 18. Current State & Next Actions
 
-Build a minimal CMD probe:
+V0 complete and locked; V1 implementation layer complete through issues 0011-0021; 803 tests pass. V0→V1 and V1→V2 gates passed mechanics validation, but Decision 34 reframes the 596-case Macro F1 as a phrase-match sanity snapshot. Paper headline awaits LLM eval wiring and 130-case researcher adjudication.
 
-1. create 50-100 synthetic examples;
-2. encode them as package-oracle cases with six V0 pipeline labels;
-3. implement fixed-summary and vector-memory baselines;
-4. implement oracle write, oracle retrieval, oracle compression, Injection-Oracle, evidence-given reasoning, and Verbatim Event Oracle;
-5. implement leak-safe subagent judge as both baseline and high-recall replay trigger;
-6. compute \(\Delta_k\);
-7. draft ECS and rebuild repaired context;
-8. rerun the original failed query without injecting gold answer;
-9. produce `attribution_table.csv`, `post_repair_retest.csv`, and `monitor_safety_report.csv`.
-10. add Failure Memory retrieval for similar future tasks.
-11. after the smoke harness works, execute `plans/issues/strengthen_retrieval_baselines_and_evidence_scoring.md`.
+### Immediate (Decision 34, 2026-05-25 ~ 2026-06-03)
 
-## 18. Follow-up Issue
+1. **LLM eval infra wiring** — `agent_generate`, independent scorer, AnswerVerifier, label-strip, baseline rescore
+2. **596-case LLM re-test** — all 10 replays, no hook; produces scale sanity + hook training labels
+3. **Researcher 130-case adjudication** — headline Experiment 2 labels with confidence
+4. **Researcher 80-ECS inspection** — Experiment 1 input quality control
 
-**Strengthen retrieval baselines and evidence scoring** is now an explicit V0.5 issue.
+### Paper sprint (2026-06-01 ~ 2026-06-10)
 
-It adds real retrieval baselines, ranked retrieval traces, richer evidence metrics, and hard negatives while preserving the key CMD boundary: raw-event-only recoverable evidence should be labeled `premature_extraction_error`, not `retrieval_error`.
+5. **Experiment 2**: CMD attribution effectiveness on 130 researcher-adjudicated cases
+6. **Experiment 1**: 5-mode Context Construction on 80 cases with token-control
+7. **Supplementary**: hook efficacy table + coupled-failure subset report + 596-case scale sanity
+8. **Paper draft**: adjudicated headline claims + Experiment 1 + layered positioning
+
+## 19. Follow-up Issues (V2)
+
+- **Cascade repair**: MemQ TD(λ) on provenance DAG for downstream impact tracking
+- **Contrastive context mode**: `wrong_memory + cause + corrected_memory` vs `corrected_memory` only
+- **Repair depth metric**: Level 0 (symptom) → Level 3 (cascade) measurement framework
+- **Failure Memory skill evolution**: automated ECS-driven memory policy updates

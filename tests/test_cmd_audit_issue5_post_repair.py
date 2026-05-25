@@ -6,9 +6,7 @@ import unittest
 
 from cmd_audit import (
     AuditResult,
-    BaselineSuiteResult,
     ECSDraft,
-    FullAuditResult,
     PostRepairResult,
     RepairedContext,
     classify_repair_assessment,
@@ -22,7 +20,6 @@ from cmd_audit import (
     validate_sandbox_path,
     write_post_repair_table,
 )
-from cmd_audit.labels import LabelValidationError
 
 
 RETRIEVAL_FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")

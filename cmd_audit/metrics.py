@@ -6,23 +6,25 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
-from .labels import validate_v0_label
+from .labels import validate_v1_label
 
 
 @dataclass(frozen=True)
 class DiagnosisPrediction:
     system_name: str
     case_id: str
-    gold_label: str
-    predicted_label: str
+    gold_label: str | None
+    predicted_label: str | None
     top2_labels: tuple[str, ...]
     cost_per_diagnosis: float
 
     def __post_init__(self) -> None:
-        validate_v0_label(self.gold_label)
-        validate_v0_label(self.predicted_label)
+        if self.gold_label is not None:
+            validate_v1_label(self.gold_label)
+        if self.predicted_label is not None:
+            validate_v1_label(self.predicted_label)
         for label in self.top2_labels:
-            validate_v0_label(label)
+            validate_v1_label(label)
 
 
 @dataclass(frozen=True)
@@ -46,15 +48,21 @@ def compute_diagnosis_metrics(
     metrics: dict[str, DiagnosisMetrics] = {}
     for system_name, rows in by_system.items():
         label_set = labels or _observed_labels(rows)
+        # Null gold_label cases: excluded from accuracy/F1 (no ground truth),
+        # included in cost (pipeline still ran).
+        labeled_rows = [r for r in rows if r.gold_label is not None]
         total = len(rows)
-        correct = sum(row.predicted_label == row.gold_label for row in rows)
-        top2_correct = sum(_top2_correct(row) for row in rows)
-        total_cost = sum(row.cost_per_diagnosis for row in rows)
+        total_labeled = len(labeled_rows)
+        correct = sum(
+            r.predicted_label == r.gold_label for r in labeled_rows
+        )
+        top2_correct = sum(_top2_correct(r) for r in labeled_rows)
+        total_cost = sum(r.cost_per_diagnosis for r in rows)
         metrics[system_name] = DiagnosisMetrics(
             system_name=system_name,
-            attribution_accuracy=correct / total if total else 0.0,
-            macro_f1=_macro_f1(rows, label_set),
-            top2_accuracy=top2_correct / total if total else 0.0,
+            attribution_accuracy=correct / total_labeled if total_labeled else 0.0,
+            macro_f1=_macro_f1(labeled_rows, label_set),
+            top2_accuracy=top2_correct / total_labeled if total_labeled else 0.0,
             cost_per_diagnosis=total_cost / total if total else 0.0,
         )
     return metrics
@@ -62,7 +70,12 @@ def compute_diagnosis_metrics(
 
 def _observed_labels(rows: list[DiagnosisPrediction]) -> tuple[str, ...]:
     labels = sorted(
-        {row.gold_label for row in rows} | {row.predicted_label for row in rows}
+        {
+            label
+            for row in rows
+            for label in (row.gold_label, row.predicted_label)
+            if label is not None
+        }
     )
     return tuple(labels)
 

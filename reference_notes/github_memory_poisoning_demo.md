@@ -1,0 +1,7 @@
+# GitHub: m-pentest/memory-poisoning-demo
+
+- **来源**: GitHub repo, created 2026-05-09. 4 stars. Python + ChromaDB.
+- **核心贡献**: Proof-of-concept demonstrating memory poisoning against AI agents backed by persistent vector stores. Shows that an adversary with write access to a ChromaDB directory can inject crafted entries that rank high in similarity search and steer the agent toward false beliefs — with no prompt injection or jailbreak. Documents attack surface: shared filesystem, compromised sidecar, insider/ops, poisoned backup. Companion blog post at mamtaupadhyay.com.
+- **关键概念**: vector store poisoning, silent memory injection, ChromaDB attack surface, memory integrity, RAG memory poisoning
+- **CMD 相关性**: HIGH. Validates CMD's `item_poisoned` (V2 label) and `safety_error` (V1 label) with practical attack evidence. The attack surface documented (no cryptographic integrity on metadata fields like session_id, timestamp, source) maps to CMD's monitor safety boundary concerns. Confirms that memory integrity verification is a real need, not a theoretical concern. The demo's simplicity (one injected entry flips agent behavior) underscores the urgency of memory audit tooling.
+- **开放空白**: Shows the attack works but doesn't provide automated detection. CMD's Subagent Judge Monitor + counterfactual replay could detect poisoning-induced failures (anomaly triggered → replay exposes that evidence was never in extracted memory → flag as potential poisoning).

@@ -625,8 +625,8 @@ class V0V1GateCheckWithTempArtifactsTest(unittest.TestCase):
         _write_csv(
             self.sandbox / "post_repair_table.csv",
             [
-                {"case_id": f"v0-{l}-001", "repair_assessment": "recovered"}
-                for l in labels
+                {"case_id": f"v0-{label}-001", "repair_assessment": "recovered"}
+                for label in labels
             ],
         )
 
@@ -655,7 +655,11 @@ class V0V1GateCheckWithTempArtifactsTest(unittest.TestCase):
             artifacts_dir=self.artifacts, sandbox_dir=self.sandbox
         )
         self.assertFalse(result.all_passed)
-        confusion = [c for c in result.criteria if c.criterion_id == "confusion_diagonal_dominance"]
+        confusion = [
+            c
+            for c in result.criteria
+            if c.criterion_id == "confusion_diagonal_dominance"
+        ]
         self.assertFalse(confusion[0].passed)
 
     def test_fails_when_repair_missing(self):
@@ -665,7 +669,11 @@ class V0V1GateCheckWithTempArtifactsTest(unittest.TestCase):
             artifacts_dir=self.artifacts, sandbox_dir=self.sandbox
         )
         self.assertFalse(result.all_passed)
-        repair = [c for c in result.criteria if c.criterion_id == "repair_assessment_distribution"]
+        repair = [
+            c
+            for c in result.criteria
+            if c.criterion_id == "repair_assessment_distribution"
+        ]
         self.assertFalse(repair[0].passed)
 
     def test_fails_when_macro_f1_insufficient(self):
@@ -708,7 +716,9 @@ class V0V1GateCheckWithTempArtifactsTest(unittest.TestCase):
             artifacts_dir=self.artifacts, sandbox_dir=self.sandbox
         )
         self.assertFalse(result.all_passed)
-        f1_crit = [c for c in result.criteria if c.criterion_id == "macro_f1_exceeds_baselines"]
+        f1_crit = [
+            c for c in result.criteria if c.criterion_id == "macro_f1_exceeds_baselines"
+        ]
         self.assertFalse(f1_crit[0].passed)
 
 
@@ -720,11 +730,12 @@ class V1V2GateCheckTest(unittest.TestCase):
         result = check_v1_to_v2_gate()
         self.assertEqual(result.gate_id, "V1→V2")
         self.assertFalse(result.all_passed)
-        self.assertEqual(len(result.criteria), 1)
+        self.assertEqual(len(result.criteria), 2)
         c = result.criteria[0]
         self.assertEqual(c.criterion_id, "adapter_integration_count")
         self.assertFalse(c.passed)
         self.assertIn("0 adapter integrations", c.evidence)
+        self.assertEqual(result.criteria[1].criterion_id, "provenance_hmac_tamper_free")
 
     def test_result_has_timestamp(self):
         result = check_v1_to_v2_gate()

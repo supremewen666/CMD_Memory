@@ -1,0 +1,70 @@
+{
+  "release_verdict": "HOLD",
+  "generated_at": "2026-05-23",
+  "review_scope": [
+    "TASK.md",
+    "CLAUDE.md",
+    "CONTEXT.md",
+    "knowledge/_index.md",
+    "knowledge/current-memory.md",
+    "cmd_innovation_core/issues/README.md",
+    "cmd_innovation_core/plans/cmd_open_decisions.md",
+    "cmd_innovation_core/gates/V0V1_gate_status.md",
+    "cmd_innovation_core/gates/V1V2_gate_status.md",
+    "cmd_innovation_core/plans/cmd_progress_report.md",
+    "cmd_innovation_core/plans/limitations.md",
+    "cmd_innovation_core/plans/experiment_02_cmd_attribution.md",
+    "cmd_innovation_core/plans/experiment_01_context_construction.md",
+    "data/cleaned_cases/cleaning_report.txt",
+    "data/probe_cases/researcher_labeled_subset.json",
+    "data/probe_cases/experiment_01_inspected_ecs.json"
+  ],
+  "blocking_findings": [
+    {
+      "id": "P0-headline-artifacts-missing",
+      "summary": "Paper release still lacks LLM re-test output and populated 130-case researcher-adjudicated headline set."
+    }
+  ],
+  "p1_findings": [
+    {
+      "id": "P1-deepseek-provenance-missing",
+      "summary": "596-case scale sanity provenance depends on recovered or reconstructed annotate_perturbation_labels.py."
+    },
+    {
+      "id": "P1-review-staleness",
+      "summary": "Review must be regenerated after headline metrics or protocol files change."
+    }
+  ],
+  "checked_files": [
+    "TASK.md",
+    "CLAUDE.md",
+    "CONTEXT.md",
+    "knowledge/_index.md",
+    "knowledge/current-memory.md",
+    "cmd_innovation_core/issues/README.md",
+    "cmd_innovation_core/plans/cmd_open_decisions.md",
+    "cmd_innovation_core/gates/V0V1_gate_status.md",
+    "cmd_innovation_core/gates/V1V2_gate_status.md",
+    "cmd_innovation_core/plans/cmd_progress_report.md",
+    "cmd_innovation_core/plans/limitations.md",
+    "cmd_innovation_core/plans/experiment_02_cmd_attribution.md",
+    "cmd_innovation_core/plans/experiment_01_context_construction.md",
+    "data/cleaned_cases/cleaning_report.txt",
+    "data/probe_cases/researcher_labeled_subset.json",
+    "data/probe_cases/experiment_01_inspected_ecs.json"
+  ],
+  "stale_if_any_newer_than": [
+    "TASK.md",
+    "CLAUDE.md",
+    "CONTEXT.md",
+    "knowledge/current-memory.md",
+    "cmd_innovation_core/plans/cmd_open_decisions.md",
+    "cmd_innovation_core/gates/V0V1_gate_status.md",
+    "cmd_innovation_core/plans/limitations.md",
+    "cmd_innovation_core/plans/experiment_02_cmd_attribution.md",
+    "cmd_innovation_core/plans/experiment_01_context_construction.md",
+    "data/probe_cases/researcher_labeled_subset.json",
+    "data/probe_cases/experiment_01_inspected_ecs.json",
+    "artifacts/at_scale_llm_retest.csv"
+  ]
+}

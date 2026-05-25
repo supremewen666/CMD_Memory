@@ -1,86 +1,90 @@
-# Issue 0009 Implementation Details: Harden Subagent Judge Monitor Contract
+# Issue 0009 实现细节：加固 Subagent Judge Monitor 契约
 
-## Purpose
+## 目的
 
-This document is the zoomed-out implementation map for issue 0009, `Harden Subagent Judge Monitor contract`.
+本文档是 issue 0009（`加固 Subagent Judge Monitor 契约`）的全局实现地图。
 
-Issue 0009 takes the leak-safe Subagent Judge Monitor from issue 0002 and hardens its contract at the implementation level:
+Issue 0009 从 issue 0002 获取防泄漏的 Subagent Judge Monitor，并在实现层面加固其契约：
 
 ```text
-SubagentJudgeMonitorDecision construction
-  -> anomaly_reason enum validation
-  -> evidence_pointers opaque-ID validation
-  -> forbidden field blocklist check
-  -> payload serialization gate
-  -> MonitorAnomalyReasonError / LeakSafeMonitorError rejection
+SubagentJudgeMonitorDecision 构造
+  -> anomaly_reason 枚举验证
+  -> evidence_pointers 不透明ID验证
+  -> 禁止字段黑名单检查
+  -> 载荷序列化闸门
+  -> MonitorAnomalyReasonError / LeakSafeMonitorError 拒绝
 ```
 
-The implemented slice locks the monitor's `anomaly_reason` to a four-value enum, restricts evidence pointers to opaque IDs only, and rejects any output that includes free-form natural language, final labels, ECS, gold answers, memory writes, or full failed traces. All validation fires at construction time (`__post_init__`) and serialization time (`to_payload`).
+已实现的切片将 Monitor 的 `anomaly_reason` 锁定为四值枚举，将 evidence pointers 限制为仅不透明 ID，并拒绝任何包含自由形式自然语言、最终标签、ECS、gold answer、内存写入或完整失败轨迹的输出。所有验证在构造时（`__post_init__`）和序列化时（`to_payload`）触发。
 
-## Source Requirements
+## 源头需求
 
-The implementation follows these local documents.
+实现遵循以下本地文档。
 
-| Source | Requirement Applied In Issue 0009 |
-| --- | --- |
-| `TASK.md` | Subagent Judge Monitor `anomaly_reason` locked to a predefined enum; free-form natural language prohibited; evidence pointers are opaque IDs only. |
-| `CLAUDE.md` | Subagent Judge Monitor is leak-safe: may trigger replay but must not emit final labels, ECS, memory writes, gold answers, or full failed traces; `anomaly_reason` locked to enum; evidence pointers opaque IDs only. |
-| `cmd_innovation_core/CONTEXT.md` | **Subagent Judge Monitor** `anomaly_reason` forced to predefined enum (`answer_vs_evidence_mismatch`, `retrieved_context_incomplete`, `evidence_recall_low`, `confidence_anomaly`); free-form natural language prohibited; evidence pointers opaque IDs only, never content text. |
-| `cmd_innovation_core/prd/cmd_minimal_probe_prd.md` | AC6: Monitor `anomaly_reason` locked to predefined enum; free-form natural language prohibited; evidence pointers opaque IDs only. User stories 6/27/28. |
-| `cmd_innovation_core/issues/0009-harden-subagent-judge-monitor-contract.md` | Lock `anomaly_reason` to enum; restrict evidence pointers to opaque IDs; reject free-form text; test at contract boundary. |
-| `cmd_innovation_core/tdd/cmd_tracer_bullets.md` | Cycle 11: free-form `anomaly_reason` rejected; Cycle 8: forbidden payload fields rejected. |
-| `cmd_innovation_core/issues/0002-baselines-and-judge-monitor-implementation-details.md` | Provides the pre-hardening monitor foundation (`SubagentJudgeMonitorDecision` with free-form `reasons`, `validate_monitor_payload`, `FORBIDDEN_MONITOR_FIELDS`). |
 
-## Domain Boundary
+| 来源                                                                                      | 在 Issue 0009 中应用的需求                                                                                                                                                                                             |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TASK.md`                                                                               | Subagent Judge Monitor 的 `anomaly_reason` 锁定为预定义枚举；禁止自由形式自然语言；evidence pointers 仅为不透明 ID。                                                                                                                       |
+| `CLAUDE.md`                                                                             | Subagent Judge Monitor 防泄漏：可触发重放，但不得输出最终标签、ECS、内存写入、gold answer 或完整失败轨迹；`anomaly_reason` 锁定为枚举；evidence pointers 仅为不透明 ID。                                                                                      |
+| `cmd_innovation_core/CONTEXT.md`                                                        | **Subagent Judge Monitor** 的 `anomaly_reason` 强制为预定义枚举（`answer_vs_evidence_mismatch`、`retrieved_context_incomplete`、`evidence_recall_low`、`confidence_anomaly`）；禁止自由形式自然语言；evidence pointers 仅为不透明 ID，绝不包含内容文本。 |
+| `cmd_innovation_core/prd/cmd_minimal_probe_prd.md`                                      | AC6：Monitor 的 `anomaly_reason` 锁定为预定义枚举；禁止自由形式自然语言；evidence pointers 仅为不透明 ID。用户故事 6/27/28。                                                                                                                     |
+| `cmd_innovation_core/issues/0009-harden-subagent-judge-monitor-contract.md`             | 将 `anomaly_reason` 锁定为枚举；将 evidence pointers 限制为不透明 ID；拒绝自由形式文本；在契约边界进行测试。                                                                                                                                      |
+| `cmd_innovation_core/tdd/cmd_tracer_bullets.md`                                         | Cycle 11：拒绝自由形式 `anomaly_reason`；Cycle 8：拒绝禁止的载荷字段。                                                                                                                                                             |
+| `cmd_innovation_core/issues/0002-baselines-and-judge-monitor-implementation-details.md` | 提供加固前的 Monitor 基础（含自由形式 `reasons` 的 `SubagentJudgeMonitorDecision`、`validate_monitor_payload`、`FORBIDDEN_MONITOR_FIELDS`）。                                                                                      |
 
-Issue 0009 hardens the issue 0002 monitor contract. It does not change the monitor's role or introduce new monitor capabilities.
+
+## 领域边界
+
+Issue 0009 加固 issue 0002 的 Monitor 契约，不改变 Monitor 的角色或引入新的 Monitor 能力。
 
 ```text
 run_subagent_judge_monitor(case, baseline)
-  -> risk_score computation (unchanged from issue 0002)
-  -> anomaly_reason selection from enum (NEW)
-  -> evidence_pointers from baseline retrieved_memory_ids (NEW)
-  -> SubagentJudgeMonitorDecision construction
+  -> risk_score 计算（与 issue 0002 一致，不变）
+  -> anomaly_reason 从枚举中选择（新增）
+  -> evidence_pointers 从 baseline.retrieved_memory_ids 获取（新增）
+  -> SubagentJudgeMonitorDecision 构造
       -> __post_init__:
-          -> validate_monitor_anomaly_reason(anomaly_reason)  (NEW)
-          -> validate_evidence_pointers(evidence_pointers)     (NEW)
+          -> validate_monitor_anomaly_reason(anomaly_reason)  （新增）
+          -> validate_evidence_pointers(evidence_pointers)     （新增）
       -> to_payload:
           -> validate_monitor_payload(payload)
-              -> _reject_forbidden_monitor_fields              (unchanged from 0002)
+              -> _reject_forbidden_monitor_fields              （与 0002 一致，不变）
 ```
 
-It does own:
+本 Issue 负责：
 
-- defining the four-value `MONITOR_ANOMALY_REASON_VALUES` enum;
-- adding `MonitorAnomalyReasonError` for enum validation failures;
-- adding `validate_monitor_anomaly_reason()` as the enum gate;
-- adding `_is_opaque_id()` and `validate_evidence_pointers()` for opaque-ID enforcement;
-- updating `SubagentJudgeMonitorDecision` fields: `reasons` → `anomaly_reason` + `evidence_pointers`;
-- updating `run_subagent_judge_monitor()` to produce enum values and opaque pointers;
-- updating `SubagentJudgeMonitorDecision.to_payload()` to serialize new fields;
-- behavior-level tests for enum rejection, opaque-ID rejection, and end-to-end contract.
+- 定义四值 `MONITOR_ANOMALY_REASON_VALUES` 枚举；
+- 添加 `MonitorAnomalyReasonError` 用于枚举验证失败；
+- 添加 `validate_monitor_anomaly_reason()` 作为枚举闸门；
+- 添加 `_is_opaque_id()` 和 `validate_evidence_pointers()` 用于不透明 ID 强制校验；
+- 更新 `SubagentJudgeMonitorDecision` 字段：`reasons` → `anomaly_reason` + `evidence_pointers`；
+- 更新 `run_subagent_judge_monitor()` 以生成枚举值和不透明指针；
+- 更新 `SubagentJudgeMonitorDecision.to_payload()` 以序列化新字段；
+- 针对枚举拒绝、不透明 ID 拒绝和端到端契约的行为级测试。
 
-It does not own:
+本 Issue 不负责（属于其他 issue）：
 
-- changing the monitor's role (still a replay trigger, not a diagnosis source);
-- changing `FORBIDDEN_MONITOR_FIELDS` or `_reject_forbidden_monitor_fields` (issue 0002 owns those);
-- adding new monitor decision logic (risk_score computation is unchanged);
-- changing `validate_monitor_payload` behavior;
-- CMD-Audit attribution or replay logic;
-- ECS, Post-Repair Context Replay, or Failure Memory.
+- 改变 Monitor 的角色（仍是重放触发器，非诊断源）；
+- 改变 `FORBIDDEN_MONITOR_FIELDS` 或 `_reject_forbidden_monitor_fields`（由 issue 0002 负责）；
+- 添加新的 Monitor 决策逻辑（risk_score 计算不变）；
+- 改变 `validate_monitor_payload` 行为；
+- CMD-Audit 归因或重放逻辑；
+- ECS、Post-Repair Context Replay 或 Failure Memory。
 
-## Module Map
+## 模块地图
 
-| Module | Issue 0009 Role |
-| --- | --- |
-| `cmd_audit/labels.py` | Owns `MONITOR_ANOMALY_REASON_VALUES`, `VALID_MONITOR_ANOMALY_REASONS`, `MonitorAnomalyReasonError`, and `validate_monitor_anomaly_reason()`. |
-| `cmd_audit/baselines.py` | Owns `_is_opaque_id()`, `validate_evidence_pointers()`, updated `SubagentJudgeMonitorDecision`, and updated `run_subagent_judge_monitor()`. |
-| `cmd_audit/__init__.py` | Exports new public surface: `MONITOR_ANOMALY_REASON_VALUES`, `MonitorAnomalyReasonError`, `SubagentJudgeMonitorDecision`, `validate_evidence_pointers`, `validate_monitor_anomaly_reason`, `validate_monitor_payload`. |
-| `tests/test_cmd_audit_issue9_monitor_contract.py` | Behavior-level tests for the hardened contract: enum validation, opaque-ID validation, forbidden field blocklist, and end-to-end payload shape. |
 
-## Caller Graph
+| 模块                                                | Issue 0009 角色                                                                                                                                                                                  |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cmd_audit/labels.py`                             | 负责 `MONITOR_ANOMALY_REASON_VALUES`、`VALID_MONITOR_ANOMALY_REASONS`、`MonitorAnomalyReasonError` 和 `validate_monitor_anomaly_reason()`。                                                          |
+| `cmd_audit/baselines.py`                          | 负责 `_is_opaque_id()`、`validate_evidence_pointers()`、更新后的 `SubagentJudgeMonitorDecision` 和更新后的 `run_subagent_judge_monitor()`。                                                                  |
+| `cmd_audit/__init__.py`                           | 导出新的公共接口：`MONITOR_ANOMALY_REASON_VALUES`、`MonitorAnomalyReasonError`、`SubagentJudgeMonitorDecision`、`validate_evidence_pointers`、`validate_monitor_anomaly_reason`、`validate_monitor_payload`。 |
+| `tests/test_cmd_audit_issue9_monitor_contract.py` | 加固后契约的行为级测试：枚举验证、不透明 ID 验证、禁止字段黑名单和端到端载荷形态。                                                                                                                                                    |
 
-Main CLI path (updated from issue 0002):
+
+## 调用关系图
+
+主 CLI 路径（从 issue 0002 更新）：
 
 ```text
 cmd_audit.__main__
@@ -90,17 +94,17 @@ cmd_audit.__main__
           -> harness.run_case
               -> baselines.run_baseline_suite
                   -> baselines.run_subagent_judge_monitor
-                      -> risk_score computation (unchanged)
-                      -> anomaly_reason selection (NEW: priority-based enum choice)
-                      -> evidence_pointers = tuple(baseline.retrieved_memory_ids) (NEW)
-                      -> SubagentJudgeMonitorDecision(...)  (NEW: anomaly_reason + evidence_pointers)
+                      -> risk_score 计算（不变）
+                      -> anomaly_reason 选择（新增：基于优先级的枚举选择）
+                      -> evidence_pointers = tuple(baseline.retrieved_memory_ids)（新增）
+                      -> SubagentJudgeMonitorDecision(...)  （新增：anomaly_reason + evidence_pointers）
                           -> __post_init__:
-                              -> labels.validate_monitor_anomaly_reason (NEW)
-                              -> baselines.validate_evidence_pointers (NEW)
-                                  -> baselines._is_opaque_id (NEW)
-                      -> SubagentJudgeMonitorDecision.to_payload (updated: anomaly_reason + evidence_pointers)
+                              -> labels.validate_monitor_anomaly_reason（新增）
+                              -> baselines.validate_evidence_pointers（新增）
+                                  -> baselines._is_opaque_id（新增）
+                      -> SubagentJudgeMonitorDecision.to_payload（更新：anomaly_reason + evidence_pointers）
                           -> baselines.validate_monitor_payload
-                              -> baselines._reject_forbidden_monitor_fields (unchanged)
+                              -> baselines._reject_forbidden_monitor_fields（不变）
               -> replays.run_v0_replay_portfolio
               -> attribution.assign_attribution
       -> harness.write_attribution_table
@@ -108,7 +112,7 @@ cmd_audit.__main__
       -> harness.write_confusion_matrix_table
 ```
 
-Behavior-test path:
+行为测试路径：
 
 ```text
 tests/test_cmd_audit_issue9_monitor_contract.py
@@ -120,34 +124,34 @@ tests/test_cmd_audit_issue9_monitor_contract.py
   -> run_baseline_suite
 ```
 
-## Data Flow
+## 数据流
 
-Input (shared with issue 0002):
+输入（与 issue 0002 共享）：
 
 ```text
 data/probe_cases/v0_issue3_cases.json
 ```
 
-Per-case monitor decision output shape (updated):
+每个案例的 Monitor 决策输出形态（已更新）：
 
 ```text
 SubagentJudgeMonitorDecision
   should_trigger_replay: bool
   risk_score: float
-  anomaly_reason: str          # enum value (was: reasons: tuple[str, ...])
-  evidence_pointers: tuple[str, ...]  # opaque IDs (NEW)
+  anomaly_reason: str          # 枚举值（原为：reasons: tuple[str, ...]）
+  evidence_pointers: tuple[str, ...]  # 不透明 ID（新增）
   trace_summary: str
   cost_per_decision: float
 ```
 
-Harness-level output (unchanged structure, updated monitor fields):
+Harness 层输出（结构不变，Monitor 字段已更新）：
 
 ```text
 BaselineSuiteResult
   monitor: SubagentJudgeMonitorDecision
 ```
 
-Payload shape (serialized):
+载荷形态（序列化后）：
 
 ```json
 {
@@ -160,15 +164,15 @@ Payload shape (serialized):
 }
 ```
 
-## Function-Level Contract
+## 函数级契约
 
 ### `cmd_audit/labels.py`
 
-Issue 0009 adds three new constants, one new exception, and one new validation function to this module. All existing issue 0001/0002 constants and functions are preserved unchanged.
+Issue 0009 向本模块添加三个新常量、一个新异常和一个新验证函数。所有来自 issue 0001/0002 的现有常量和函数保持不变。
 
-#### Constant: `MONITOR_ANOMALY_REASON_VALUES`
+#### 常量：`MONITOR_ANOMALY_REASON_VALUES`
 
-Definition:
+定义：
 
 ```python
 MONITOR_ANOMALY_REASON_VALUES = (
@@ -179,186 +183,194 @@ MONITOR_ANOMALY_REASON_VALUES = (
 )
 ```
 
-Purpose:
+目的：
 
-- Defines the exhaustive set of valid `anomaly_reason` values for the Subagent Judge Monitor.
-- Tuple ordering is stable for documentation and iteration, but does not imply priority (priority is defined in `run_subagent_judge_monitor`).
+- 定义 Subagent Judge Monitor 的 `anomaly_reason` 有效值全集。
+- 元组顺序为文档和迭代提供稳定顺序，但不暗示优先级（优先级在 `run_subagent_judge_monitor` 中定义）。
 
-Domain meaning of each value:
+各值的领域含义：
 
-| Enum Value | Meaning |
-| --- | --- |
-| `answer_vs_evidence_mismatch` | Baseline context has adequate evidence recall but the answer is wrong — suggests reasoning failure. |
-| `retrieved_context_incomplete` | Baseline did not retrieve any memory items at all — context is empty. |
-| `evidence_recall_low` | Baseline retrieved memory items but evidence recall is below threshold — retrieval may have missed relevant items. |
-| `confidence_anomaly` | Risk score is anomalous but no specific signal dominates — catch-all for edge cases. |
 
-Used by:
+| 枚举值                            | 含义                                         |
+| ------------------------------ | ------------------------------------------ |
+| `answer_vs_evidence_mismatch`  | 基线上下文具有充分证据召回但答案错误——暗示推理失败。                |
+| `retrieved_context_incomplete` | 基线未检索到任何 memory item——上下文为空。               |
+| `evidence_recall_low`          | 基线检索到了 memory item 但证据召回低于阈值——检索可能遗漏了相关条目。 |
+| `confidence_anomaly`           | Risk score 异常但无单一信号主导——边界情况的兜底分类。          |
+
+
+被以下调用方使用：
 
 - `validate_monitor_anomaly_reason(...)`
 - `SubagentJudgeMonitorDecision.__post_init__()`
-- Tests that iterate over all valid reasons.
+- 遍历所有合法值的测试。
 
-#### Constant: `VALID_MONITOR_ANOMALY_REASONS`
+#### 常量：`VALID_MONITOR_ANOMALY_REASONS`
 
-Definition:
+定义：
 
 ```python
 VALID_MONITOR_ANOMALY_REASONS = frozenset(MONITOR_ANOMALY_REASON_VALUES)
 ```
 
-Purpose:
+目的：
 
-- O(1) membership check for `validate_monitor_anomaly_reason(...)`.
-- Exists as a frozenset to prevent accidental mutation.
+- 为 `validate_monitor_anomaly_reason(...)` 提供 O(1) 成员检查。
+- 以 frozenset 形式存在，防止意外修改。
 
-#### Exception: `MonitorAnomalyReasonError`
+#### 异常：`MonitorAnomalyReasonError`
 
-Definition:
+定义：
 
 ```python
 class MonitorAnomalyReasonError(ValueError):
-    """Raised when monitor anomaly_reason is not a valid enum value."""
+    """当 Monitor 的 anomaly_reason 不是有效枚举值时抛出。"""
 ```
 
-Purpose:
+目的：
 
-- Signals that a monitor `anomaly_reason` value violates the enum contract.
-- Distinct from `LabelValidationError` (label scope) and `LeakSafeMonitorError` (forbidden fields).
+- 表示 Monitor 的 `anomaly_reason` 值违反了枚举契约。
+- 与 `LabelValidationError`（标签范围）和 `LeakSafeMonitorError`（禁止字段）区分开来。
 
-Raised by:
+由以下抛出：
 
 - `validate_monitor_anomaly_reason(...)`
 
-Caught by:
+由以下捕获：
 
-- `SubagentJudgeMonitorDecision.__post_init__()` — propagates to caller on invalid construction.
+- `SubagentJudgeMonitorDecision.__post_init__()` —— 在构造无效时向调用方传播。
 
-#### Function: `validate_monitor_anomaly_reason(reason: str) -> str`
+#### 函数：`validate_monitor_anomaly_reason(reason: str) -> str`
 
-Signature:
+签名：
 
 ```python
 def validate_monitor_anomaly_reason(reason: str) -> str
 ```
 
-Purpose:
+目的：
 
-- Validates that a monitor `anomaly_reason` string is one of the four allowed enum values.
-- Returns the reason unchanged on success, enabling use as a pass-through validator.
+- 验证 Monitor 的 `anomaly_reason` 字符串是否为四个允许的枚举值之一。
+- 验证通过时原样返回 reason，使其可作为直通式验证器使用。
 
-Behavior:
+行为：
 
-1. Checks `reason in VALID_MONITOR_ANOMALY_REASONS` (frozenset lookup).
-2. If valid: returns `reason`.
-3. If invalid: raises `MonitorAnomalyReasonError` with a message that includes the invalid value and the list of valid values.
+1. 检查 `reason in VALID_MONITOR_ANOMALY_REASONS`（frozenset 查找）。
+2. 有效则返回 `reason`。
+3. 无效则抛出 `MonitorAnomalyReasonError`，消息包含无效值和有效值列表。
 
-Validation rules:
+验证规则：
 
-| Input | Result |
-| --- | --- |
-| `"evidence_recall_low"` | Returns `"evidence_recall_low"` |
-| `"answer_vs_evidence_mismatch"` | Returns `"answer_vs_evidence_mismatch"` |
-| `"retrieved_context_incomplete"` | Returns `"retrieved_context_incomplete"` |
-| `"confidence_anomaly"` | Returns `"confidence_anomaly"` |
-| `"the answer looks wrong"` | Raises `MonitorAnomalyReasonError` |
-| `"evidence_recall_low "` (trailing space) | Raises `MonitorAnomalyReasonError` |
-| `"Confidence_Anomaly"` (wrong case) | Raises `MonitorAnomalyReasonError` |
-| `""` (empty string) | Raises `MonitorAnomalyReasonError` |
 
-Callers:
+| 输入                               | 结果                                  |
+| -------------------------------- | ----------------------------------- |
+| `"evidence_recall_low"`          | 返回 `"evidence_recall_low"`          |
+| `"answer_vs_evidence_mismatch"`  | 返回 `"answer_vs_evidence_mismatch"`  |
+| `"retrieved_context_incomplete"` | 返回 `"retrieved_context_incomplete"` |
+| `"confidence_anomaly"`           | 返回 `"confidence_anomaly"`           |
+| `"the answer looks wrong"`       | 抛出 `MonitorAnomalyReasonError`      |
+| `"evidence_recall_low "`（尾部空格）   | 抛出 `MonitorAnomalyReasonError`      |
+| `"Confidence_Anomaly"`（大小写错误）    | 抛出 `MonitorAnomalyReasonError`      |
+| `""`（空字符串）                       | 抛出 `MonitorAnomalyReasonError`      |
+
+
+调用方：
 
 - `SubagentJudgeMonitorDecision.__post_init__()`
-- Direct tests in `MonitorAnomalyReasonEnumTest`
+- `MonitorAnomalyReasonEnumTest` 中的直接测试
 
-Boundary:
+边界：
 
-- This function enforces the grill-session rule that the monitor cannot emit free-form natural language. Any string that is not an exact match to one of the four enum values is rejected.
+- 此函数强制执行 grill-session 规则：Monitor 不得输出自由形式自然语言。任何不与四个枚举值完全匹配的字符串均被拒绝。
 
 ### `cmd_audit/baselines.py`
 
-Issue 0009 modifies this module by adding two new helper functions, updating one dataclass, and modifying one runner function. All other functions (`run_baseline_suite`, `run_memory_baselines`, `run_evidence_recall_heuristic`, `run_subagent_judge_baseline`, `run_random_label_baseline`, `validate_monitor_payload`, `_reject_forbidden_monitor_fields`, `_select_comparison_baseline`, `_observational_label`) are unchanged from issue 0002.
+Issue 0009 通过添加两个新辅助函数、更新一个 dataclass 和修改一个运行器函数来修改本模块。所有其他函数（`run_baseline_suite`、`run_memory_baselines`、`run_evidence_recall_heuristic`、`run_subagent_judge_baseline`、`run_random_label_baseline`、`validate_monitor_payload`、`_reject_forbidden_monitor_fields`、`_select_comparison_baseline`、`_observational_label`）自 issue 0002 以来保持不变。
 
-#### Function: `_is_opaque_id(value: str) -> bool`
+#### 函数：`_is_opaque_id(value: str) -> bool`
 
-Signature:
+签名：
 
 ```python
 def _is_opaque_id(value: str) -> bool
 ```
 
-Purpose:
+目的：
 
-- Private helper that determines whether a string qualifies as an opaque ID.
-- An opaque ID is a short, whitespace-free token that carries no content-bearing separators.
+- 私有辅助函数，判断一个字符串是否可作为不透明 ID。
+- 不透明 ID 是短小、无空白字符的令牌，不包含携带内容的分隔符。
 
-Behavior:
+行为：
 
 ```python
 return bool(value) and " " not in value and ":" not in value and "\n" not in value and len(value) <= 128
 ```
 
-Rules:
+规则：
 
-| Check | Rationale |
-| --- | --- |
-| `bool(value)` | Rejects empty strings. |
-| `" " not in value` | Rejects strings with space-separated content text. |
-| `":" not in value` | Rejects `mem_003:Berlin` patterns that embed content after a colon. |
-| `"\n" not in value` | Rejects multi-line content dumps. |
-| `len(value) <= 128` | Upper bound: genuine memory/event IDs are short tokens. |
 
-Callers:
+| 检查项                 | 理由                                 |
+| ------------------- | ---------------------------------- |
+| `bool(value)`       | 拒绝空字符串。                            |
+| `" " not in value`  | 拒绝包含空格分隔的内容文本。                     |
+| `":" not in value`  | 拒绝 `mem_003:Berlin` 这类在冒号后嵌入内容的模式。 |
+| `"\n" not in value` | 拒绝多行内容转储。                          |
+| `len(value) <= 128` | 上界：真实的 memory/event ID 是短令牌。       |
+
+
+调用方：
 
 - `validate_evidence_pointers(...)`
 
-Why it is private:
+为何是私有的：
 
-- The public contract is `validate_evidence_pointers(...)`. The `_is_opaque_id` check is an implementation detail of what constitutes "opaque."
+- 公共契约是 `validate_evidence_pointers(...)`。`_is_opaque_id` 检查是"不透明"构成条件的实现细节。
 
-#### Function: `validate_evidence_pointers(pointers: tuple[str, ...]) -> tuple[str, ...]`
+#### 函数：`validate_evidence_pointers(pointers: tuple[str, ...]) -> tuple[str, ...]`
 
-Signature:
+签名：
 
 ```python
 def validate_evidence_pointers(pointers: tuple[str, ...]) -> tuple[str, ...]
 ```
 
-Purpose:
+目的：
 
-- Validates that every evidence pointer in the tuple is an opaque ID.
-- Returns the tuple unchanged on success, enabling use as a pass-through validator.
+- 验证 evidence pointers 元组中的每个指针都是不透明 ID。
+- 验证通过时原样返回元组，可作为直通式验证器使用。
 
-Behavior:
+行为：
 
-1. Iterates over every pointer in `pointers`.
-2. Calls `_is_opaque_id(ptr)` for each.
-3. If any pointer is not an opaque ID: raises `LeakSafeMonitorError` with the offending value.
-4. If all pointers pass: returns `pointers` unchanged.
+1. 遍历 `pointers` 中的每个指针。
+2. 对每个指针调用 `_is_opaque_id(ptr)`。
+3. 如果任何指针不是不透明 ID：抛出 `LeakSafeMonitorError`，附带违规值。
+4. 全部通过则原样返回 `pointers`。
 
-Validation rules:
+验证规则：
 
-| Input | Result |
-| --- | --- |
-| `("mem_001", "mem_002", "evt_301")` | Returns input |
-| `()` | Returns `()` |
-| `("mem_003: user lives in Berlin",)` | Raises `LeakSafeMonitorError` |
-| `("memory item #4 contains stale data",)` | Raises `LeakSafeMonitorError` |
-| `("mem_001\nevidence leaked",)` | Raises `LeakSafeMonitorError` |
-| `("mem_003:Berlin",)` | Raises `LeakSafeMonitorError` |
 
-Callers:
+| 输入                                        | 结果                        |
+| ----------------------------------------- | ------------------------- |
+| `("mem_001", "mem_002", "evt_301")`       | 返回输入                      |
+| `()`                                      | 返回 `()`                   |
+| `("mem_003: user lives in Berlin",)`      | 抛出 `LeakSafeMonitorError` |
+| `("memory item #4 contains stale data",)` | 抛出 `LeakSafeMonitorError` |
+| `("mem_001\nevidence leaked",)`           | 抛出 `LeakSafeMonitorError` |
+| `("mem_003:Berlin",)`                     | 抛出 `LeakSafeMonitorError` |
+
+
+调用方：
 
 - `SubagentJudgeMonitorDecision.__post_init__()`
-- Direct tests in `MonitorEvidencePointerTest`
+- `MonitorEvidencePointerTest` 中的直接测试
 
-Domain meaning:
+领域含义：
 
-- The monitor can point to which memory items triggered the anomaly (by ID), but must not embed content text in those pointers. This enforces the grill-session rule that evidence pointers are opaque IDs only, never content text.
+- Monitor 可以通过 ID 指出哪些 memory item 触发了异常，但不能在指针中嵌入内容文本。这强制执行了 grill-session 规则：evidence pointers 仅为不透明 ID，绝不包含内容文本。
 
-#### Dataclass: `SubagentJudgeMonitorDecision` (updated)
+#### Dataclass：`SubagentJudgeMonitorDecision`（已更新）
 
-Pre-0009 fields:
+Issue 0009 之前的字段：
 
 ```python
 should_trigger_replay: bool
@@ -368,7 +380,7 @@ trace_summary: str
 cost_per_decision: float = 0.2
 ```
 
-Post-0009 fields:
+Issue 0009 之后的字段：
 
 ```python
 should_trigger_replay: bool
@@ -379,58 +391,60 @@ trace_summary: str
 cost_per_decision: float = 0.2
 ```
 
-Field-level changes:
+字段级变更：
 
-| Old Field | New Field | Change |
-| --- | --- | --- |
-| `reasons: tuple[str, ...]` | `anomaly_reason: str` | Free-form tuple → single enum-locked string |
-| _(none)_ | `evidence_pointers: tuple[str, ...]` | New field for opaque memory/event IDs |
 
-Domain meaning:
+| 旧字段                        | 新字段                                  | 变更                         |
+| -------------------------- | ------------------------------------ | -------------------------- |
+| `reasons: tuple[str, ...]` | `anomaly_reason: str`                | 自由形式元组 → 单枚举锁定字符串          |
+| *(无)*                      | `evidence_pointers: tuple[str, ...]` | 新增字段，用于不透明 memory/event ID |
 
-- `anomaly_reason`: a single enum value from `MONITOR_ANOMALY_REASON_VALUES` describing the primary anomaly signal. Replaces the free-form `reasons` tuple.
-- `evidence_pointers`: opaque IDs of memory items that are relevant to the anomaly (typically `baseline.retrieved_memory_ids`). Must not contain content text.
 
-#### `SubagentJudgeMonitorDecision.__post_init__()` (updated)
+领域含义：
 
-Signature:
+- `anomaly_reason`：来自 `MONITOR_ANOMALY_REASON_VALUES` 的单一枚举值，描述主要异常信号。取代自由形式的 `reasons` 元组。
+- `evidence_pointers`：与异常相关的 memory item 的不透明 ID（通常为 `baseline.retrieved_memory_ids`）。不得包含内容文本。
+
+#### `SubagentJudgeMonitorDecision.__post_init__()`（已更新）
+
+签名：
 
 ```python
 def __post_init__(self) -> None
 ```
 
-Behavior:
+行为：
 
-1. Calls `validate_monitor_anomaly_reason(self.anomaly_reason)`.
-2. Calls `validate_evidence_pointers(self.evidence_pointers)`.
+1. 调用 `validate_monitor_anomaly_reason(self.anomaly_reason)`。
+2. 调用 `validate_evidence_pointers(self.evidence_pointers)`。
 
-Pre-0009 behavior: no `__post_init__` existed. Validation only happened in `to_payload()`.
+Issue 0009 之前：不存在 `__post_init__`，验证仅在 `to_payload()` 中进行。
 
-Why validation moved to construction time:
+为何将验证移至构造时：
 
-- Catching invalid enum values and content-bearing pointers at construction time (rather than at serialization time) makes the error proximal to the source. A `SubagentJudgeMonitorDecision` with an invalid `anomaly_reason` is rejected immediately, before any caller can inspect it.
+- 在构造时（而非序列化时）捕获无效的枚举值和携带内容的指针，使错误更靠近源头。一个 `anomaly_reason` 无效的 `SubagentJudgeMonitorDecision` 被立即拒绝，调用方无法检查它。
 
-#### `SubagentJudgeMonitorDecision.to_payload()` (updated)
+#### `SubagentJudgeMonitorDecision.to_payload()`（已更新）
 
-Signature:
+签名：
 
 ```python
 def to_payload(self) -> dict[str, Any]
 ```
 
-Behavior (unchanged flow, updated payload shape):
+行为（流程不变，载荷形态已更新）：
 
-1. Builds a dict with keys:
-   - `should_trigger_replay`
-   - `risk_score`
-   - `anomaly_reason` (was: `reasons`)
-   - `evidence_pointers` (NEW)
-   - `trace_summary`
-   - `cost_per_decision`
-2. Calls `validate_monitor_payload(payload)`.
-3. Returns the validated payload.
+1. 构建包含以下键的 dict：
+  - `should_trigger_replay`
+  - `risk_score`
+  - `anomaly_reason`（原为：`reasons`）
+  - `evidence_pointers`（新增）
+  - `trace_summary`
+  - `cost_per_decision`
+2. 调用 `validate_monitor_payload(payload)`。
+3. 返回验证后的载荷。
 
-Pre-0009 payload:
+Issue 0009 之前的载荷：
 
 ```python
 {
@@ -442,7 +456,7 @@ Pre-0009 payload:
 }
 ```
 
-Post-0009 payload:
+Issue 0009 之后的载荷：
 
 ```python
 {
@@ -455,14 +469,14 @@ Post-0009 payload:
 }
 ```
 
-Callers:
+调用方：
 
-- `run_subagent_judge_monitor(...)` calls `decision.to_payload()` before returning.
-- Tests call it directly to verify payload shape.
+- `run_subagent_judge_monitor(...)` 在返回前调用 `decision.to_payload()`。
+- 测试直接调用以验证载荷形态。
 
-#### Function: `run_subagent_judge_monitor(case, baseline, *, trigger_threshold=0.5)` (updated)
+#### 函数：`run_subagent_judge_monitor(case, baseline, *, trigger_threshold=0.5)`（已更新）
 
-Signature (unchanged):
+签名（不变）：
 
 ```python
 def run_subagent_judge_monitor(
@@ -473,13 +487,13 @@ def run_subagent_judge_monitor(
 ) -> SubagentJudgeMonitorDecision
 ```
 
-Inputs:
+输入：
 
-- `case`: one validated `ProbeCase`.
-- `baseline`: optional baseline output (defaults to `vector_memory`).
-- `trigger_threshold`: risk_score threshold for `should_trigger_replay`.
+- `case`：一个已验证的 `ProbeCase`。
+- `baseline`：可选基线输出（默认为 `vector_memory`）。
+- `trigger_threshold`：`should_trigger_replay` 的 risk_score 阈值。
 
-Risk score computation (unchanged from issue 0002):
+Risk score 计算（与 issue 0002 一致，不变）：
 
 ```python
 risk_score = 0.0
@@ -492,7 +506,7 @@ if not baseline.retrieved_memory_ids:
 risk_score = min(risk_score, 1.0)
 ```
 
-Anomaly reason selection (NEW — replaces free-form `reasons` list):
+Anomaly reason 选择（新增——取代自由形式 `reasons` 列表）：
 
 ```python
 if not baseline.retrieved_memory_ids:
@@ -505,24 +519,26 @@ else:
     anomaly_reason = "confidence_anomaly"
 ```
 
-Priority logic:
+优先级逻辑：
 
-| Priority | Condition | Enum Value |
-| --- | --- | --- |
-| 1 (highest) | No memory items retrieved | `retrieved_context_incomplete` |
-| 2 | Evidence recall below threshold | `evidence_recall_low` |
-| 3 | Answer score below threshold (but evidence OK) | `answer_vs_evidence_mismatch` |
-| 4 (fallback) | Risk score anomalous but no dominant signal | `confidence_anomaly` |
 
-Evidence pointers (NEW):
+| 优先级   | 条件                  | 枚举值                            |
+| ----- | ------------------- | ------------------------------ |
+| 1（最高） | 未检索到 memory item    | `retrieved_context_incomplete` |
+| 2     | 证据召回低于阈值            | `evidence_recall_low`          |
+| 3     | 答案评分低于阈值（但证据充分）     | `answer_vs_evidence_mismatch`  |
+| 4（兜底） | Risk score 异常但无主导信号 | `confidence_anomaly`           |
+
+
+Evidence pointers（新增）：
 
 ```python
 evidence_pointers = tuple(baseline.retrieved_memory_ids)
 ```
 
-The monitor returns the baseline's retrieved memory IDs as opaque pointers. These are memory_id strings from the probe case contract (e.g., `"mem_001"`, `"mem_302"`), which are already short tokens with no embedded content. The `validate_evidence_pointers` call in `__post_init__` provides a defense-in-depth check.
+Monitor 返回基线的已检索 memory ID 作为不透明指针。这些是来自探针案例契约的 memory_id 字符串（例如 `"mem_001"`、`"mem_302"`），本身即是短令牌，不含嵌入内容。`__post_init_`_ 中的 `validate_evidence_pointers` 调用提供了纵深防御检查。
 
-Decision construction:
+决策构造：
 
 ```python
 decision = SubagentJudgeMonitorDecision(
@@ -540,106 +556,117 @@ decision.to_payload()
 return decision
 ```
 
-Callers:
+调用方：
 
 - `run_baseline_suite(...)`
-- Exported from `cmd_audit.__init__`
+- 从 `cmd_audit.__init__` 导出
 
-## Test-Level Contract
+## 测试级契约
 
 ### `tests/test_cmd_audit_issue9_monitor_contract.py`
 
-This file is the behavior-level specification for issue 0009. It contains 4 test classes and 15 test methods.
+此文件是 issue 0009 的行为级规约，包含 4 个测试类和 15 个测试方法。
 
 #### `MonitorAnomalyReasonEnumTest`
 
-| Test | What It Verifies |
-| --- | --- |
-| `test_all_four_enum_values_accepted` | Each of the four `MONITOR_ANOMALY_REASON_VALUES` is accepted by `validate_monitor_anomaly_reason()`. Uses `subTest` for all four values. |
-| `test_free_form_natural_language_rejected` | Four examples of natural-language reasons ("the answer looks wrong compared to stored facts", "baseline evidence score is below success threshold", "possible retrieval failure detected", "suspicious context injection") are rejected with `MonitorAnomalyReasonError`. |
-| `test_misspelled_enum_value_rejected` | Five near-miss values (misspelling, trailing space, wrong case, empty string) are rejected. |
-| `test_none_or_empty_rejected` | Empty string is rejected with `MonitorAnomalyReasonError`. |
-| `test_decision_construction_rejects_bad_reason` | Constructing a `SubagentJudgeMonitorDecision` with an invalid `anomaly_reason` raises `MonitorAnomalyReasonError` at `__post_init__` time. |
-| `test_decision_construction_accepts_valid_reason` | Constructing a `SubagentJudgeMonitorDecision` with a valid `anomaly_reason` succeeds and preserves the value. |
+
+| 测试                                                | 验证内容                                                                                                                                                                                                                      |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_all_four_enum_values_accepted`              | 四个 `MONITOR_ANOMALY_REASON_VALUES` 中的每一个都被 `validate_monitor_anomaly_reason()` 接受。使用 `subTest` 测试全部四个值。                                                                                                                   |
+| `test_free_form_natural_language_rejected`        | 四个自然语言原因的示例（"the answer looks wrong compared to stored facts"、"baseline evidence score is below success threshold"、"possible retrieval failure detected"、"suspicious context injection"）被 `MonitorAnomalyReasonError` 拒绝。 |
+| `test_misspelled_enum_value_rejected`             | 五个近似值（拼写错误、尾部空格、大小写错误、空字符串）被拒绝。                                                                                                                                                                                           |
+| `test_none_or_empty_rejected`                     | 空字符串被 `MonitorAnomalyReasonError` 拒绝。                                                                                                                                                                                     |
+| `test_decision_construction_rejects_bad_reason`   | 使用无效的 `anomaly_reason` 构造 `SubagentJudgeMonitorDecision` 时，在 `__post_init__` 时刻抛出 `MonitorAnomalyReasonError`。                                                                                                            |
+| `test_decision_construction_accepts_valid_reason` | 使用有效的 `anomaly_reason` 构造 `SubagentJudgeMonitorDecision` 成功，且值被保留。                                                                                                                                                        |
+
 
 #### `MonitorEvidencePointerTest`
 
-| Test | What It Verifies |
-| --- | --- |
-| `test_opaque_ids_accepted` | Valid opaque IDs (`"mem_001"`, `"mem_002"`, `"evt_301"`) are accepted. |
-| `test_empty_pointers_accepted` | Empty tuple is accepted (no pointers to validate). |
-| `test_content_bearing_pointers_rejected` | Three examples of content-bearing pointers (colon-separated content, descriptive text, newline injection) are rejected with `LeakSafeMonitorError`. Uses `subTest`. |
-| `test_pointer_with_colon_rejected` | `"mem_003:Berlin"` is rejected (colon is a content-bearing separator). |
-| `test_decision_construction_rejects_bad_pointer` | Constructing a `SubagentJudgeMonitorDecision` with a content-bearing evidence pointer raises `LeakSafeMonitorError` at `__post_init__` time. |
+
+| 测试                                               | 验证内容                                                                                                        |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `test_opaque_ids_accepted`                       | 有效的不透明 ID（`"mem_001"`、`"mem_002"`、`"evt_301"`）被接受。                                                          |
+| `test_empty_pointers_accepted`                   | 空元组被接受（无指针需验证）。                                                                                             |
+| `test_content_bearing_pointers_rejected`         | 三个携带内容的指针示例（冒号分隔内容、描述性文本、换行注入）被 `LeakSafeMonitorError` 拒绝。使用 `subTest`。                                     |
+| `test_pointer_with_colon_rejected`               | `"mem_003:Berlin"` 被拒绝（冒号是携带内容的分隔符）。                                                                        |
+| `test_decision_construction_rejects_bad_pointer` | 使用携带内容的 evidence pointer 构造 `SubagentJudgeMonitorDecision` 时，在 `__post_init__` 时刻抛出 `LeakSafeMonitorError`。 |
+
 
 #### `MonitorForbiddenFieldsTest`
 
-| Test | What It Verifies |
-| --- | --- |
-| `test_forbidden_field_names_rejected_in_payload` | All 22 keys in `FORBIDDEN_MONITOR_FIELDS` are rejected when present in a monitor payload. Uses `subTest` for all 22 keys. This re-validates the issue 0002 contract within the issue 0009 context. |
-| `test_clean_payload_with_anomaly_reason_accepted` | A payload with the new `anomaly_reason` and `evidence_pointers` fields (but no forbidden fields) is accepted by `validate_monitor_payload`. |
-| `test_payload_with_forbidden_field_nested_rejected` | Forbidden fields in nested dicts are rejected (tests recursive `_reject_forbidden_monitor_fields`). |
+
+| 测试                                                  | 验证内容                                                                                                                     |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `test_forbidden_field_names_rejected_in_payload`    | `FORBIDDEN_MONITOR_FIELDS` 中的全部 22 个键在出现在 Monitor 载荷中时均被拒绝。使用 `subTest` 测试全部 22 个键。在 issue 0009 上下文中重新验证 issue 0002 的契约。 |
+| `test_clean_payload_with_anomaly_reason_accepted`   | 包含新的 `anomaly_reason` 和 `evidence_pointers` 字段（但无禁止字段）的载荷被 `validate_monitor_payload` 接受。                                |
+| `test_payload_with_forbidden_field_nested_rejected` | 嵌套 dict 中的禁止字段被拒绝（测试递归的 `_reject_forbidden_monitor_fields`）。                                                             |
+
 
 #### `MonitorEndToEndContractTest`
 
-| Test | What It Verifies |
-| --- | --- |
-| `test_monitor_payload_exposes_anomaly_reason_and_pointers` | End-to-end: loads a real probe case from `v0_issue3_cases.json`, runs `run_baseline_suite`, and checks that the monitor payload contains a valid `anomaly_reason` (in the enum) and `evidence_pointers` (all opaque IDs with no colons, no spaces). |
 
-## Artifact Contract
+| 测试                                                         | 验证内容                                                                                                                                             |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test_monitor_payload_exposes_anomaly_reason_and_pointers` | 端到端：从 `v0_issue3_cases.json` 加载真实探针案例，运行 `run_baseline_suite`，检查 Monitor 载荷包含有效的 `anomaly_reason`（在枚举中）和 `evidence_pointers`（全部为不透明 ID，无冒号、无空格）。 |
 
-Issue 0009 produces no new output artifacts. It hardens the internal monitor contract of the existing `BaselineSuiteResult.monitor` path.
 
-The monitor payload shape in `BaselineSuiteResult.monitor.to_payload()` is the contract change. Existing consumers of the payload (tests, harness) are updated to reference `anomaly_reason` instead of `reasons`.
+## 产物契约
 
-## `cmd_audit/__init__.py` Exports
+Issue 0009 不产生新的输出产物。它加固了现有 `BaselineSuiteResult.monitor` 路径的内部 Monitor 契约。
 
-New public exports for issue 0009:
+`BaselineSuiteResult.monitor.to_payload()` 中的 Monitor 载荷形态是契约变更点。载荷的现有消费者（测试、harness）已更新为引用 `anomaly_reason` 而非 `reasons`。
 
-| Export | Source Module |
-| --- | --- |
-| `MONITOR_ANOMALY_REASON_VALUES` | `cmd_audit.labels` |
-| `MonitorAnomalyReasonError` | `cmd_audit.labels` |
-| `SubagentJudgeMonitorDecision` | `cmd_audit.baselines` |
-| `validate_evidence_pointers` | `cmd_audit.baselines` |
-| `validate_monitor_anomaly_reason` | `cmd_audit.labels` |
-| `validate_monitor_payload` | `cmd_audit.baselines` |
+## `cmd_audit/__init__.py` 导出
 
-Pre-existing exports preserved from issue 0002: `BaselineSuiteResult`, `run_baseline_suite`, `validate_v0_label`, `V0_PIPELINE_LABEL_ORDER`, `V0_PIPELINE_LABELS`.
+Issue 0009 的新公共导出：
 
-## Boundary Rules
 
-- Monitor `anomaly_reason` accepts exactly four enum values. Any other string is rejected at construction time.
-- Monitor `evidence_pointers` accept only opaque IDs (no spaces, no colons, no newlines, ≤128 chars, non-empty). Content-bearing strings are rejected at construction time.
-- Forbidden field blocklist (`FORBIDDEN_MONITOR_FIELDS`) remains enforced at `to_payload()` time (unchanged from issue 0002).
-- The monitor still only triggers replay. It does not emit final labels, ECS, memory writes, gold answers, or full failed traces.
-- The monitor's `trace_summary` remains a single aggregate string for debugging. It is not validated for content because it is an internal trace, not a user-facing output.
-- `ingestion_error` is registered in `DEFERRED_PIPELINE_LABELS` (labels.py). It is rejected by `validate_v0_label` but is not a monitor concern — the monitor only uses pipeline labels indirectly through the comparator layer.
+| 导出                                | 来源模块                  |
+| --------------------------------- | --------------------- |
+| `MONITOR_ANOMALY_REASON_VALUES`   | `cmd_audit.labels`    |
+| `MonitorAnomalyReasonError`       | `cmd_audit.labels`    |
+| `SubagentJudgeMonitorDecision`    | `cmd_audit.baselines` |
+| `validate_evidence_pointers`      | `cmd_audit.baselines` |
+| `validate_monitor_anomaly_reason` | `cmd_audit.labels`    |
+| `validate_monitor_payload`        | `cmd_audit.baselines` |
 
-## Verification
 
-Commands:
+从 issue 0002 保留的已有导出：`BaselineSuiteResult`、`run_baseline_suite`、`validate_v0_label`、`V0_PIPELINE_LABEL_ORDER`、`V0_PIPELINE_LABELS`。
+
+## 边界规则
+
+- Monitor 的 `anomaly_reason` 仅接受四个枚举值。任何其他字符串在构造时被拒绝。
+- Monitor 的 `evidence_pointers` 仅接受不透明 ID（无空格、无冒号、无换行、≤128 字符、非空）。携带内容的字符串在构造时被拒绝。
+- 禁止字段黑名单（`FORBIDDEN_MONITOR_FIELDS`）在 `to_payload()` 时刻继续强制执行（与 issue 0002 一致，不变）。
+- Monitor 仍然只触发重放，不输出最终标签、ECS、内存写入、gold answer 或完整失败轨迹。
+- Monitor 的 `trace_summary` 仍然是用于调试的单一聚合字符串，其内容不被验证（内部追踪，非面向用户输出）。
+- `ingestion_error` 在 `DEFERRED_PIPELINE_LABELS`（labels.py）中注册。被 `validate_v0_label` 拒绝，但不是 Monitor 的关注点——Monitor 仅通过比较器层间接使用 pipeline labels。
+
+## 验证
+
+命令：
 
 ```bash
 python3 -m pytest tests/test_cmd_audit_issue9_monitor_contract.py -v
-python3 -m pytest                                  # full suite
-python3 -m cmd_audit run                           # artifact generation
+python3 -m pytest                                  # 完整测试套件
+python3 -m cmd_audit run                           # 产物生成
 ```
 
-Verified state:
+已验证状态：
 
 ```text
-31 tests passed (16 pre-existing + 15 issue 0009)
-wrote 6 attribution row(s) to artifacts/attribution_table.csv
-with comparison metrics to artifacts/comparison_metrics.csv
-and confusion matrix to artifacts/attribution_confusion_matrix.csv
+31 个测试通过（16 个已有 + 15 个 issue 0009）
+向 artifacts/attribution_table.csv 写入了 6 个归因行
+比较指标写入 artifacts/comparison_metrics.csv
+混淆矩阵写入 artifacts/attribution_confusion_matrix.csv
 ```
 
-## Remaining Work After Issue 0009
+## Issue 0009 之后的剩余工作
 
-Issue 0009 is green. The next slices in dependency order:
+Issue 0009 已通过。后续按依赖顺序的切片：
 
-- Issue 0005: Post-Repair Context Replay with three-value `repair_assessment`.
-- Issue 0006: Targeted memory fixes.
-- Issue 0007: ECS Failure Memory recurrence (enforces ECS cause item-label-name prohibition).
-- Issue 0010: Evidence-driven version gates (HITL, blocked by 0004/0005/0007).
+- Issue 0005：Post-Repair Context Replay，输出三值 `repair_assessment`。
+- Issue 0006：定向内存修复。
+- Issue 0007：ECS Failure Memory 复发（强制执行 ECS cause 的 item-label 名称禁止规则）。
+- Issue 0010：基于证据的版本关口（HITL，被 0004/0005/0007 阻塞）。
+

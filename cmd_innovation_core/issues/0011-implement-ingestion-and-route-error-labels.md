@@ -1,9 +1,9 @@
 ---
 title: Implement ingestion_error and route_error labels
 labels:
-  - needs-triage
-type: AFK
-blocked_by: "0010"
+  - ready-for-human
+type: done
+blocked_by: ~
 user_stories:
   - 37
   - 38
@@ -48,10 +48,30 @@ Split `ingestion_error` from `write_error` and add `route_error` as a new first-
 
 ## Acceptance Criteria
 
-- [ ] `ingestion_error` is attributed when Oracle Write recovers but gold evidence has no `add()` trace.
-- [ ] `write_error` is still attributed when Oracle Write recovers and gold evidence HAS an `add()` trace.
-- [ ] Oracle Route replay enumerates stores, produces recovery gains, and attributes `route_error` when best store ≠ original store.
-- [ ] V0 6-label smoke suite produces identical labels through V1 pipeline (no regression).
-- [ ] `validate_v1_label("ingestion_error")` and `validate_v1_label("route_error")` succeed.
-- [ ] Deferred label registry reflects that `ingestion_error` and `route_error` are now active.
-- [ ] Behavior-level tests: ingestion vs write boundary, route recovery gain > 0, non-regression on 6-label suite.
+- [x] `ingestion_error` is attributed when Oracle Write recovers but gold evidence has no `add()` trace.
+- [x] `write_error` is still attributed when Oracle Write recovers and gold evidence HAS an `add()` trace.
+- [x] Oracle Route replay enumerates stores, produces recovery gains, and attributes `route_error` when best store ≠ original store.
+- [x] V0 6-label smoke suite produces identical labels through V1 pipeline (no regression).
+- [x] `validate_v1_label("ingestion_error")` and `validate_v1_label("route_error")` succeed.
+- [x] Deferred label registry reflects that `ingestion_error` and `route_error` are now active.
+- [x] Behavior-level tests: ingestion vs write boundary, route recovery gain > 0, non-regression on 6-label suite.
+
+## Completion (2026-05-15)
+
+All acceptance criteria pass. 44 behavior-level tests, 262 total tests, zero regressions. Detail map: `0011-implement-ingestion-and-route-error-labels-implementation-details.md`.
+
+### Changed Files
+
+| File | Change |
+|------|--------|
+| `cmd_audit/labels.py` | V1 labels registry, `V1_REPLAY_TO_LABEL`, `validate_v1_label()`, updated `DEFERRED_PIPELINE_LABELS` |
+| `cmd_audit/models.py` | `store` on MemoryItem, `has_ingestion_trace` + `default_store` on ProbeCase, `from_mapping_v1()`, `load_probe_cases_v1()` |
+| `cmd_audit/replays.py` | `run_v1_replay_portfolio()`, `run_oracle_route()`, `_collect_stores()`, `_recover_from_store()` |
+| `cmd_audit/attribution.py` | `assign_attribution_v1()`, `_v1_label_for_replay()` |
+| `cmd_audit/harness.py` | `run_case_v1()`, `run_cases_v1()`, `run_case_full_v1()`, `run_cases_full_v1()` |
+| `cmd_audit/repairs.py` | V1 label validation, `ingestion_error` + `route_error` repair actions, `get_targeted_repair_action_v1()` |
+| `cmd_audit/post_repair.py` | V1 label validation in ECSDraft |
+| `cmd_audit/metrics.py` | V1 label validation in DiagnosisPrediction |
+| `cmd_audit/__init__.py` | 13 new exports |
+| `data/probe_cases/` | v1_ingestion_error_case.json, v1_route_error_case.json |
+| `tests/test_cmd_audit_issue11_v1_labels.py` | 9 test classes, 44 methods |

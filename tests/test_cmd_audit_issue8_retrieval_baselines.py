@@ -9,17 +9,14 @@ from pathlib import Path
 from cmd_audit import load_probe_cases
 from cmd_audit.retrieval_baselines import (
     RankedRetrievalTrace,
-    RetrievalBaselineResult,
-    RetrievalBaselineSuiteResult,
     RetrievalMetrics,
     compute_evidence_boundary_audit,
     compute_retrieval_metrics,
     enforce_retrieval_error_boundary,
     run_bm25_retrieval,
-    run_hybrid_rerank_retrieval,
     run_retrieval_baseline_suite,
 )
-from cmd_audit.scoring import answer_score, evidence_recall_from_text
+from cmd_audit.scoring import evidence_recall_from_text
 
 HARD_NEGATIVES = Path("data/probe_cases/v0_issue8_hard_negatives.json")
 RETRIEVAL_ERROR_FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")
@@ -35,27 +32,48 @@ class RankedRetrievalTraceContractTest(unittest.TestCase):
     def test_rank_must_be_positive(self) -> None:
         with self.assertRaises(ValueError):
             RankedRetrievalTrace(
-                case_id="c1", run_id="r1", retriever_name="bm25",
-                memory_id="m1", rank=0, score=1.0, token_cost=0.0,
-                retrieved_text="text", matched_gold_evidence_units=1,
-                is_gold_support=True, is_distractor=False,
+                case_id="c1",
+                run_id="r1",
+                retriever_name="bm25",
+                memory_id="m1",
+                rank=0,
+                score=1.0,
+                token_cost=0.0,
+                retrieved_text="text",
+                matched_gold_evidence_units=1,
+                is_gold_support=True,
+                is_distractor=False,
             )
 
     def test_score_must_be_nonnegative(self) -> None:
         with self.assertRaises(ValueError):
             RankedRetrievalTrace(
-                case_id="c1", run_id="r1", retriever_name="bm25",
-                memory_id="m1", rank=1, score=-0.1, token_cost=0.0,
-                retrieved_text="text", matched_gold_evidence_units=1,
-                is_gold_support=True, is_distractor=False,
+                case_id="c1",
+                run_id="r1",
+                retriever_name="bm25",
+                memory_id="m1",
+                rank=1,
+                score=-0.1,
+                token_cost=0.0,
+                retrieved_text="text",
+                matched_gold_evidence_units=1,
+                is_gold_support=True,
+                is_distractor=False,
             )
 
     def test_frozen_dataclass_prevents_mutation(self) -> None:
         trace = RankedRetrievalTrace(
-            case_id="c1", run_id="r1", retriever_name="bm25",
-            memory_id="m1", rank=1, score=1.0, token_cost=0.0,
-            retrieved_text="text", matched_gold_evidence_units=1,
-            is_gold_support=True, is_distractor=False,
+            case_id="c1",
+            run_id="r1",
+            retriever_name="bm25",
+            memory_id="m1",
+            rank=1,
+            score=1.0,
+            token_cost=0.0,
+            retrieved_text="text",
+            matched_gold_evidence_units=1,
+            is_gold_support=True,
+            is_distractor=False,
         )
         with self.assertRaises(Exception):
             trace.rank = 2  # type: ignore[misc]
@@ -65,20 +83,38 @@ class RetrievalMetricsContractTest(unittest.TestCase):
     def test_metric_fields_must_be_in_range(self) -> None:
         with self.assertRaises(ValueError):
             RetrievalMetrics(
-                retriever_name="bm25", case_id="c1",
-                recall_at_1=1.5, recall_at_3=0.0, recall_at_5=0.0, recall_at_10=0.0,
-                mrr=0.0, ndcg_at_10=0.0,
-                precision_at_1=0.0, precision_at_3=0.0, precision_at_5=0.0,
-                context_noise_ratio=0.0, answer_accuracy=0.0, answer_f1=0.0,
+                retriever_name="bm25",
+                case_id="c1",
+                recall_at_1=1.5,
+                recall_at_3=0.0,
+                recall_at_5=0.0,
+                recall_at_10=0.0,
+                mrr=0.0,
+                ndcg_at_10=0.0,
+                precision_at_1=0.0,
+                precision_at_3=0.0,
+                precision_at_5=0.0,
+                context_noise_ratio=0.0,
+                answer_accuracy=0.0,
+                answer_f1=0.0,
             )
 
     def test_frozen_dataclass_prevents_mutation(self) -> None:
         metrics = RetrievalMetrics(
-            retriever_name="bm25", case_id="c1",
-            recall_at_1=1.0, recall_at_3=0.5, recall_at_5=0.3, recall_at_10=0.1,
-            mrr=1.0, ndcg_at_10=1.0,
-            precision_at_1=1.0, precision_at_3=0.5, precision_at_5=0.3,
-            context_noise_ratio=0.0, answer_accuracy=1.0, answer_f1=1.0,
+            retriever_name="bm25",
+            case_id="c1",
+            recall_at_1=1.0,
+            recall_at_3=0.5,
+            recall_at_5=0.3,
+            recall_at_10=0.1,
+            mrr=1.0,
+            ndcg_at_10=1.0,
+            precision_at_1=1.0,
+            precision_at_3=0.5,
+            precision_at_5=0.3,
+            context_noise_ratio=0.0,
+            answer_accuracy=1.0,
+            answer_f1=1.0,
         )
         with self.assertRaises(Exception):
             metrics.mrr = 0.5  # type: ignore[misc]
@@ -138,69 +174,6 @@ class BM25RetrievalTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# HybridRerank retriever tests
-# ---------------------------------------------------------------------------
-
-
-class HybridRerankRetrievalTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.hn_cases = load_probe_cases(HARD_NEGATIVES)
-
-    def test_hybrid_rerank_ranks_all_memory_items(self) -> None:
-        case = self.hn_cases[0]
-        traces = run_hybrid_rerank_retrieval(case)
-        self.assertEqual(len(traces), len(case.extracted_memory))
-
-    def test_hybrid_rerank_is_deterministic(self) -> None:
-        case = self.hn_cases[0]
-        r1 = run_hybrid_rerank_retrieval(case)
-        r2 = run_hybrid_rerank_retrieval(case)
-        self.assertEqual(
-            [t.memory_id for t in r1],
-            [t.memory_id for t in r2],
-        )
-
-    def test_hybrid_rerank_temporal_conflict_recovers_gold(self) -> None:
-        """In temporal conflict case, BM25 may rank outdated memory higher;
-        HybridRerank should push the updated gold to rank 1."""
-        case = next(
-            c for c in self.hn_cases if c.case_id == "v0-hn-temporal-002"
-        )
-        traces = run_hybrid_rerank_retrieval(case)
-        self.assertTrue(traces[0].is_gold_support)
-        self.assertEqual(traces[0].memory_id, "mem-005")
-
-    def test_hybrid_rerank_paraphrase_recovers_gold(self) -> None:
-        """In paraphrase case, BM25 may rank the paraphrased version higher;
-        HybridRerank should identify the exact gold evidence."""
-        case = next(
-            c for c in self.hn_cases if c.case_id == "v0-hn-paraphrase-003"
-        )
-        traces = run_hybrid_rerank_retrieval(case)
-        self.assertTrue(traces[0].is_gold_support)
-        self.assertEqual(traces[0].memory_id, "mem-007")
-
-    def test_hybrid_rerank_compression_loss_recovers_gold(self) -> None:
-        """In compression-loss case, the lossy memory may score higher on
-        keyword overlap; HybridRerank should prefer the full-detail gold."""
-        case = next(
-            c for c in self.hn_cases if c.case_id == "v0-hn-compress-006"
-        )
-        traces = run_hybrid_rerank_retrieval(case)
-        self.assertTrue(traces[0].is_gold_support)
-        self.assertEqual(traces[0].memory_id, "mem-016")
-
-    def test_hybrid_rerank_multihop_both_golds_in_top2(self) -> None:
-        """Multi-hop case: both gold supports should appear in top-2."""
-        case = next(
-            c for c in self.hn_cases if c.case_id == "v0-hn-multihop-004"
-        )
-        traces = run_hybrid_rerank_retrieval(case)
-        top2_gold = sum(1 for t in traces[:2] if t.is_gold_support)
-        self.assertGreaterEqual(top2_gold, 1)
-
-
 # ---------------------------------------------------------------------------
 # Retrieval metrics tests
 # ---------------------------------------------------------------------------
@@ -264,9 +237,7 @@ class RetrievalMetricsTest(unittest.TestCase):
         self.assertLessEqual(metrics.ndcg_at_10, 1.0)
 
     def test_empty_traces_produces_zero_metrics(self) -> None:
-        metrics = compute_retrieval_metrics(
-            [], "empty_case", "bm25", "answer"
-        )
+        metrics = compute_retrieval_metrics([], "empty_case", "bm25", "answer")
         self.assertEqual(metrics.recall_at_1, 0.0)
         self.assertEqual(metrics.mrr, 0.0)
         self.assertEqual(metrics.answer_accuracy, 0.0)
@@ -288,13 +259,12 @@ class EvidenceBoundaryTest(unittest.TestCase):
         # Find a memory item whose text contains the gold evidence
         found = False
         for item in self.retrieval_case.extracted_memory:
-            if evidence_recall_from_text(
-                self.retrieval_case.gold_evidence, item.text
-            ) >= 1.0:
+            if (
+                evidence_recall_from_text(self.retrieval_case.gold_evidence, item.text)
+                >= 1.0
+            ):
                 self.assertTrue(
-                    enforce_retrieval_error_boundary(
-                        self.retrieval_case, item.text
-                    )
+                    enforce_retrieval_error_boundary(self.retrieval_case, item.text)
                 )
                 found = True
         self.assertTrue(found, "No memory item contained the gold evidence")
@@ -306,9 +276,7 @@ class EvidenceBoundaryTest(unittest.TestCase):
         # contain the gold evidence phrases
         for item in case.extracted_memory:
             if evidence_recall_from_text(case.gold_evidence, item.text) < 1.0:
-                self.assertFalse(
-                    enforce_retrieval_error_boundary(case, item.text)
-                )
+                self.assertFalse(enforce_retrieval_error_boundary(case, item.text))
 
     def test_boundary_audit_maps_all_memory_items(self) -> None:
         case = self.premature_case
@@ -358,12 +326,12 @@ class RetrievalBaselineSuiteTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.cases = load_probe_cases(HARD_NEGATIVES)
 
-    def test_suite_runs_both_retrievers(self) -> None:
+    def test_suite_runs_bm25_retriever(self) -> None:
         case = self.cases[0]
         result = run_retrieval_baseline_suite(case)
-        self.assertEqual(len(result.baseline_results), 2)
+        self.assertEqual(len(result.baseline_results), 1)
         names = {r.retriever_name for r in result.baseline_results}
-        self.assertEqual(names, {"bm25", "hybrid_rerank"})
+        self.assertEqual(names, {"bm25"})
 
     def test_suite_result_matches_case_id(self) -> None:
         case = self.cases[0]
@@ -405,52 +373,27 @@ class HardNegativesTest(unittest.TestCase):
     def test_each_case_has_gold_and_distractor_memory_items(self) -> None:
         for case in self.cases:
             golds = sum(
-                1 for m in case.extracted_memory
+                1
+                for m in case.extracted_memory
                 if evidence_recall_from_text(case.gold_evidence, m.text) > 0.0
             )
             distractors = len(case.extracted_memory) - golds
             self.assertGreaterEqual(
-                golds, 1,
+                golds,
+                1,
                 f"{case.case_id}: need at least one gold support memory "
-                f"(any positive evidence match, got {golds})"
+                f"(any positive evidence match, got {golds})",
             )
             self.assertGreaterEqual(
-                distractors, 1,
+                distractors,
+                1,
                 f"{case.case_id}: need at least one distractor memory "
-                f"(got {distractors})"
+                f"(got {distractors})",
             )
 
     def test_case_ids_are_unique(self) -> None:
         ids = [c.case_id for c in self.cases]
         self.assertEqual(len(ids), len(set(ids)))
-
-    def test_hybrid_rerank_beats_or_ties_bm25_on_recall_at_1(self) -> None:
-        """On hard negatives, HybridRerank should never be worse than BM25
-        at rank-1 gold support retrieval."""
-        for case in self.cases:
-            suite = run_retrieval_baseline_suite(case)
-            by_name = {r.retriever_name: r for r in suite.baseline_results}
-            hr_recall = by_name["hybrid_rerank"].metrics.recall_at_1
-            bm25_recall = by_name["bm25"].metrics.recall_at_1
-            self.assertGreaterEqual(
-                hr_recall, bm25_recall,
-                f"{case.case_id}: HybridRerank recall@1 ({hr_recall}) "
-                f"should be >= BM25 recall@1 ({bm25_recall})"
-            )
-
-    def test_hybrid_rerank_mrr_not_worse_than_bm25(self) -> None:
-        """On hard negatives, HybridRerank MRR should never be worse than BM25."""
-        for case in self.cases:
-            suite = run_retrieval_baseline_suite(case)
-            by_name = {r.retriever_name: r for r in suite.baseline_results}
-            hr_mrr = by_name["hybrid_rerank"].metrics.mrr
-            bm25_mrr = by_name["bm25"].metrics.mrr
-            self.assertGreaterEqual(
-                hr_mrr, bm25_mrr,
-                f"{case.case_id}: HybridRerank MRR ({hr_mrr}) "
-                f"should be >= BM25 MRR ({bm25_mrr})"
-            )
-
 
 # ---------------------------------------------------------------------------
 # CSV writer tests
@@ -463,7 +406,7 @@ class RetrievalTableWriterTest(unittest.TestCase):
         cls.cases = load_probe_cases(HARD_NEGATIVES)
 
     def test_trace_table_written_with_all_fields(self) -> None:
-        from cmd_audit.harness import write_retrieval_trace_table
+        from cmd_audit import write_retrieval_trace_table
 
         case = self.cases[0]
         suite = run_retrieval_baseline_suite(case)
@@ -484,7 +427,7 @@ class RetrievalTableWriterTest(unittest.TestCase):
         self.assertIn("is_distractor", text)
 
     def test_metrics_table_written_with_all_fields(self) -> None:
-        from cmd_audit.harness import write_retrieval_metrics_table
+        from cmd_audit import write_retrieval_metrics_table
 
         case = self.cases[0]
         suite = run_retrieval_baseline_suite(case)

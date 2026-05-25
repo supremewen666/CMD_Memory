@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .labels import V0_PIPELINE_LABEL_ORDER
+from .provenance import detect_tamper
 from .writers import write_text_artifact
 
 _GATE_DECISION_VALUES = ("approved", "deferred", "rejected")
@@ -18,6 +20,8 @@ V0V1_CRITERION_IDS = (
     "accuracy_top2_exceeds_baselines",
     "repair_assessment_distribution",
 )
+
+DECISION34_LEGACY_ARTIFACTS_DIR = Path("artifacts/legacy_phrase_match_2026_05_22")
 
 
 # ── Data types ──────────────────────────────────────────────────────────
@@ -76,10 +80,13 @@ def check_v0_to_v1_gate(
 
     Returns a GateResult with pass/fail per criterion. The final decision is HITL.
     """
-    if artifacts_dir is None:
-        artifacts_dir = Path("artifacts")
-    if sandbox_dir is None:
-        sandbox_dir = Path("artifacts/sandbox")
+    if artifacts_dir is None and sandbox_dir is None:
+        artifacts_dir, sandbox_dir = _default_v0v1_artifact_dirs()
+    else:
+        if artifacts_dir is None:
+            artifacts_dir = Path("artifacts")
+        if sandbox_dir is None:
+            sandbox_dir = Path("artifacts/sandbox")
 
     criteria: list[GateCriterion] = []
 
@@ -92,9 +99,7 @@ def check_v0_to_v1_gate(
     )
 
     # Criterion 3: Attribution accuracy and top-2 exceed baselines
-    criteria.append(
-        _check_accuracy_top2(artifacts_dir / "comparison_metrics.csv")
-    )
+    criteria.append(_check_accuracy_top2(artifacts_dir / "comparison_metrics.csv"))
 
     # Criterion 4: Repair assessment distribution
     criteria.append(_check_repair_distribution(sandbox_dir / "post_repair_table.csv"))
@@ -110,35 +115,125 @@ def check_v0_to_v1_gate(
     )
 
 
+def _default_v0v1_artifact_dirs() -> tuple[Path, Path]:
+    current = Path("artifacts")
+    current_sandbox = current / "sandbox"
+    if (current / "comparison_metrics.csv").exists():
+        return current, current_sandbox
+
+    legacy = DECISION34_LEGACY_ARTIFACTS_DIR
+    if (legacy / "comparison_metrics.csv").exists():
+        return legacy, legacy / "sandbox"
+
+    return current, current_sandbox
+
+
 # ── V1→V2 gate check ───────────────────────────────────────────────────
 
 
-def check_v1_to_v2_gate() -> GateResult:
+def check_v1_to_v2_gate(
+    *,
+    mem0_integrated: bool = False,
+    letta_integrated: bool = False,
+    audit_results: tuple = (),
+) -> GateResult:
     """Check V1→V2 gate: at least two distinct memory agents integrated.
 
-    V0 has no adapter integrations, so this always returns not-met.
+    Set *mem0_integrated* to ``True`` after Issue 0014 is complete.
+    Set *letta_integrated* to ``True`` after Issue 0015 is complete.
+    The gate requires two integrations (mem0 + Letta).
     """
     checked_at = datetime.now(timezone.utc).isoformat()
-    criterion = GateCriterion(
+    adapter_count = (1 if mem0_integrated else 0) + (1 if letta_integrated else 0)
+    passed = adapter_count >= 2
+    integrations = []
+    if mem0_integrated:
+        integrations.append("mem0 (Issue 0014)")
+    if letta_integrated:
+        integrations.append("Letta (Issue 0015)")
+
+    if adapter_count == 2:
+        evidence = f"{adapter_count} adapter integration(s): {', '.join(integrations)}."
+        missing = ""
+    elif adapter_count == 1:
+        evidence = (
+            f"{adapter_count} adapter integration(s): {integrations[0]}. "
+            "Second adapter required for gate."
+        )
+        missing = "Integrate second adapter target (Letta if mem0 done)."
+    else:
+        evidence = "0 adapter integrations; V0 operates as standalone harness."
+        missing = (
+            "No Adapter Interface integrations exist. V1 must integrate "
+            "at least two distinct memory agents before V1→V2 gate review."
+        )
+    adapter_criterion = GateCriterion(
         criterion_id="adapter_integration_count",
         description=(
             "At least two distinct memory agents integrated through "
             "the Adapter Interface without macro F1 regression"
         ),
-        artifact_path="(none — adapter integrations do not exist in V0)",
+        artifact_path="cmd_audit/adapters/",
         threshold="adapter_count >= 2 AND no macro F1 regression",
-        passed=False,
-        evidence="0 adapter integrations; V0 operates as standalone harness.",
-        missing=(
-            "No Adapter Interface integrations exist. V1 must integrate "
-            "at least two distinct memory agents before V1→V2 gate review."
-        ),
+        passed=passed,
+        evidence=evidence,
+        missing=missing,
     )
+    tamper_criterion = _check_provenance_tamper(audit_results)
+    criteria = (adapter_criterion, tamper_criterion)
     return GateResult(
         gate_id="V1→V2",
-        criteria=(criterion,),
-        all_passed=False,
+        criteria=criteria,
+        all_passed=all(criterion.passed for criterion in criteria),
         checked_at=checked_at,
+    )
+
+
+def _check_provenance_tamper(audit_results: tuple) -> GateCriterion:
+    checked = 0
+    tampered: list[str] = []
+    missing_source_text: list[str] = []
+
+    for result in audit_results:
+        attribution = getattr(result, "attribution", None)
+        if attribution is None:
+            continue
+        session_key = hashlib.sha256(result.case_id.encode()).hexdigest()
+        for edge in getattr(attribution, "distractor_provenance_edges", ()):
+            source_text = getattr(edge, "source_text", "")
+            edge_id = f"{result.case_id}:{edge.source_id}->{edge.target_id}"
+            if not source_text:
+                missing_source_text.append(edge_id)
+                continue
+            checked += 1
+            if detect_tamper(edge, source_text, session_key):
+                tampered.append(edge_id)
+
+    passed = not tampered and not missing_source_text
+    if not audit_results:
+        passed = True
+        evidence = "No audit results supplied; no distractor provenance edges to check."
+        missing = ""
+    elif tampered:
+        evidence = f"Tamper detected on {len(tampered)} provenance edge(s)."
+        missing = "; ".join(tampered)
+    elif missing_source_text:
+        evidence = (
+            f"{len(missing_source_text)} provenance edge(s) lacked source_text for HMAC check."
+        )
+        missing = "; ".join(missing_source_text)
+    else:
+        evidence = f"{checked} distractor provenance edge(s) passed HMAC tamper checks."
+        missing = ""
+
+    return GateCriterion(
+        criterion_id="provenance_hmac_tamper_free",
+        description="Distractor provenance edges must pass HMAC tamper detection",
+        artifact_path="AuditResult.attribution.distractor_provenance_edges",
+        threshold="detect_tamper(edge, edge.source_text, session_key) is False for every edge",
+        passed=passed,
+        evidence=evidence,
+        missing=missing,
     )
 
 
@@ -199,11 +294,11 @@ def write_gate_review(
     lines.append(f"Decision:   {review.decision}")
     lines.append(f"Reviewed:   {review.reviewed_at}")
     lines.append("")
-    lines.append(f"Rationale:")
+    lines.append("Rationale:")
     lines.append(f"  {review.rationale}")
     if review.missing_evidence:
         lines.append("")
-        lines.append(f"Missing evidence:")
+        lines.append("Missing evidence:")
         lines.append(f"  {review.missing_evidence}")
 
     return write_text_artifact(output_path, lines, sandbox_root=sandbox_root)
@@ -221,9 +316,7 @@ def _read_comparison_csv(path: Path) -> dict[str, dict[str, float]]:
         reader = csv.DictReader(f)
         for row in reader:
             name = row["system_name"]
-            rows[name] = {
-                k: float(v) for k, v in row.items() if k != "system_name"
-            }
+            rows[name] = {k: float(v) for k, v in row.items() if k != "system_name"}
     return rows
 
 
@@ -241,20 +334,25 @@ def _read_confusion_csv(path: Path) -> dict[str, dict[str, int]]:
 
 
 def _read_repair_csv(path: Path) -> list[str]:
-    """Read post_repair_table.csv, return list of repair_assessment values."""
+    """Read post_repair_table.csv, return post-repair assessment values."""
     if not path.exists():
         raise FileNotFoundError(f"Required artifact not found: {path}")
     assessments: list[str] = []
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
+        assessment_field = "repair_assessment"
+        if reader.fieldnames and assessment_field not in reader.fieldnames:
+            assessment_field = "targeted_assessment"
         for row in reader:
-            assessments.append(row["repair_assessment"])
+            assessments.append(row[assessment_field])
     return assessments
 
 
 def _check_macro_f1(comparison_path: Path) -> GateCriterion:
     description = "CMD macro F1 exceeds all comparator baselines"
-    threshold = "CMD-Audit macro_f1 > evidence_recall AND subagent_judge AND random_label"
+    threshold = (
+        "CMD-Audit macro_f1 > evidence_recall AND subagent_judge AND random_label"
+    )
 
     try:
         data = _read_comparison_csv(comparison_path)
@@ -340,7 +438,9 @@ def _check_confusion_diagonal(confusion_path: Path) -> GateCriterion:
 
 
 def _check_accuracy_top2(comparison_path: Path) -> GateCriterion:
-    description = "CMD outperforms all baselines on attribution accuracy and top-2 accuracy"
+    description = (
+        "CMD outperforms all baselines on attribution accuracy and top-2 accuracy"
+    )
     threshold = (
         "CMD-Audit attribution_accuracy > all baselines AND "
         "CMD-Audit top2_accuracy > all baselines"
@@ -429,8 +529,7 @@ def _check_repair_distribution(repair_path: Path) -> GateCriterion:
                 )
             if not majority_improves:
                 missing_parts.append(
-                    f"recovered+partial ({recovered + partial}) <= "
-                    f"failed ({failed})"
+                    f"recovered+partial ({recovered + partial}) <= failed ({failed})"
                 )
             missing = "; ".join(missing_parts)
 

@@ -7,7 +7,7 @@ Code: github.com/boqiny/memory-probe
 
 ## Core Contribution
 
-A diagnostic framework that separates retrieval quality from write quality in agent memory. 3x3 study crossing three write strategies (raw chunks, Mem0-style fact extraction, MemGPT-style summarization) with three retrieval methods (cosine, BM25, hybrid reranking) on LoCoMo.
+A diagnostic framework that separates retrieval quality from write quality in agent memory. 3x3 study crossing three write strategies (raw chunks, Mem0-style fact extraction, MemGPT-style summarization) with three retrieval methods (cosine, BM25, hybrid reranking) on LoCoMo. Note: CMD's implementation uses a 3×2 grid (cosine + BM25 only); dense/hybrid retrieval is deferred to V1 adapter layer per issue 0008 (sparse+sparse hybrid cannot deliver semantic recovery).
 
 ## Key Findings
 

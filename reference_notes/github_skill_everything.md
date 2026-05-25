@@ -1,0 +1,7 @@
+# GitHub: sordi-ai/skill-everything
+
+- **来源**: GitHub repo, created 2026-05-08. 9 stars. Python.
+- **核心贡献**: "Git-versioned agent memory: agents that never make the same mistake twice." Self-extending skills from accepted mistakes. Core loop: errors → commits → skills. Multi-runtime (Claude Code, Cursor, Gemini CLI, OpenCode). Claims up to 84% fewer input tokens via selective sub-skill loading. Uses Anthropic-Skill folder standard, PR review workflow for quality gates.
+- **关键概念**: self-extending skills, error-to-skill loop, git-versioned agent memory, per-skill token cap (3K), multi-runtime skill portability
+- **CMD 相关性**: HIGHEST among Day 3 GitHub finds. The closest engineering analogue to CMD's Failure Memory loop: "errors become commits → commits become skills → skills make agents smarter" mirrors CMD's "anomaly → ECS → Failure Memory → future retrieval." Key differences: skill-everything is human-in-the-loop (PR review), CMD aims for automated attribution; skill-everything stores executable skills, CMD stores ECS records. The PR review step validates that CMD's Post-Repair Context Replay (automated quality gate) is a genuine contribution — it replaces the human PR review with automated verification.
+- **开放空白**: No automated error attribution — requires human to identify the root cause. No counterfactual replay. No operation-level diagnosis granularity. CMD could feed automated ECS records into a skill-everything-like catalog as auto-generated PRs.

@@ -13,7 +13,9 @@ def answer_score(answer: str, gold_answer: str) -> float:
     return 1.0 if _normalize(answer) == _normalize(gold_answer) else 0.0
 
 
-def evidence_recall_from_memory_ids(case: ProbeCase, memory_ids: tuple[str, ...]) -> float:
+def evidence_recall_from_memory_ids(
+    case: ProbeCase, memory_ids: tuple[str, ...]
+) -> float:
     required = {
         evidence.source_memory_id
         for evidence in case.gold_evidence
@@ -24,7 +26,9 @@ def evidence_recall_from_memory_ids(case: ProbeCase, memory_ids: tuple[str, ...]
     return len(required.intersection(memory_ids)) / len(required)
 
 
-def evidence_recall_from_text(gold_evidence: tuple[GoldEvidence, ...], text: str) -> float:
+def evidence_recall_from_text(
+    gold_evidence: tuple[GoldEvidence, ...], text: str
+) -> float:
     if not gold_evidence:
         return 0.0
 
