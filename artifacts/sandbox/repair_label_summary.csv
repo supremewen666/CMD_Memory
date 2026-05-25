@@ -1,7 +1,0 @@
-label,total_cases,targeted_recovered,targeted_partial,targeted_failed,targeted_recovery_rate,hard_case_recovered,hard_case_partial,hard_case_failed,hard_case_recovery_rate,targeted_better_count,hard_case_better_count,same_outcome_count,avg_targeted_token_cost,avg_hard_case_token_cost
-write_error,1,1,0,0,1.000,0,0,1,0.000,1,0,0,54.8,49.0
-compression_error,1,1,0,0,1.000,0,0,1,0.000,1,0,0,56.2,58.2
-premature_extraction_error,1,1,0,0,1.000,0,0,1,0.000,1,0,0,83.8,82.2
-retrieval_error,1,1,0,0,1.000,1,0,0,1.000,1,0,0,45.8,72.2
-injection_error,1,1,0,0,1.000,1,0,0,1.000,0,0,1,55.2,48.8
-reasoning_error,1,1,0,0,1.000,1,0,0,1.000,0,0,1,58.2,47.5

@@ -1,4 +1,0 @@
-case_id,perturbation_label,no_fm_answer_score,no_fm_evidence_score,full_trace_answer_score,full_trace_evidence_score,corrected_guidance_answer_score,corrected_guidance_evidence_score,no_fm_token_cost,full_trace_token_cost,corrected_guidance_token_cost,full_trace_pollution_risk,corrected_guidance_better_than_none,corrected_guidance_better_than_full_trace,failure_memory_useful
-v0-fm-retrieval-001,retrieval_error,0.000,0.000,0.000,0.000,1.000,1.000,15.5,35.0,53.0,1.000,true,true,true
-v0-fm-premature-extraction-001,premature_extraction_error,0.000,0.000,0.000,0.000,1.000,1.000,16.0,56.8,118.5,1.000,true,true,true
-v0-fm-compression-001,compression_error,0.000,0.000,0.000,0.000,1.000,1.000,16.2,57.0,118.8,1.000,true,true,true
