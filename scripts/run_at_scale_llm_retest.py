@@ -216,6 +216,7 @@ def run_one_case(
     answer_verifier: Any,
     tie_margin: float,
     top_k: int,
+    positive_gain_threshold: float,
 ) -> RetestCaseResult:
     start = time.perf_counter()
     baseline_suite = run_baseline_suite(case)
@@ -260,7 +261,7 @@ def run_one_case(
         attribution = assign_attribution_v1(
             replays,
             has_ingestion_trace=case.has_ingestion_trace,
-            positive_gain_threshold=0.0,
+            positive_gain_threshold=positive_gain_threshold,
             tie_margin=tie_margin,
             top_k=top_k,
             distractor_edges=distractor_edges,
@@ -324,9 +325,9 @@ def write_retest_csv(path: str | Path, results: list[RetestCaseResult]) -> None:
                         "source": result.source,
                         "gold_label": result.case.perturbation_label or "",
                         "replay_name": replay.replay_name,
-                        "recovery_gain": f"{replay.recovery_gain:.6f}",
-                        "evidence_score": f"{replay.evidence_score:.6f}",
-                        "answer_score": f"{replay.answer_score:.6f}",
+                        "recovery_gain": f"{replay.recovery_gain:.9f}",
+                        "evidence_score": f"{replay.evidence_score:.9f}",
+                        "answer_score": f"{replay.answer_score:.9f}",
                         "baseline_evidence_score_llm": _fmt_optional(
                             result.audit.baseline_evidence_score_llm
                         ),
@@ -361,7 +362,7 @@ def _find_replay(
 
 
 def _fmt_optional(value: float | None) -> str:
-    return "" if value is None else f"{value:.6f}"
+    return "" if value is None else f"{value:.9f}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -422,6 +423,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--tie-margin", type=float, default=0.0)
     parser.add_argument("--top-k", type=int, default=2)
+    parser.add_argument(
+        "--positive-gain-threshold",
+        type=float,
+        default=0.0,
+        help="minimum gain for attribution; default 0.0 matches Decision 34",
+    )
     parser.add_argument(
         "--case-ids",
         default=None,
@@ -507,6 +514,7 @@ def main(argv: list[str] | None = None) -> int:
             answer_verifier=answer_verifier,
             tie_margin=args.tie_margin,
             top_k=args.top_k,
+            positive_gain_threshold=args.positive_gain_threshold,
         )
         results.append(result)
         status = (
