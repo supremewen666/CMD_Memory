@@ -245,6 +245,31 @@ def _baseline_agent_context(case: ProbeCase) -> str:
     )
 
 
+def _derive_store_sets(
+    case: ProbeCase,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Derive (gold_stores, queried_stores) for shadow-replay disambiguation.
+
+    ``gold_stores``    — every store the gold evidence's source memory lives in.
+    ``queried_stores`` — every store the baseline retrieval pulled from.
+
+    Both are frozensets of store names; missing source_memory_id entries are
+    skipped (they could not be located in any store anyway).
+    """
+    memory_by_id = {item.memory_id: item for item in case.extracted_memory}
+    gold = {
+        memory_by_id[ev.source_memory_id].store
+        for ev in case.gold_evidence
+        if ev.source_memory_id and ev.source_memory_id in memory_by_id
+    }
+    queried = {
+        memory_by_id[mid].store
+        for mid in case.primary_baseline.retrieved_memory_ids
+        if mid in memory_by_id
+    }
+    return frozenset(gold), frozenset(queried)
+
+
 def _apply_dual_axis_recovery_gain(
     replays: tuple[ReplayResult, ...],
     *,
@@ -440,6 +465,7 @@ def run_case_v1(
     if graph_off_replay is not None:
         distractor_edges = get_graph_distractor_edges(case, graph_off_replay)
 
+    gold_stores, queried_stores = _derive_store_sets(case)
     attribution = assign_attribution_v1(
         replays,
         has_ingestion_trace=case.has_ingestion_trace,
@@ -447,6 +473,9 @@ def run_case_v1(
         tie_margin=tie_margin,
         top_k=top_k,
         distractor_edges=distractor_edges,
+        gold_stores=gold_stores,
+        queried_stores=queried_stores,
+        default_store=case.default_store,
     )
     return AuditResult(
         case_id=case.case_id,
@@ -615,6 +644,7 @@ def run_case_v1_with_hook(
                 distractor_edges = get_graph_distractor_edges(case, r)
                 break
 
+    gold_stores, queried_stores = _derive_store_sets(case)
     try:
         attribution = assign_attribution_v1(
             replays,
@@ -623,6 +653,9 @@ def run_case_v1_with_hook(
             tie_margin=tie_margin,
             top_k=2,
             distractor_edges=distractor_edges,
+            gold_stores=gold_stores,
+            queried_stores=queried_stores,
+            default_store=case.default_store,
         )
     except ValueError:
         attribution = None

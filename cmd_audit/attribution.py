@@ -24,6 +24,7 @@ class AttributionResult:
     close_deltas: tuple[tuple[str, float], ...] = ()
     distractor_provenance_ids: tuple[str, ...] = ()
     distractor_provenance_edges: tuple = ()
+    shadow_replay_resolution: str | None = None
 
 
 def assign_attribution(
@@ -68,6 +69,10 @@ def assign_attribution_v1(
     tie_margin: float = 0.05,
     top_k: int = 2,
     distractor_edges: tuple = (),
+    gold_stores: frozenset[str] | tuple[str, ...] | None = None,
+    queried_stores: frozenset[str] | tuple[str, ...] | None = None,
+    default_store: str | None = None,
+    shadow_noise_band: float = 0.05,
 ) -> AttributionResult:
     """V1 attribution with ingestion/write split and route_error support.
 
@@ -84,6 +89,21 @@ def assign_attribution_v1(
     ``top_k_labels``.  ``top2_labels`` always caps at 2 for backward
     compatibility; ``close_deltas`` exposes every (label, delta) pair
     within *tie_margin* unbounded by *top_k*.
+
+    Route/retrieval shadow disambiguation
+    -------------------------------------
+    When ``oracle_route`` and ``oracle_retrieval`` are tied within
+    ``shadow_noise_band`` they recover the same gold evidence by two
+    different paths.  Without store information the rubric softmax tail
+    decides arbitrarily.  When ``gold_stores`` and ``queried_stores`` are
+    provided, the tie is broken structurally:
+
+      * gold evidence sits in the default store → ``retrieval_error``
+        (route is a shadow of retrieval — same store, different framing)
+      * gold evidence sits in a store the baseline never queried →
+        ``route_error`` (route is a real intervention)
+      * mixed / inconclusive → keep the rubric-ranked top1 and flag
+        ``shadow_replay_resolution="ambiguous"`` for downstream review.
     """
     if not replay_results:
         raise ValueError("at least one replay result is required")
@@ -119,6 +139,16 @@ def assign_attribution_v1(
         else:
             raise ValueError("no replay produced a positive recovery gain")
 
+    shadow_resolution: str | None = None
+    if not reasoning_fallback:
+        top, shadow_resolution = _disambiguate_route_retrieval_shadow(
+            ranked,
+            gold_stores=gold_stores,
+            queried_stores=queried_stores,
+            default_store=default_store,
+            shadow_noise_band=shadow_noise_band,
+        )
+
     predicted_label = validate_v1_label(
         _v1_label_for_replay(top.replay_name, has_ingestion_trace=has_ingestion_trace)
     )
@@ -136,6 +166,13 @@ def assign_attribution_v1(
                     )
                 )
                 all_close.append((label, delta))
+        # When shadow disambiguation chose a runner-up, surface it as the
+        # head of close_deltas so top_k / top2 reflect the resolved order.
+        if shadow_resolution in {"prefer_retrieval", "prefer_route"}:
+            head = (predicted_label, 0.0)
+            all_close = [head] + [
+                (label, delta) for label, delta in all_close if label != predicted_label
+            ]
 
     top_k_labels = tuple(label for label, _ in all_close[:top_k])
     top2_labels = tuple(label for label, _ in all_close[:2])
@@ -152,7 +189,50 @@ def assign_attribution_v1(
             e.source_id for e in distractor_edges
         ),
         distractor_provenance_edges=tuple(distractor_edges),
+        shadow_replay_resolution=shadow_resolution,
     )
+
+
+def _disambiguate_route_retrieval_shadow(
+    ranked: list[ReplayResult],
+    *,
+    gold_stores: frozenset[str] | tuple[str, ...] | None,
+    queried_stores: frozenset[str] | tuple[str, ...] | None,
+    default_store: str | None,
+    shadow_noise_band: float,
+) -> tuple[ReplayResult, str | None]:
+    """Resolve oracle_route vs oracle_retrieval ties by store membership.
+
+    Returns ``(chosen_replay, resolution_tag)``.  ``resolution_tag`` is
+    ``None`` when the rule does not fire (no tie, missing store info, or
+    only one of the two replays present in the top pair).
+    """
+    if len(ranked) < 2:
+        return ranked[0], None
+    first, second = ranked[0], ranked[1]
+    pair = {first.replay_name, second.replay_name}
+    if pair != {"oracle_retrieval", "oracle_route"}:
+        return first, None
+    if abs(first.recovery_gain - second.recovery_gain) > shadow_noise_band:
+        return first, None
+    if not gold_stores:
+        return first, None
+
+    gold_set = frozenset(gold_stores)
+    queried_set = frozenset(queried_stores or ())
+    default_aliases = {default_store, "default"} - {None, ""}
+
+    retrieval_replay = first if first.replay_name == "oracle_retrieval" else second
+    route_replay = first if first.replay_name == "oracle_route" else second
+
+    in_default = bool(gold_set & default_aliases)
+    outside_queried_and_default = gold_set.isdisjoint(queried_set | default_aliases)
+
+    if in_default:
+        return retrieval_replay, "prefer_retrieval"
+    if outside_queried_and_default:
+        return route_replay, "prefer_route"
+    return first, "ambiguous"
 
 
 def _label_for_replay(replay_name: str) -> str:
