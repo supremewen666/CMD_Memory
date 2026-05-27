@@ -8,8 +8,8 @@ from cmd_audit.attribution import assign_attribution_v1
 from baselines import run_baseline_suite
 from cmd_audit.harness import (
     AuditResult,
-    _score_baseline_evidence_with_agent,
-    _with_llm_baseline_recovery_gain,
+    _apply_dual_axis_recovery_gain,
+    _score_baseline_with_agent,
 )
 from cmd_audit.models import ProbeCase
 from cmd_audit.provenance import ProvenanceTracker, get_graph_distractor_edges
@@ -30,14 +30,17 @@ def _run_case_with_adapter(
     top_k: int = 2,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier=None,
     on_the_fly_baseline_rescore: bool = False,
 ) -> AuditResult:
     """Run V1 pipeline through an adapter path (shared runner)."""
     baseline_suite = run_baseline_suite(case)
-    baseline_evidence_score_llm = _score_baseline_evidence_with_agent(
+    baseline = case.primary_baseline
+    baseline_evidence_score_llm, baseline_answer_score_llm = _score_baseline_with_agent(
         case,
         agent_generate=agent_generate,
         scorer=scorer,
+        answer_verifier=answer_verifier,
         enabled=on_the_fly_baseline_rescore,
     )
     tracker = ProvenanceTracker(case.case_id)
@@ -48,7 +51,19 @@ def _run_case_with_adapter(
         scorer=scorer,
         agent_generate=agent_generate,
     )
-    replays = _with_llm_baseline_recovery_gain(replays, baseline_evidence_score_llm)
+    replays = _apply_dual_axis_recovery_gain(
+        replays,
+        baseline_evidence_llm=(
+            baseline_evidence_score_llm
+            if baseline_evidence_score_llm is not None
+            else baseline.evidence_score
+        ),
+        baseline_answer_llm=(
+            baseline_answer_score_llm
+            if baseline_answer_score_llm is not None
+            else baseline.answer_score
+        ),
+    )
 
     distractor_edges = ()
     for r in replays:
@@ -59,13 +74,10 @@ def _run_case_with_adapter(
     attribution = assign_attribution_v1(
         replays,
         has_ingestion_trace=case.has_ingestion_trace,
-        positive_gain_threshold=(
-            -1e-12 if baseline_evidence_score_llm is not None else 0.0
-        ),
+        positive_gain_threshold=0.0,
         top_k=top_k,
         distractor_edges=distractor_edges,
     )
-    baseline = case.primary_baseline
     return AuditResult(
         case_id=case.case_id,
         perturbation_label=case.perturbation_label,
@@ -76,6 +88,7 @@ def _run_case_with_adapter(
         attribution=attribution,
         baseline_suite=baseline_suite,
         baseline_evidence_score_llm=baseline_evidence_score_llm,
+        baseline_answer_score_llm=baseline_answer_score_llm,
     )
 
 
@@ -89,6 +102,7 @@ def run_case_with_mem0(
     top_k: int = 2,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier=None,
     on_the_fly_baseline_rescore: bool = False,
 ) -> AuditResult:
     """Run V1 pipeline through the mem0 adapter path."""
@@ -102,6 +116,7 @@ def run_case_with_mem0(
         top_k=top_k,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
         on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
     )
 
@@ -113,6 +128,7 @@ def run_cases_with_mem0(
     top_k: int = 2,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier=None,
     on_the_fly_baseline_rescore: bool = False,
 ) -> list[AuditResult]:
     """Run V1 pipeline through mem0 adapter path for multiple cases."""
@@ -123,6 +139,7 @@ def run_cases_with_mem0(
             top_k=top_k,
             scorer=scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
             on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
         )
         for case in cases
@@ -139,6 +156,7 @@ def run_case_with_letta(
     top_k: int = 2,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier=None,
     on_the_fly_baseline_rescore: bool = False,
 ) -> AuditResult:
     """Run V1 pipeline through the Letta adapter path."""
@@ -152,6 +170,7 @@ def run_case_with_letta(
         top_k=top_k,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
         on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
     )
 
@@ -163,6 +182,7 @@ def run_cases_with_letta(
     top_k: int = 2,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier=None,
     on_the_fly_baseline_rescore: bool = False,
 ) -> list[AuditResult]:
     """Run V1 pipeline through Letta adapter path for multiple cases."""
@@ -173,6 +193,7 @@ def run_cases_with_letta(
             top_k=top_k,
             scorer=scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
             on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
         )
         for case in cases

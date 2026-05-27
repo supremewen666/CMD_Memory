@@ -76,7 +76,7 @@ def _build_one(case_index: int, cc: dict, label: str) -> dict | None:
     # ── Build extracted_memory with a "gold item" that carries the snippet ──
     gold_mem_id = f"mem-{case_index:04d}-gold"
     extracted_memory = _build_memory_items(
-        case_index, cc, gold_snippet, gold_mem_id, label
+        case_index, cc, gold_snippet, gold_mem_id, label, query
     )
 
     # ── Build gold_evidence (label-aware pointer setup) ──
@@ -175,7 +175,7 @@ def _build_raw_events(idx: int, cc: dict, gold_snippet: str) -> list[dict]:
 
 
 def _build_memory_items(
-    idx: int, cc: dict, gold_snippet: str, gold_mem_id: str, label: str
+    idx: int, cc: dict, gold_snippet: str, gold_mem_id: str, label: str, query: str
 ) -> list[dict]:
     """Build 2-5 memory items. The gold item is crafted per-label so the
     corresponding replay can recover from it.
@@ -233,7 +233,7 @@ def _build_memory_items(
     # ── Gold memory item (label-aware text) ──
     if label == "compression_error":
         # Compressed: missing key phrases — oracle_compression can recover
-        gold_text = _compress_snippet(gold_snippet)
+        gold_text = _compress_snippet(gold_snippet, query)
     elif label == "premature_extraction_error":
         # Too abstract — gold evidence points to raw event instead
         gold_text = "Some information was discussed regarding the topic."
@@ -603,7 +603,7 @@ def _extract_key_phrases(snippet: str) -> list[str]:
     return parts[:5] if parts else [snippet[:60]]
 
 
-def _compress_snippet(snippet: str) -> str:
+def _compress_snippet(snippet: str, query: str = "") -> str:
     """Create a lossy-compressed version missing specifics."""
     replacements = [
         ("Prague", "a Central European city"),
@@ -622,20 +622,45 @@ def _compress_snippet(snippet: str) -> str:
         if spec in result:
             result = result.replace(spec, vague)
     if result == snippet:
-        words = snippet.split()
-        if len(words) > 6:
-            result = (
-                " ".join(words[:2]) + " was discussed regarding " + " ".join(words[-2:])
-            )
+        head_noun = _query_head_noun(query)
+        result = (
+            f"The {head_noun} was discussed but the specific value was abstracted."
+        )
     return result[:250]
 
 
+def _query_head_noun(query: str) -> str:
+    """Infer the type of short answer so compression can hide the value."""
+    lowered = str(query).casefold()
+    patterns = (
+        ("last name", "last name"),
+        ("flight number", "flight number"),
+        ("city", "city"),
+        ("tool", "tool"),
+        ("country", "country"),
+        ("name", "name"),
+        ("date", "date"),
+        ("price", "price"),
+    )
+    for needle, noun in patterns:
+        if needle in lowered:
+            return noun
+    return "specific value"
+
+
 def _garble(text: str) -> str:
-    """Simulate garbled/malformed injection."""
-    sentences = [s.strip() for s in re.split(r"[.;]", text) if s.strip()]
-    if len(sentences) >= 2:
-        sentences = sentences[::-1]  # reverse order
-    return " ... ".join(sentences)[:500]
+    """Simulate garbled/malformed injection.
+
+    Returns a fixed malformed-fragment string regardless of input. Earlier
+    versions reversed sentence order, but for short proper-noun gold values
+    (e.g. "Key fact: Dr. Arati Prabhakar") that left the proper noun
+    verbatim and leaked gold into the baseline.
+    """
+    del text
+    return (
+        "Injected memory fragment was malformed; the specific value was not "
+        "recoverable."
+    )
 
 
 def _make_wrong_answer(gold: str, injected: str) -> str:

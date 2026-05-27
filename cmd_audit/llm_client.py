@@ -34,6 +34,28 @@ class LLMEmptyResponseError(LLMClientError):
 
 
 @dataclass(frozen=True)
+class TokenLogprob:
+    """One generated token with the top-K alternatives and their logprobs.
+
+    ``alternatives`` is the OpenAI-spec ``top_logprobs`` list — each entry is
+    ``(token, logprob)`` for one of the K most likely tokens at that step.
+    The chosen token itself appears first via :attr:`token` / :attr:`logprob`.
+    """
+
+    token: str
+    logprob: float
+    alternatives: tuple[tuple[str, float], ...] = ()
+
+
+@dataclass(frozen=True)
+class LLMResponse:
+    """Generation result with optional per-token logprobs."""
+
+    text: str
+    token_logprobs: tuple[TokenLogprob, ...] | None = None
+
+
+@dataclass(frozen=True)
 class LLMClientConfig:
     """Configuration for the provider-agnostic LLM client.
 
@@ -97,19 +119,52 @@ class LLMClient:
             LLMResponseError: Non-200 HTTP response.
             LLMEmptyResponseError: Response body contains no content.
         """
+        body = self._post_chat_completion(prompt, system=system, top_logprobs=None)
+        return _extract_content(body)
+
+    def generate_with_logprobs(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        top_logprobs: int = 10,
+    ) -> LLMResponse:
+        """Send a chat completion and return text plus per-token logprobs.
+
+        Returns an :class:`LLMResponse` whose ``token_logprobs`` is populated
+        when the endpoint includes a ``logprobs.content`` block (vLLM,
+        OpenAI).  Endpoints that ignore the logprobs request return
+        ``token_logprobs=None`` and the caller should fall back to discrete
+        parsing.
+        """
+        body = self._post_chat_completion(prompt, system=system, top_logprobs=top_logprobs)
+        text = _extract_content(body)
+        token_logprobs = _extract_logprobs(body)
+        return LLMResponse(text=text, token_logprobs=token_logprobs)
+
+    def _post_chat_completion(
+        self,
+        prompt: str,
+        *,
+        system: str | None,
+        top_logprobs: int | None,
+    ) -> dict:
         messages: list[dict[str, str]] = []
         if system is not None:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        payload = json.dumps(
-            {
-                "model": self._config.model,
-                "messages": messages,
-                "temperature": self._config.temperature,
-                "stream": False,
-            }
-        ).encode("utf-8")
+        payload_obj: dict[str, object] = {
+            "model": self._config.model,
+            "messages": messages,
+            "temperature": self._config.temperature,
+            "stream": False,
+        }
+        if top_logprobs is not None:
+            payload_obj["logprobs"] = True
+            payload_obj["top_logprobs"] = int(top_logprobs)
+
+        payload = json.dumps(payload_obj).encode("utf-8")
 
         headers = {
             "Content-Type": "application/json",
@@ -133,8 +188,7 @@ class LLMClient:
                         raise LLMResponseError(
                             f"LLM endpoint returned HTTP {resp.status}"
                         )
-                    body = json.loads(resp.read().decode("utf-8"))
-                    return _extract_content(body)
+                    return json.loads(resp.read().decode("utf-8"))
             except (LLMClientError, LLMEmptyResponseError):
                 raise
             except urllib.error.URLError as exc:
@@ -169,3 +223,53 @@ def _extract_content(body: dict) -> str:
     if not text:
         raise LLMEmptyResponseError("LLM response content is empty")
     return text
+
+
+def _extract_logprobs(body: dict) -> tuple[TokenLogprob, ...] | None:
+    """Pull per-token logprobs from an OpenAI-spec choices[0].logprobs block.
+
+    Returns ``None`` when the endpoint did not produce a ``logprobs.content``
+    array (older Ollama, models without logprob support).
+    """
+    choices = body.get("choices") or []
+    if not choices:
+        return None
+    logprobs_block = choices[0].get("logprobs")
+    if not isinstance(logprobs_block, dict):
+        return None
+    content = logprobs_block.get("content")
+    if not isinstance(content, list) or not content:
+        return None
+
+    out: list[TokenLogprob] = []
+    for entry in content:
+        if not isinstance(entry, dict):
+            continue
+        token = entry.get("token")
+        logprob = entry.get("logprob")
+        if token is None or logprob is None:
+            continue
+        alts_raw = entry.get("top_logprobs") or []
+        alts: list[tuple[str, float]] = []
+        for alt in alts_raw:
+            if not isinstance(alt, dict):
+                continue
+            tok = alt.get("token")
+            lp = alt.get("logprob")
+            if tok is None or lp is None:
+                continue
+            try:
+                alts.append((str(tok), float(lp)))
+            except (TypeError, ValueError):
+                continue
+        try:
+            out.append(
+                TokenLogprob(
+                    token=str(token),
+                    logprob=float(logprob),
+                    alternatives=tuple(alts),
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+    return tuple(out) if out else None

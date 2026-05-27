@@ -47,27 +47,28 @@ def run_v0_replay_portfolio(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> tuple[ReplayResult, ...]:
     """Run the currently implemented V0 replay portfolio for one case."""
 
     return (
         run_oracle_write(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         run_oracle_compression(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         run_verbatim_event_oracle(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         run_oracle_retrieval(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         run_injection_oracle(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         run_evidence_given_reasoning(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
     )
 
@@ -78,30 +79,31 @@ def run_v1_replay_portfolio(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> tuple[ReplayResult, ...]:
     """Run the V1 replay portfolio (10 replays) for one case."""
 
     return (
         run_oracle_write(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         run_oracle_compression(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         run_verbatim_event_oracle(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         run_oracle_retrieval(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         run_injection_oracle(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         run_evidence_given_reasoning(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
         *run_v1_passthrough_replays(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
     )
 
@@ -113,21 +115,22 @@ def run_v1_passthrough_replays(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> tuple[ReplayResult, ...]:
     """Run the four V1 replay extensions, optionally through an adapter snapshot."""
     if adapter is None:
         return (
             run_oracle_route(
-                case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+                case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
             ),
             run_oracle_granularity(
-                case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+                case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
             ),
             run_graph_off(
-                case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+                case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
             ),
             run_safety_off(
-                case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+                case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
             ),
         )
 
@@ -141,6 +144,7 @@ def run_v1_passthrough_replays(
             tracker=tracker,
             scorer=scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
         ),
         _run_adapter_search_replay(
             case,
@@ -151,6 +155,7 @@ def run_v1_passthrough_replays(
             tracker=tracker,
             scorer=scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
         ),
         _run_adapter_search_replay(
             case,
@@ -161,6 +166,7 @@ def run_v1_passthrough_replays(
             tracker=tracker,
             scorer=scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
         ),
         _run_adapter_safety_off(
             case,
@@ -168,6 +174,7 @@ def run_v1_passthrough_replays(
             tracker=tracker,
             scorer=scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
         ),
     )
 
@@ -182,6 +189,7 @@ def _run_adapter_search_replay(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     oracle_results = adapter.intercept_search(
         case.case_id,
@@ -206,6 +214,7 @@ def _run_adapter_search_replay(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -216,6 +225,7 @@ def _run_adapter_safety_off(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     if case.safety_filter_blocked:
         oracle = adapter.intercept_write(
@@ -241,6 +251,7 @@ def _run_adapter_safety_off(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -250,6 +261,7 @@ def run_oracle_write(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     """Replay with gold evidence injected as newly written memory."""
 
@@ -276,6 +288,7 @@ def run_oracle_write(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -285,6 +298,7 @@ def run_oracle_compression(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     """Replay with a corrected memory representation after lossy compression."""
 
@@ -320,6 +334,7 @@ def run_oracle_compression(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -329,6 +344,7 @@ def run_oracle_retrieval(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     """Replay with gold evidence recovered from extracted memory.
 
@@ -363,6 +379,7 @@ def run_oracle_retrieval(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -372,6 +389,7 @@ def run_verbatim_event_oracle(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     """Replay with raw-event evidence before memory extraction.
 
@@ -402,6 +420,7 @@ def run_verbatim_event_oracle(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -411,6 +430,7 @@ def run_injection_oracle(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     """Replay with retrieved memory injected as a clean evidence block."""
 
@@ -426,6 +446,7 @@ def run_injection_oracle(
             tracker,
             scorer=scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
         )
 
     retrieved_ids = set(baseline.retrieved_memory_ids)
@@ -457,6 +478,7 @@ def run_injection_oracle(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -466,6 +488,7 @@ def run_evidence_given_reasoning(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     """Replay final reasoning with already-injected supporting evidence."""
 
@@ -490,6 +513,7 @@ def run_evidence_given_reasoning(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -499,6 +523,7 @@ def run_oracle_route(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     """Replay by testing retrieval from each available store/tier.
 
@@ -544,6 +569,7 @@ def run_oracle_route(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -581,6 +607,7 @@ def _score_recovered_evidence(
     *,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     baseline = case.primary_baseline
     if agent_generate is not None:
@@ -590,7 +617,9 @@ def _score_recovered_evidence(
             evidence_score = scorer(case.gold_evidence, answer)
         else:
             evidence_score = evidence_recall_from_text(case.gold_evidence, answer)
-        recovered_answer_score = answer_score(answer, case.gold_answer)
+        recovered_answer_score = _score_replay_answer(
+            answer_verifier, answer, case.gold_answer
+        )
         recovery_gain = evidence_score - baseline.evidence_score
         return ReplayResult(
             replay_name=replay_name,
@@ -617,7 +646,9 @@ def _score_recovered_evidence(
     _warn_phrase_match_shortcut_once()
     evidence_score = evidence_recall_from_text(case.gold_evidence, evidence_block)
     answer = case.gold_answer if evidence_score == 1.0 else ""
-    recovered_answer_score = answer_score(answer, case.gold_answer)
+    recovered_answer_score = _score_replay_answer(
+        answer_verifier, answer, case.gold_answer
+    )
     return ReplayResult(
         replay_name=replay_name,
         answer=answer,
@@ -627,6 +658,20 @@ def _score_recovered_evidence(
         recovery_gain=recovered_answer_score - baseline.answer_score,
         provenance_edges=tracker.get_edges() if tracker else (),
     )
+
+
+def _score_replay_answer(
+    answer_verifier: object | None, answer: str, gold_answer: str
+) -> float:
+    """Use the LLM verifier when provided, else fall back to substring.
+
+    Shared by every replay so the answer-axis recovery_gain stays symmetric
+    with the baseline path (which goes through the same helper via
+    :func:`cmd_audit.llm_scoring.score_answer_with_verifier`).
+    """
+    from .llm_scoring import score_answer_with_verifier
+
+    return score_answer_with_verifier(answer_verifier, answer, gold_answer)
 
 
 def _build_replay_agent_context(
@@ -705,6 +750,7 @@ def run_oracle_granularity(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     """Replay by re-expressing memory at each granularity level.
 
@@ -742,6 +788,7 @@ def run_oracle_granularity(
             tracker,
             scorer=scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
         )
 
     if tracker is not None and best_level != case.current_granularity:
@@ -772,6 +819,7 @@ def run_oracle_granularity(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -781,6 +829,7 @@ def run_graph_off(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     """Replay with graph expansion disabled.
 
@@ -797,6 +846,7 @@ def run_graph_off(
             tracker,
             scorer=scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
         )
 
     evidence_block = _recover_without_graph_expansion(case)
@@ -825,6 +875,7 @@ def run_graph_off(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -834,6 +885,7 @@ def run_safety_off(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> ReplayResult:
     """Replay with safety filter bypassed.
 
@@ -849,6 +901,7 @@ def run_safety_off(
             tracker,
             scorer=scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
         )
 
     evidence_block = "\n".join(evidence.text for evidence in case.gold_evidence)
@@ -868,6 +921,7 @@ def run_safety_off(
         tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
 
 
@@ -934,11 +988,16 @@ def run_v1_replay_portfolio_subset(
     tracker: object | None = None,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: object | None = None,
 ) -> tuple[ReplayResult, ...]:
     """Run only the named V1 replays, in portfolio order."""
     return tuple(
         _V1_REPLAY_DISPATCH[name](
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+            case,
+            tracker=tracker,
+            scorer=scorer,
+            agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
         )
         for name in V1_REPLAY_NAMES
         if name in replay_names

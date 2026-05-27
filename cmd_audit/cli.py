@@ -35,6 +35,11 @@ def main(argv: list[str] | None = None) -> int:
         help="CSV path for the attribution table",
     )
     run_parser.add_argument(
+        "--output",
+        default=None,
+        help="output directory for attribution, metrics, and confusion artifacts",
+    )
+    run_parser.add_argument(
         "--metrics-out",
         default="artifacts/comparison_metrics.csv",
         help="CSV path for CMD-vs-comparator diagnosis metrics",
@@ -43,6 +48,14 @@ def main(argv: list[str] | None = None) -> int:
         "--confusion-out",
         default="artifacts/attribution_confusion_matrix.csv",
         help="CSV path for the CMD attribution confusion matrix",
+    )
+    run_parser.add_argument(
+        "--on-the-fly-baseline-rescore",
+        action="store_true",
+        help=(
+            "enable runtime baseline rescore when an agent/scorer stack is "
+            "configured by the caller"
+        ),
     )
 
     # ── V1 run ──────────────────────────────────────────────────────────
@@ -64,6 +77,11 @@ def main(argv: list[str] | None = None) -> int:
         "--out-dir",
         default="artifacts/sandbox",
         help="output directory for artifacts",
+    )
+    v1_parser.add_argument(
+        "--output",
+        default=None,
+        help="alias for --out-dir",
     )
     v1_parser.add_argument(
         "--use-hook",
@@ -90,14 +108,30 @@ def main(argv: list[str] | None = None) -> int:
         default=0.0,
         help="attribution tie margin for V1 runs (default: 0.0)",
     )
+    v1_parser.add_argument(
+        "--on-the-fly-baseline-rescore",
+        action="store_true",
+        help=(
+            "enable runtime baseline rescore when an agent/scorer stack is "
+            "configured by the caller"
+        ),
+    )
 
     # ── Parse and dispatch ──────────────────────────────────────────────
 
     args = parser.parse_args(argv)
 
     if args.command == "run":
+        if args.output:
+            dest = Path(args.output)
+            args.out = dest / "attribution_table.csv"
+            args.metrics_out = dest / "comparison_metrics.csv"
+            args.confusion_out = dest / "attribution_confusion_matrix.csv"
         cases = load_probe_cases(args.cases)
-        results = run_cases(cases)
+        results = run_cases(
+            cases,
+            on_the_fly_baseline_rescore=args.on_the_fly_baseline_rescore,
+        )
         write_attribution_table(results, args.out)
         write_comparison_metrics_table(results, args.metrics_out)
         write_confusion_matrix_table(results, args.confusion_out)
@@ -109,11 +143,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run-v1":
+        if args.output:
+            args.out_dir = args.output
         if args.real_data:
             results = run_full_real_suite(
                 out_dir=args.out_dir,
                 use_hook=args.use_hook,
                 tie_margin=args.tie_margin,
+                on_the_fly_baseline_rescore=args.on_the_fly_baseline_rescore,
             )
         elif args.cases:
             cases = load_probe_cases_v1(args.cases)
@@ -121,11 +158,13 @@ def main(argv: list[str] | None = None) -> int:
                 results = run_cases_v1_with_hook(
                     cases,
                     tie_margin=args.tie_margin,
+                    on_the_fly_baseline_rescore=args.on_the_fly_baseline_rescore,
                 )
             else:
                 results = run_cases_v1(
                     cases,
                     tie_margin=args.tie_margin,
+                    on_the_fly_baseline_rescore=args.on_the_fly_baseline_rescore,
                 )
             dest = Path(args.out_dir)
             dest.mkdir(parents=True, exist_ok=True)

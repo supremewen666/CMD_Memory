@@ -231,6 +231,80 @@ def compare_annotations(
     }
 
 
+def build_cleaned_case_index(
+    cleaned_rows: list[dict[str, Any]],
+) -> dict[str, tuple[int, dict[str, Any]]]:
+    """Map generated ProbeCase IDs back to cleaned rows.
+
+    ``experiments.build_probecases.build_all`` groups cleaned rows by
+    ``source.split("/")[0]``, iterates groups in sorted source order, and uses
+    a global running index for case IDs. This mirrors that convention so a
+    relabeled probe case can be rebuilt from its original cleaned case.
+    """
+    by_source: dict[str, list[dict[str, Any]]] = {}
+    for row in cleaned_rows:
+        source_name = str(row.get("source", "")).split("/")[0]
+        by_source.setdefault(source_name, []).append(row)
+
+    index: dict[str, tuple[int, dict[str, Any]]] = {}
+    total = 0
+    for source_name, source_rows in sorted(by_source.items()):
+        for local_idx, row in enumerate(source_rows):
+            case_idx = total + local_idx
+            case_source = str(row.get("source", source_name)).replace("/", "-")
+            case_id = f"{case_source}-{case_idx:04d}"
+            index[case_id] = (case_idx, row)
+        total += len(source_rows)
+    return index
+
+
+def regenerate_case_rows(
+    rows: list[dict[str, Any]],
+    annotations: Iterable[dict[str, str]],
+    cleaned_index: dict[str, tuple[int, dict[str, Any]]],
+    *,
+    regenerate_unchanged: bool = False,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Apply labels and rebuild changed case bodies from cleaned rows.
+
+    By default only relabeled rows are rebuilt, matching the recovered DeepSeek
+    provenance contract. ``regenerate_unchanged`` is intended for deterministic
+    data refreshes after generator changes, such as the short-answer compression
+    fix in ``experiments.build_probecases``.
+    """
+    from experiments.build_probecases import _build_one
+
+    labels = {
+        str(row.get("case_id", "")): str(row.get("perturbation_label", ""))
+        for row in annotations
+        if row.get("case_id") and row.get("perturbation_label")
+    }
+    out: list[dict[str, Any]] = []
+    regenerated: list[str] = []
+    for row in rows:
+        case_id = str(row.get("case_id", ""))
+        new_label = labels.get(case_id)
+        if not new_label:
+            out.append(row)
+            continue
+        old_label = str(row.get("perturbation_label", ""))
+        if not regenerate_unchanged and new_label == old_label:
+            out.append(row)
+            continue
+        try:
+            case_idx, cleaned_case = cleaned_index[case_id]
+        except KeyError as exc:
+            raise ValueError(
+                f"{case_id}: cannot regenerate; missing cleaned-case index entry"
+            ) from exc
+        rebuilt = _build_one(case_idx, cleaned_case, new_label)
+        if rebuilt is None:
+            raise ValueError(f"{case_id}: generator returned no probe case")
+        out.append(rebuilt)
+        regenerated.append(case_id)
+    return out, regenerated
+
+
 def write_reproducibility_report(
     path: str | Path,
     comparison: dict[str, Any],
@@ -244,10 +318,12 @@ def write_reproducibility_report(
     run_status: str = "completed",
     estimated_cost_usd: str = "not_recorded",
     notes: str = "",
+    regenerated_case_ids: Iterable[str] = (),
 ) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     agreement = float(comparison["agreement"])
     threshold_status = "pass" if agreement >= 0.95 else "fail"
+    regenerated = list(regenerated_case_ids)
     lines = [
         "Deepseek Label Reproducibility Report",
         "",
@@ -261,6 +337,9 @@ def write_reproducibility_report(
         f"total_annotation_calls: {total_calls}",
         f"elapsed_seconds: {elapsed_seconds:.2f}",
         f"estimated_cost_usd: {estimated_cost_usd}",
+        f"regenerated_count: {len(regenerated)}",
+        "regenerated_sample: "
+        + (", ".join(regenerated[:5]) if regenerated else "none"),
         f"compared: {comparison['compared']}",
         f"matched: {comparison['matched']}",
         f"agreement: {agreement:.6f}",
@@ -398,7 +477,21 @@ def main(argv: list[str] | None = None) -> int:
         description="Annotate perturbation labels with deepseek-v4-pro-max"
     )
     parser.add_argument("--input", default="data/cleaned_cases/cleaned_cases.json")
+    parser.add_argument("--cleaned-path", default="data/cleaned_cases/cleaned_cases.json")
     parser.add_argument("--output", default="artifacts/deepseek_label_annotations.json")
+    parser.add_argument(
+        "--case-output",
+        default=None,
+        help=(
+            "Optional regenerated ProbeCase JSON path. Use with probe-case input "
+            "when relabels should propagate into baseline_outputs/extracted_memory."
+        ),
+    )
+    parser.add_argument(
+        "--regenerate-unchanged",
+        action="store_true",
+        help="Regenerate unchanged labels too; useful after generator fixes.",
+    )
     parser.add_argument(
         "--existing-labels",
         nargs="*",
@@ -444,6 +537,21 @@ def main(argv: list[str] | None = None) -> int:
         annotations = load_case_rows(annotation_path)
         existing = load_existing_labels(args.existing_labels)
         comparison = compare_annotations(annotations, existing)
+        regenerated_case_ids: list[str] = []
+        if args.case_output:
+            cleaned_index = build_cleaned_case_index(load_case_rows(args.cleaned_path))
+            regenerated_rows, regenerated_case_ids = regenerate_case_rows(
+                rows,
+                annotations,
+                cleaned_index,
+                regenerate_unchanged=args.regenerate_unchanged,
+            )
+            case_out = Path(args.case_output)
+            case_out.parent.mkdir(parents=True, exist_ok=True)
+            case_out.write_text(
+                json.dumps(regenerated_rows, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
         write_reproducibility_report(
             args.report,
             comparison,
@@ -455,6 +563,7 @@ def main(argv: list[str] | None = None) -> int:
             total_calls=len(annotations),
             run_status="compare_only",
             notes=f"Compared existing annotations from {annotation_path}; no API calls made.",
+            regenerated_case_ids=regenerated_case_ids,
         )
         print(
             f"compared {comparison['compared']} labels from {annotation_path}; "
@@ -488,6 +597,21 @@ def main(argv: list[str] | None = None) -> int:
 
     existing = load_existing_labels(args.existing_labels)
     comparison = compare_annotations(annotations, existing)
+    regenerated_case_ids: list[str] = []
+    if args.case_output:
+        cleaned_index = build_cleaned_case_index(load_case_rows(args.cleaned_path))
+        regenerated_rows, regenerated_case_ids = regenerate_case_rows(
+            rows,
+            annotations,
+            cleaned_index,
+            regenerate_unchanged=args.regenerate_unchanged,
+        )
+        case_out = Path(args.case_output)
+        case_out.parent.mkdir(parents=True, exist_ok=True)
+        case_out.write_text(
+            json.dumps(regenerated_rows, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
     write_reproducibility_report(
         args.report,
         comparison,
@@ -497,11 +621,17 @@ def main(argv: list[str] | None = None) -> int:
         top_p=args.top_p,
         elapsed_seconds=elapsed,
         total_calls=len(annotations),
+        regenerated_case_ids=regenerated_case_ids,
     )
     print(
         f"wrote {len(annotations)} labels to {out}; "
         f"agreement={comparison['agreement']:.4f}"
     )
+    if args.case_output:
+        print(
+            f"wrote regenerated cases to {args.case_output}; "
+            f"regenerated_count={len(regenerated_case_ids)}"
+        )
     return 0
 
 

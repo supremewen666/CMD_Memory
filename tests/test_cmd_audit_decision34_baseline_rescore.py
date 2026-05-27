@@ -26,26 +26,41 @@ class Decision34BaselineRescoreTest(unittest.TestCase):
                 return 1.0
             return 0.0
 
+        def answer_verifier(answer: str, gold_answer: str) -> str:
+            if answer == "baseline answer":
+                return "NOT_EQUIVALENT"
+            return "EQUIVALENT"
+
         result = run_case_full_v1(
             case,
             agent_generate=agent_generate,
             scorer=evidence_scorer,
             evidence_scorer=evidence_scorer,
-            answer_verifier=lambda answer, gold_answer: "EQUIVALENT",
+            answer_verifier=answer_verifier,
             on_the_fly_baseline_rescore=True,
         )
 
         self.assertEqual(result.audit.baseline_evidence_score_llm, 0.25)
+        self.assertEqual(result.audit.baseline_answer_score_llm, 0.0)
         self.assertEqual(result.audit.replay.replay_name, "oracle_retrieval")
         self.assertEqual(result.audit.replay.recovery_gain, 0.75)
 
     def test_attribution_table_writes_optional_llm_baseline_column(self) -> None:
         case = load_probe_cases(FIXTURE)[0]
+
+        def agent_generate(query: str, context: str) -> str:
+            if "COUNTERFACTUAL EVIDENCE BLOCK" in context:
+                return "Lisbon"
+            return "baseline answer"
+
+        def evidence_scorer(gold_evidence, text: str) -> float:
+            return 1.0 if "Lisbon" in text else 0.0
+
         result = run_case_full_v1(
             case,
-            agent_generate=lambda query, context: "Lisbon",
-            scorer=lambda gold, text: 1.0,
-            evidence_scorer=lambda gold, text: 1.0,
+            agent_generate=agent_generate,
+            scorer=evidence_scorer,
+            evidence_scorer=evidence_scorer,
             answer_verifier=lambda answer, gold_answer: "EQUIVALENT",
             on_the_fly_baseline_rescore=True,
         )
@@ -56,6 +71,7 @@ class Decision34BaselineRescoreTest(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
 
         self.assertIn("baseline_evidence_score_llm", text.splitlines()[0])
+        self.assertIn("baseline_answer_score_llm", text.splitlines()[0])
         self.assertIn(",1.000,", text)
 
 
