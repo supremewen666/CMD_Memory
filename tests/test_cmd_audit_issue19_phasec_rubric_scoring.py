@@ -313,6 +313,18 @@ class FindScoreDigitLogprobsTest(unittest.TestCase):
         digits = _find_score_digit_logprobs(stream)
         self.assertEqual(set(digits.keys()), {3})
 
+    def test_finds_digit_when_vllm_token_contains_json_punctuation(self):
+        alts = [(" 3}", math.log(0.6)), (" 4}", math.log(0.25))]
+        stream = (
+            _tlp('"score"', math.log(0.99)),
+            _tlp(":", math.log(0.99)),
+            _tlp(" 3}", math.log(0.6), alts),
+        )
+        digits = _find_score_digit_logprobs(stream)
+
+        self.assertEqual(set(digits.keys()), {3, 4})
+        self.assertAlmostEqual(digits[3], math.log(0.6))
+
     def test_returns_none_when_chosen_token_is_word(self):
         # Score got emitted as multi-char fragment (e.g. "three") — bail.
         stream = (

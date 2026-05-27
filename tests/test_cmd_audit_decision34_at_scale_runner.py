@@ -5,13 +5,39 @@ import tempfile
 import unittest
 
 from cmd_audit.harness import AuditResult
+from cmd_audit.llm_client import LLMResponse, TokenLogprob
+from cmd_audit.models import GoldEvidence
 from cmd_audit.replays import ReplayResult
 from scripts.run_at_scale_llm_retest import (
     RetestCaseResult,
+    build_answer_verifier,
+    build_evidence_scorer,
+    assert_g_eval_available,
     load_case_ids,
     load_labeled_cases,
     write_retest_csv,
 )
+
+
+class _RubricOnlyClient:
+    def generate(self, prompt, *, system=None):
+        return '{"reasoning": "partial", "score": 2}'
+
+
+class _LogprobClient:
+    def generate(self, prompt, *, system=None):
+        return '{"reasoning": "fallback should not be used", "score": 0}'
+
+    def generate_with_logprobs(self, prompt, *, system=None, top_logprobs=10):
+        return LLMResponse(
+            text='{"reasoning": "strong", "score": 3}',
+            token_logprobs=(
+                TokenLogprob(token='{"reasoning"', logprob=0.0),
+                TokenLogprob(token='"score"', logprob=0.0),
+                TokenLogprob(token=":", logprob=0.0),
+                TokenLogprob(token="3", logprob=0.0),
+            ),
+        )
 
 
 class AtScaleRunnerTest(unittest.TestCase):
@@ -30,6 +56,105 @@ class AtScaleRunnerTest(unittest.TestCase):
             case_ids = load_case_ids(path)
 
         self.assertEqual(case_ids, {"c1", "c2"})
+
+    def test_rubric_continuous_evidence_scorer_returns_fractional_score(self) -> None:
+        scorer = build_evidence_scorer(
+            _RubricOnlyClient(),
+            scorer_mode="rubric-continuous",
+            max_workers=1,
+            max_retries=0,
+        )
+        score = scorer(
+            (
+                GoldEvidence(
+                    evidence_id="e1",
+                    text="Lisbon is the capital of Portugal.",
+                    source_memory_id=None,
+                ),
+            ),
+            "Lisbon is mentioned as a Portuguese city.",
+        )
+
+        self.assertAlmostEqual(score, 0.5)
+
+    def test_rubric_continuous_answer_verifier_returns_fractional_score(self) -> None:
+        verifier = build_answer_verifier(
+            _RubricOnlyClient(),
+            answer_mode="rubric-continuous",
+            max_workers=1,
+            max_retries=0,
+        )
+
+        score = verifier("Lisbon is mentioned.", "Lisbon")
+
+        self.assertAlmostEqual(score, 0.5)
+        self.assertNotIn(score, (0.0, 1.0))
+
+    def test_g_eval_evidence_scorer_requires_logprob_expectation(self) -> None:
+        scorer = build_evidence_scorer(
+            _LogprobClient(),
+            scorer_mode="g-eval",
+            max_workers=1,
+            max_retries=0,
+        )
+
+        score = scorer(
+            (
+                GoldEvidence(
+                    evidence_id="e1",
+                    text="Lisbon is the capital of Portugal.",
+                    source_memory_id=None,
+                ),
+            ),
+            "Lisbon is the capital of Portugal.",
+        )
+
+        self.assertAlmostEqual(score, 0.75)
+
+    def test_g_eval_hybrid_falls_back_when_logprobs_are_unparseable(self) -> None:
+        scorer = build_evidence_scorer(
+            _RubricOnlyClient(),
+            scorer_mode="g-eval-hybrid",
+            max_workers=1,
+            max_retries=0,
+        )
+
+        score = scorer(
+            (
+                GoldEvidence(
+                    evidence_id="e1",
+                    text="Lisbon is the capital of Portugal.",
+                    source_memory_id=None,
+                ),
+            ),
+            "Lisbon is mentioned as a Portuguese city.",
+        )
+
+        self.assertAlmostEqual(score, 0.5)
+
+    def test_strict_g_eval_evidence_scorer_raises_without_logprob_expectation(self) -> None:
+        scorer = build_evidence_scorer(
+            _RubricOnlyClient(),
+            scorer_mode="g-eval-strict",
+            max_workers=1,
+            max_retries=0,
+        )
+
+        with self.assertRaises(RuntimeError):
+            scorer(
+                (
+                    GoldEvidence(
+                        evidence_id="e1",
+                        text="Lisbon is the capital of Portugal.",
+                        source_memory_id=None,
+                    ),
+                ),
+                "Lisbon is mentioned as a Portuguese city.",
+            )
+
+    def test_g_eval_preflight_rejects_discrete_only_client(self) -> None:
+        with self.assertRaises(RuntimeError):
+            assert_g_eval_available(_RubricOnlyClient(), role="evaluator")
 
     def test_write_retest_csv_records_attribution_failed(self) -> None:
         _source, case = load_labeled_cases("data/probe_cases")[0]

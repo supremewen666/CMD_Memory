@@ -15,10 +15,9 @@ if str(ROOT) in sys.path:
 sys.path.insert(0, str(ROOT))
 
 from cmd_audit.llm_client import LLMClient, LLMClientConfig
-from cmd_audit.llm_scoring import SubagentScorer
 from cmd_audit.models import ProbeCase, load_real_cases_by_source
 from cmd_audit.surrogate_gap import SurrogateGapRow, measure_surrogate_gaps
-from scripts.run_at_scale_llm_retest import build_agent_generate
+from scripts.run_at_scale_llm_retest import build_agent_generate, build_evidence_scorer
 
 
 def load_case_index(input_dir: str | Path) -> dict[str, ProbeCase]:
@@ -80,6 +79,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--max-workers", type=int, default=8)
     parser.add_argument("--max-retries", type=int, default=1)
+    parser.add_argument(
+        "--scorer-mode",
+        choices=(
+            "g-eval",
+            "g-eval-hybrid",
+            "g-eval-strict",
+            "binary",
+            "rubric",
+            "rubric-continuous",
+        ),
+        default="g-eval-hybrid",
+    )
     parser.add_argument("--max-cases", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -103,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"cases={len(cases)}")
         print(f"agent={agent_model} @ {agent_base_url}")
         print(f"evaluator={evaluator_model} @ {evaluator_base_url}")
+        print(f"scorer_mode={args.scorer_mode}")
         return 0
 
     agent_client = LLMClient(
@@ -126,8 +138,9 @@ def main(argv: list[str] | None = None) -> int:
     rows = measure_surrogate_gaps(
         cases,
         agent_generate=build_agent_generate(agent_client),
-        scorer=SubagentScorer(
+        scorer=build_evidence_scorer(
             evaluator_client,
+            scorer_mode=args.scorer_mode,
             max_workers=args.max_workers,
             max_retries=args.max_retries,
         ),

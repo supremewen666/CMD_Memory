@@ -33,8 +33,14 @@ from cmd_audit.harness import (
     write_confusion_matrix_table,
 )
 from cmd_audit.llm_client import LLMClient, LLMClientConfig
-from cmd_audit.llm_scoring import AnswerVerifier, SubagentScorer
-from cmd_audit.models import ProbeCase, load_real_cases_by_source
+from cmd_audit.llm_scoring import (
+    AnswerVerifier,
+    RUBRIC_MAX_SCORE,
+    RubricScorer,
+    SubagentScorer,
+    _continuous_verify,
+)
+from cmd_audit.models import GoldEvidence, ProbeCase, load_real_cases_by_source
 from cmd_audit.provenance import ProvenanceTracker, get_graph_distractor_edges
 from cmd_audit.replays import ReplayResult, run_v1_replay_portfolio
 from baselines.comparators import run_baseline_suite
@@ -70,6 +76,103 @@ def build_agent_generate(client: LLMClient):
         return client.generate(prompt, system=AGENT_SYSTEM_PROMPT)
 
     return agent_generate
+
+
+def build_evidence_scorer(
+    client: LLMClient,
+    *,
+    scorer_mode: str,
+    max_workers: int,
+    max_retries: int,
+):
+    if scorer_mode == "g-eval-strict":
+        return _build_strict_g_eval_scorer(client)
+    if scorer_mode == "binary":
+        return SubagentScorer(
+            client,
+            max_workers=max_workers,
+            max_retries=max_retries,
+        )
+    rubric = RubricScorer(
+        client,
+        max_workers=max_workers,
+        max_retries=max_retries,
+    )
+    if scorer_mode == "rubric":
+        return rubric
+    if scorer_mode in {"g-eval", "g-eval-hybrid", "rubric-continuous"}:
+        return rubric.score_continuous
+    raise ValueError(f"unknown scorer mode: {scorer_mode}")
+
+
+def build_answer_verifier(
+    client: LLMClient,
+    *,
+    answer_mode: str,
+    max_workers: int,
+    max_retries: int,
+):
+    if answer_mode == "g-eval-strict":
+        return _build_rubric_answer_callable(_build_strict_g_eval_scorer(client))
+    if answer_mode == "binary":
+        return AnswerVerifier(client, max_retries=max_retries)
+    rubric = RubricScorer(
+        client,
+        max_workers=max_workers,
+        max_retries=max_retries,
+    )
+    if answer_mode == "rubric":
+        return _build_rubric_answer_callable(rubric)
+    if answer_mode in {"g-eval", "g-eval-hybrid", "rubric-continuous"}:
+        return _build_rubric_answer_callable(rubric.score_continuous)
+    raise ValueError(f"unknown answer mode: {answer_mode}")
+
+
+def _build_rubric_answer_callable(scorer):
+    def score_answer(answer: str, gold_answer: str) -> float:
+        evidence = (
+            GoldEvidence(
+                evidence_id="gold_answer",
+                text=gold_answer,
+                source_memory_id=None,
+            ),
+        )
+        return float(scorer(evidence, answer))
+
+    return score_answer
+
+
+def _build_strict_g_eval_scorer(client: LLMClient):
+    def score(gold_evidence, text: str) -> float:
+        if not gold_evidence or not text:
+            return 0.0
+        scores: list[float] = []
+        for evidence in gold_evidence:
+            expected = _continuous_verify(client, evidence.text, text)
+            if expected is None:
+                raise RuntimeError(
+                    "G-Eval logprob scoring failed: endpoint did not return "
+                    "parseable score-token top_logprobs. Check vLLM logprobs "
+                    "support or run with --scorer-mode rubric-continuous to "
+                    "allow fallback."
+                )
+            scores.append(expected / RUBRIC_MAX_SCORE)
+        return sum(scores) / len(scores)
+
+    return score
+
+
+def assert_g_eval_available(client: LLMClient, *, role: str) -> None:
+    expected = _continuous_verify(
+        client,
+        "Paris is in France.",
+        "Paris is in France.",
+    )
+    if expected is None:
+        raise RuntimeError(
+            f"{role} endpoint did not return parseable G-Eval logprobs. "
+            "Do not run paper retest in this state."
+        )
 
 
 def load_labeled_cases(
@@ -282,6 +385,41 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--max-workers", type=int, default=8)
     parser.add_argument("--max-retries", type=int, default=1)
+    parser.add_argument(
+        "--scorer-mode",
+        choices=(
+            "g-eval",
+            "g-eval-hybrid",
+            "g-eval-strict",
+            "binary",
+            "rubric",
+            "rubric-continuous",
+        ),
+        default="g-eval-hybrid",
+        help=(
+            "evidence scorer for recovery_gain. g-eval/g-eval-hybrid use "
+            "score-token top_logprobs when parseable and fall back to discrete "
+            "rubric JSON; g-eval-strict aborts unless logprobs are parseable; "
+            "binary reproduces PRESENT/ABSENT; rubric is discrete 0..4/4"
+        ),
+    )
+    parser.add_argument(
+        "--answer-mode",
+        choices=(
+            "g-eval",
+            "g-eval-hybrid",
+            "g-eval-strict",
+            "binary",
+            "rubric",
+            "rubric-continuous",
+        ),
+        default="g-eval-hybrid",
+        help=(
+            "answer-axis scorer for baseline_answer_score_llm and "
+            "evidence_given_reasoning. g-eval/g-eval-hybrid keep the "
+            "answer-axis continuous with discrete-rubric fallback."
+        ),
+    )
     parser.add_argument("--tie-margin", type=float, default=0.0)
     parser.add_argument("--top-k", type=int, default=2)
     parser.add_argument(
@@ -310,6 +448,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"agent={agent_model} @ {agent_base_url}")
         print(f"evaluator={evaluator_model} @ {evaluator_base_url}")
         print(f"verifier={verifier_model} @ {verifier_base_url}")
+        print(f"scorer_mode={args.scorer_mode}")
+        print(f"answer_mode={args.answer_mode}")
         return 0
 
     agent_client = LLMClient(
@@ -340,12 +480,22 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     agent_generate = build_agent_generate(agent_client)
-    scorer = SubagentScorer(
+    scorer = build_evidence_scorer(
         evaluator_client,
+        scorer_mode=args.scorer_mode,
         max_workers=args.max_workers,
         max_retries=args.max_retries,
     )
-    answer_verifier = AnswerVerifier(verifier_client, max_retries=args.max_retries)
+    answer_verifier = build_answer_verifier(
+        verifier_client,
+        answer_mode=args.answer_mode,
+        max_workers=args.max_workers,
+        max_retries=args.max_retries,
+    )
+    if args.scorer_mode == "g-eval-strict":
+        assert_g_eval_available(evaluator_client, role="evaluator")
+    if args.answer_mode == "g-eval-strict":
+        assert_g_eval_available(verifier_client, role="verifier")
 
     results: list[RetestCaseResult] = []
     for index, (source, case) in enumerate(rows, start=1):
