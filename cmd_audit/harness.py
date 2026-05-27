@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from .attribution import AttributionResult, assign_attribution, assign_attribution_v1
 from baselines.comparators import BaselineSuiteResult, run_baseline_suite
@@ -36,6 +37,7 @@ from .replays import (
     run_v1_replay_portfolio,
     run_v1_replay_portfolio_subset,
 )
+from .scoring import answer_score, evidence_recall_from_text
 from .writers import (
     write_attribution_table,
     write_confusion_matrix_table,
@@ -56,6 +58,7 @@ class AuditResult:
     attribution: AttributionResult | None
     baseline_suite: BaselineSuiteResult
     baseline_evidence_score_llm: float | None = None
+    baseline_answer_score_llm: float | None = None
     hook_stage: str = ""  # 0020-F/0021: empty_ctx | rpe_top_k | rpe_below_threshold | ""
     selected_replays: tuple[str, ...] = ()  # 0020-F/0021: hook-selected top-k replays
     per_replay_scores: tuple = ()  # 0020-F/0021: ReplayScore per replay
@@ -119,26 +122,41 @@ def run_case(
     *,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: Any = None,
     on_the_fly_baseline_rescore: bool = False,
 ) -> AuditResult:
     baseline_suite = run_baseline_suite(case)
-    baseline_evidence_score_llm = _score_baseline_evidence_with_agent(
+    baseline = case.primary_baseline
+    baseline_evidence_score_llm, baseline_answer_score_llm = _score_baseline_with_agent(
         case,
         agent_generate=agent_generate,
         scorer=scorer,
+        answer_verifier=answer_verifier,
         enabled=on_the_fly_baseline_rescore,
     )
     replays = run_v0_replay_portfolio(
-        case, scorer=scorer, agent_generate=agent_generate
+        case,
+        scorer=scorer,
+        agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
-    replays = _with_llm_baseline_recovery_gain(replays, baseline_evidence_score_llm)
-    attribution = assign_attribution(
+    replays = _apply_dual_axis_recovery_gain(
         replays,
-        positive_gain_threshold=(
-            -1e-12 if baseline_evidence_score_llm is not None else 0.0
+        baseline_evidence_llm=(
+            baseline_evidence_score_llm
+            if baseline_evidence_score_llm is not None
+            else baseline.evidence_score
+        ),
+        baseline_answer_llm=(
+            baseline_answer_score_llm
+            if baseline_answer_score_llm is not None
+            else baseline.answer_score
         ),
     )
-    baseline = case.primary_baseline
+    attribution = assign_attribution(
+        replays,
+        positive_gain_threshold=0.0,
+    )
     return AuditResult(
         case_id=case.case_id,
         perturbation_label=case.perturbation_label,
@@ -149,6 +167,7 @@ def run_case(
         attribution=attribution,
         baseline_suite=baseline_suite,
         baseline_evidence_score_llm=baseline_evidence_score_llm,
+        baseline_answer_score_llm=baseline_answer_score_llm,
     )
 
 
@@ -160,6 +179,31 @@ def run_cases_full(cases: list[ProbeCase]) -> list[FullAuditResult]:
     return [run_case_full(case) for case in cases]
 
 
+def _score_baseline_with_agent(
+    case: ProbeCase,
+    *,
+    agent_generate: AgentGenerate | None,
+    scorer: EvidenceScorer | None,
+    answer_verifier: Any = None,
+    enabled: bool,
+) -> tuple[float | None, float | None]:
+    if not enabled or agent_generate is None:
+        return None, None
+    baseline_context = _baseline_agent_context(case)
+    answer = agent_generate(case.query, baseline_context)
+    evidence_score = (
+        scorer(case.gold_evidence, answer)
+        if scorer is not None
+        else evidence_recall_from_text(case.gold_evidence, answer)
+    )
+    answer_llm_score = _score_answer_with_verifier(
+        answer_verifier,
+        answer,
+        case.gold_answer,
+    )
+    return evidence_score, answer_llm_score
+
+
 def _score_baseline_evidence_with_agent(
     case: ProbeCase,
     *,
@@ -167,11 +211,26 @@ def _score_baseline_evidence_with_agent(
     scorer: EvidenceScorer | None,
     enabled: bool,
 ) -> float | None:
-    if not enabled or agent_generate is None or scorer is None:
-        return None
-    baseline_context = _baseline_agent_context(case)
-    answer = agent_generate(case.query, baseline_context)
-    return scorer(case.gold_evidence, answer)
+    """Backward-compatible evidence-only baseline scorer."""
+    evidence_score, _ = _score_baseline_with_agent(
+        case,
+        agent_generate=agent_generate,
+        scorer=scorer,
+        answer_verifier=None,
+        enabled=enabled,
+    )
+    return evidence_score
+
+
+def _score_answer_with_verifier(
+    answer_verifier: Any,
+    answer: str,
+    gold_answer: str,
+) -> float:
+    """Score answer equivalence using a verifier when provided."""
+    from .llm_scoring import score_answer_with_verifier
+
+    return score_answer_with_verifier(answer_verifier, answer, gold_answer)
 
 
 def _baseline_agent_context(case: ProbeCase) -> str:
@@ -186,15 +245,36 @@ def _baseline_agent_context(case: ProbeCase) -> str:
     )
 
 
+def _apply_dual_axis_recovery_gain(
+    replays: tuple[ReplayResult, ...],
+    *,
+    baseline_evidence_llm: float | None,
+    baseline_answer_llm: float | None,
+) -> tuple[ReplayResult, ...]:
+    out: list[ReplayResult] = []
+    for replay in replays:
+        if replay.replay_name == "evidence_given_reasoning":
+            ref = baseline_answer_llm
+            score = replay.answer_score
+        else:
+            ref = baseline_evidence_llm
+            score = replay.evidence_score
+        if ref is None:
+            out.append(replay)
+        else:
+            out.append(replace(replay, recovery_gain=score - ref))
+    return tuple(out)
+
+
 def _with_llm_baseline_recovery_gain(
     replays: tuple[ReplayResult, ...],
     baseline_evidence_score_llm: float | None,
 ) -> tuple[ReplayResult, ...]:
-    if baseline_evidence_score_llm is None:
-        return replays
-    return tuple(
-        replace(replay, recovery_gain=replay.evidence_score - baseline_evidence_score_llm)
-        for replay in replays
+    """Backward-compatible evidence-axis wrapper."""
+    return _apply_dual_axis_recovery_gain(
+        replays,
+        baseline_evidence_llm=baseline_evidence_score_llm,
+        baseline_answer_llm=None,
     )
 
 
@@ -316,21 +396,40 @@ def run_case_v1(
     tie_margin: float = 0.0,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: Any = None,
     on_the_fly_baseline_rescore: bool = False,
 ) -> AuditResult:
     """Run the V1 pipeline: 10-replay portfolio + V1 attribution."""
     baseline_suite = run_baseline_suite(case)
+    baseline = case.primary_baseline
     tracker = ProvenanceTracker(case.case_id)
-    baseline_evidence_score_llm = _score_baseline_evidence_with_agent(
+    baseline_evidence_score_llm, baseline_answer_score_llm = _score_baseline_with_agent(
         case,
         agent_generate=agent_generate,
         scorer=scorer,
+        answer_verifier=answer_verifier,
         enabled=on_the_fly_baseline_rescore,
     )
     replays = run_v1_replay_portfolio(
-        case, tracker=tracker, scorer=scorer, agent_generate=agent_generate
+        case,
+        tracker=tracker,
+        scorer=scorer,
+        agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
-    replays = _with_llm_baseline_recovery_gain(replays, baseline_evidence_score_llm)
+    replays = _apply_dual_axis_recovery_gain(
+        replays,
+        baseline_evidence_llm=(
+            baseline_evidence_score_llm
+            if baseline_evidence_score_llm is not None
+            else baseline.evidence_score
+        ),
+        baseline_answer_llm=(
+            baseline_answer_score_llm
+            if baseline_answer_score_llm is not None
+            else baseline.answer_score
+        ),
+    )
 
     graph_off_replay = None
     for r in replays:
@@ -344,14 +443,11 @@ def run_case_v1(
     attribution = assign_attribution_v1(
         replays,
         has_ingestion_trace=case.has_ingestion_trace,
-        positive_gain_threshold=(
-            -1e-12 if baseline_evidence_score_llm is not None else 0.0
-        ),
+        positive_gain_threshold=0.0,
         tie_margin=tie_margin,
         top_k=top_k,
         distractor_edges=distractor_edges,
     )
-    baseline = case.primary_baseline
     return AuditResult(
         case_id=case.case_id,
         perturbation_label=case.perturbation_label,
@@ -362,6 +458,7 @@ def run_case_v1(
         attribution=attribution,
         baseline_suite=baseline_suite,
         baseline_evidence_score_llm=baseline_evidence_score_llm,
+        baseline_answer_score_llm=baseline_answer_score_llm,
     )
 
 
@@ -388,6 +485,7 @@ def run_case_full_v1(
         tie_margin=tie_margin,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
         on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
     )
     ecs_draft = draft_ecs(case, audit)
@@ -435,6 +533,7 @@ def run_case_v1_with_hook(
     tie_margin: float = 0.0,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: Any = None,
     on_the_fly_baseline_rescore: bool = False,
 ) -> AuditResult:
     """Run V1 pipeline with the issue 0021 two-stage Pre-CMD Hook.
@@ -445,10 +544,11 @@ def run_case_v1_with_hook(
     del agent_confidence
     baseline_suite = run_baseline_suite(case)
     baseline = case.primary_baseline
-    baseline_evidence_score_llm = _score_baseline_evidence_with_agent(
+    baseline_evidence_score_llm, baseline_answer_score_llm = _score_baseline_with_agent(
         case,
         agent_generate=agent_generate,
         scorer=scorer,
+        answer_verifier=answer_verifier,
         enabled=on_the_fly_baseline_rescore,
     )
 
@@ -479,6 +579,7 @@ def run_case_v1_with_hook(
             attribution=None,
             baseline_suite=baseline_suite,
             baseline_evidence_score_llm=baseline_evidence_score_llm,
+            baseline_answer_score_llm=baseline_answer_score_llm,
             hook_stage=decision.stage,
             selected_replays=decision.selected_replays,
             per_replay_scores=decision.per_replay_scores,
@@ -491,8 +592,21 @@ def run_case_v1_with_hook(
         tracker=tracker,
         scorer=scorer,
         agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
     )
-    replays = _with_llm_baseline_recovery_gain(replays, baseline_evidence_score_llm)
+    replays = _apply_dual_axis_recovery_gain(
+        replays,
+        baseline_evidence_llm=(
+            baseline_evidence_score_llm
+            if baseline_evidence_score_llm is not None
+            else baseline.evidence_score
+        ),
+        baseline_answer_llm=(
+            baseline_answer_score_llm
+            if baseline_answer_score_llm is not None
+            else baseline.answer_score
+        ),
+    )
 
     distractor_edges = ()
     if "graph_off" in decision.selected_replays:
@@ -505,9 +619,7 @@ def run_case_v1_with_hook(
         attribution = assign_attribution_v1(
             replays,
             has_ingestion_trace=case.has_ingestion_trace,
-            positive_gain_threshold=(
-                -1e-12 if baseline_evidence_score_llm is not None else 0.0
-            ),
+            positive_gain_threshold=0.0,
             tie_margin=tie_margin,
             top_k=2,
             distractor_edges=distractor_edges,
@@ -525,6 +637,7 @@ def run_case_v1_with_hook(
         attribution=attribution,
         baseline_suite=baseline_suite,
         baseline_evidence_score_llm=baseline_evidence_score_llm,
+        baseline_answer_score_llm=baseline_answer_score_llm,
         hook_stage=decision.stage,
         selected_replays=decision.selected_replays,
         per_replay_scores=decision.per_replay_scores,
@@ -642,6 +755,7 @@ def run_full_real_suite(
             cases,
             scorer=effective_scorer,
             agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
             tie_margin=tie_margin,
             on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
         )

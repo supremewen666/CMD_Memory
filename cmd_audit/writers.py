@@ -86,6 +86,7 @@ def write_attribution_table(
         "baseline_answer_score",
         "baseline_evidence_score",
         "baseline_evidence_score_llm",
+        "baseline_answer_score_llm",
         "replay_answer_score",
         "replay_evidence_score",
         "recovery_gain",
@@ -126,6 +127,11 @@ def write_attribution_table(
                 ""
                 if result.baseline_evidence_score_llm is None
                 else f"{result.baseline_evidence_score_llm:.3f}"
+            ),
+            "baseline_answer_score_llm": (
+                ""
+                if result.baseline_answer_score_llm is None
+                else f"{result.baseline_answer_score_llm:.3f}"
             ),
             "replay_answer_score": f"{replay.answer_score:.3f}" if replay else "",
             "replay_evidence_score": f"{replay.evidence_score:.3f}" if replay else "",
@@ -172,7 +178,7 @@ def write_confusion_matrix_table(
         for gold_label in V1_PIPELINE_LABEL_ORDER
     }
     for result in results:
-        if result.attribution is None:
+        if result.attribution is None or result.perturbation_label is None:
             continue
         counts[result.perturbation_label][result.attribution.predicted_label] += 1
 
