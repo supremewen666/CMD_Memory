@@ -629,7 +629,7 @@ def _find_score_digit_logprobs(
 
     for j in range(score_key_idx + 1, len(token_logprobs)):
         tok = token_logprobs[j]
-        stripped = tok.token.strip().strip('"').strip("'")
+        stripped = _normalise_score_digit_token(tok.token)
         if not stripped:
             continue
         if stripped.isdigit() and 0 <= int(stripped) <= RUBRIC_MAX_SCORE:
@@ -637,7 +637,7 @@ def _find_score_digit_logprobs(
             chosen = stripped
             digits[int(chosen)] = tok.logprob
             for alt_token, alt_lp in tok.alternatives:
-                cand = alt_token.strip().strip('"').strip("'")
+                cand = _normalise_score_digit_token(alt_token)
                 if cand.isdigit() and 0 <= int(cand) <= RUBRIC_MAX_SCORE:
                     digits.setdefault(int(cand), alt_lp)
             return digits or None
@@ -651,6 +651,21 @@ def _find_score_digit_logprobs(
         if not all(c in "\":' \t\n" for c in tok.token):
             return None
     return None
+
+
+def _normalise_score_digit_token(token: str) -> str:
+    """Normalize tokenizer fragments around a JSON score digit.
+
+    vLLM/OpenAI-compatible servers can emit score values as tokens such as
+    ``"3"``, ``" 3"``, ``"3}"``, ``"3,"`` or sentencepiece-style ``"▁3"``.
+    The G-Eval parser only needs the first standalone rubric digit at the
+    score-value position.
+    """
+    stripped = token.strip().strip('"').strip("'")
+    stripped = stripped.lstrip("Ġ▁")
+    if stripped and stripped[0].isdigit():
+        return stripped[0]
+    return stripped
 
 
 def _expected_score_from_logprobs(digits: dict[int, float]) -> float:
