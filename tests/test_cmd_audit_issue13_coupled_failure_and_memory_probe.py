@@ -61,7 +61,11 @@ class AttributionResultSchemaTest(unittest.TestCase):
     """Verify the new top_k_labels and close_deltas fields on AttributionResult."""
 
     def test_default_fields_are_present(self) -> None:
-        result = assign_attribution((_make_replay("oracle_write", 1.0),))
+        result = assign_attribution(
+            (_make_replay("oracle_write", 1.0),),
+            use_extended_labels=False,
+            separate_reasoning_axis=False,
+        )
         self.assertEqual(result.top_k_labels, result.top2_labels)
         self.assertEqual(result.close_deltas, ())
 
@@ -234,7 +238,11 @@ class V0BackwardCompatTest(unittest.TestCase):
                 )
 
     def test_v0_attribution_result_has_new_fields(self) -> None:
-        result = assign_attribution((_make_replay("oracle_write", 1.0),))
+        result = assign_attribution(
+            (_make_replay("oracle_write", 1.0),),
+            use_extended_labels=False,
+            separate_reasoning_axis=False,
+        )
         self.assertEqual(result.top_k_labels, ("write_error",))
         self.assertEqual(result.close_deltas, ())
 
