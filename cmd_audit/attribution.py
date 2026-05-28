@@ -12,6 +12,11 @@ from .core.labels import (
 from .replays import ReplayResult
 
 
+# Failure reason enum for principled abstention (Decision 35 R1).
+FAILURE_REASON_ZERO_GAIN = "zero_gain"
+FAILURE_REASON_NEGATIVE_GAIN = "negative_gain"
+
+
 @dataclass(frozen=True)
 class AttributionResult:
     predicted_label: str
@@ -24,6 +29,40 @@ class AttributionResult:
     distractor_provenance_ids: tuple[str, ...] = ()
     distractor_provenance_edges: tuple = ()
     shadow_replay_resolution: str | None = None
+    attribution_failed: bool = False
+    failure_reason: str | None = None
+
+
+def _build_abstain_result(
+    top_recovery_gain: float,
+    *,
+    distractor_edges: tuple = (),
+) -> AttributionResult:
+    """Construct a principled-abstention AttributionResult.
+
+    Decision 35 R1: zero/negative-gain returns ``attribution_failed=True``
+    instead of raising. Downstream callers check the flag and decide whether
+    to skip post-repair / log abstention coverage.
+    """
+    failure_reason = (
+        FAILURE_REASON_NEGATIVE_GAIN
+        if top_recovery_gain < 0.0
+        else FAILURE_REASON_ZERO_GAIN
+    )
+    return AttributionResult(
+        predicted_label="",
+        top_replay="",
+        recovery_gain=top_recovery_gain,
+        top2_labels=(),
+        is_ambiguous=False,
+        top_k_labels=(),
+        close_deltas=(),
+        distractor_provenance_ids=tuple(e.source_id for e in distractor_edges),
+        distractor_provenance_edges=tuple(distractor_edges),
+        shadow_replay_resolution=None,
+        attribution_failed=True,
+        failure_reason=failure_reason,
+    )
 
 
 def assign_attribution(
@@ -40,7 +79,7 @@ def assign_attribution(
     )
     top = ranked[0]
     if top.recovery_gain <= positive_gain_threshold:
-        raise ValueError("no replay produced a positive recovery gain")
+        return _build_abstain_result(top.recovery_gain)
 
     predicted_label = validate_label_base(_label_for_replay(top.replay_name))
     close = [
@@ -136,7 +175,10 @@ def assign_attribution_v1(
             top = reasoning_replay
             reasoning_fallback = True
         else:
-            raise ValueError("no replay produced a positive recovery gain")
+            return _build_abstain_result(
+                top.recovery_gain,
+                distractor_edges=distractor_edges,
+            )
 
     shadow_resolution: str | None = None
     if not reasoning_fallback:
