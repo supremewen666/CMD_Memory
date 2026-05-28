@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 from cmd_audit import load_probe_cases, run_case
-from baselines.comparators import (
+from cmd_audit.baselines.comparators import (
     FORBIDDEN_MONITOR_FIELDS,
     LeakSafeMonitorError,
     run_baseline_suite,

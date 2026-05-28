@@ -15,10 +15,8 @@ from .harness import (
     run_case_with_letta,
     run_cases_with_letta,
 )
-from .mem0_adapter import Mem0Adapter
-from .mem0_replays import run_mem0_replay_portfolio
-from .letta_adapter import LettaAdapter
-from .letta_replays import run_letta_replay_portfolio
+from .mem0 import Mem0Adapter, run_mem0_replay_portfolio
+from .letta import LettaAdapter, run_letta_replay_portfolio
 
 __all__ = [
     "LettaAdapter",

@@ -24,7 +24,7 @@ from cmd_audit.core.labels import REPLAY_TO_LABEL
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.metrics import DiagnosisPrediction, compute_diagnosis_metrics
 from cmd_audit.core.models import ProbeCase, load_real_cases_by_source
-from baselines import run_baseline_suite
+from cmd_audit.baselines import run_baseline_suite
 
 
 HEADLINE_LABELS = (

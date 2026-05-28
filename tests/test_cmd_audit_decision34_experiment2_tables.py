@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from baselines.comparators import BaselineSuiteResult, ComparatorResult
+from cmd_audit.baselines.comparators import BaselineSuiteResult, ComparatorResult
 from cmd_audit.metrics import DiagnosisPrediction
 from scripts import build_experiment_02_tables as exp2
 

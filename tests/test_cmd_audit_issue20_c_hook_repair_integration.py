@@ -5,7 +5,7 @@ import unittest
 
 from cmd_audit import load_probe_cases
 from cmd_audit.adapters.base import Mem0Trace
-from cmd_audit.adapters.mem0_adapter import Mem0Adapter
+from cmd_audit.adapters.mem0 import Mem0Adapter
 from cmd_audit.harness import run_case_v1_with_hook_and_repair
 
 

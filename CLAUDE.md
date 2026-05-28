@@ -114,13 +114,13 @@ python -m cmd_audit run --cases data/probe_cases/v0_issue3_cases.json
 
 ## Code Architecture
 
-`cmd_audit/` is a standalone research harness with no external PyPI dependencies; `baselines/` is a repository-local sibling package, not a pip dependency. Modules and data flow:
+`cmd_audit/` is a standalone research harness with no external PyPI dependencies; `cmd_audit/baselines/` is its comparator subpackage. Modules and data flow:
 
 ```
 data/probe_cases/*.json
   -> models.py loaders
   -> harness.py run_case* / run_case_full_v1
-    -> baselines/ comparators and memory-probe baseline
+    -> cmd_audit.baselines comparators and memory-probe baseline
     -> replays.py V0/V1 replay portfolio
     -> scoring.py phrase fallback or llm_scoring.py semantic scorer
     -> attribution.py recovery-gain label assignment
@@ -131,7 +131,7 @@ data/probe_cases/*.json
     -> writers.py CSV/text artifacts
 
 cmd_audit/adapters/
-  -> mem0_adapter.py / letta_adapter.py recorded-trace adapters
+  -> mem0.py / letta.py recorded-trace adapters
 
 cmd_audit/hook/
   -> post_retrieve_hook.py + rpe_judge.py + constants.py
@@ -145,14 +145,14 @@ cmd_audit/hook/
 | `replays.py` | 6 V0 replays + `oracle_route` (V1); `run_v0_replay_portfolio` / `run_v1_replay_portfolio` |
 | `attribution.py` | `assign_attribution` (V0) / `assign_attribution_v1` (V1) — ranks replays by recovery gain, handles `has_ingestion_trace` split |
 | `harness.py` | Public entry points: `run_case` / `run_case_v1`, `run_cases` / `run_cases_v1`, `run_case_full` / `run_case_full_v1`; also `run_case_with_mem0`/`run_case_with_letta` via adapters harness |
-| `adapters/` | CMD-Skill Adapter package: `base.py` (trace types, loaders), `harness.py` (adapter run helpers), `mem0_adapter.py` (Mem0Adapter, two-cut-point), `letta_adapter.py` (LettaAdapter, three-cut-point), `mem0_replays.py`, `letta_replays.py` (10-replay portfolios) |
+| `adapters/` | CMD-Skill Adapter package: `base.py` (trace types, loaders), `harness.py` (adapter run helpers), `mem0.py` (Mem0Adapter + `run_mem0_replay_portfolio`, two cut points), `letta.py` (LettaAdapter + `run_letta_replay_portfolio`, three cut points) |
 | `hook/` | Current hook package: `post_retrieve_hook.py`, `rpe_judge.py`, `constants.py`; two-stage empty-context + RPE Judge top-k selector for supplementary hook analysis |
 | `post_repair.py` | `ECSDraft`, `RepairedContext`, `PostRepairResult`; `draft_ecs`, `run_post_repair_context_replay`, sandbox path validation |
 | `repair_executor.py` | `RepairExecutor`, `RepairExecutorResult`, and single-repair execution through adapter-supported actions |
 | `repair_orchestrator.py` | Iterative repair loop over `close_deltas`, stopping on recovered or exhausted candidates |
 | `repairs.py` | `TargetedRepairAction`, legacy repair mapping, repair comparison helpers |
 | `failure_memory.py` | `FailureMemoryStore`, upgraded composite retrieval key, recurrence comparison |
-| `baselines/` | External comparator package: evidence-recall heuristic, subagent judge, random label, llm_judge, memory-probe grid |
+| `cmd_audit/baselines/` | Comparator subpackage: evidence-recall heuristic, subagent judge, random label, llm_judge, memory-probe grid |
 | `retrieval_baselines.py` | BM25 deterministic retrieval, `RetrievalMetrics`, evidence boundary enforcement |
 | `scoring.py` | `answer_score`, `evidence_recall_from_text` (phrase-matching); preserved as default/fallback; superseded by `llm_scoring.py` (issue 0019, Decision A) |
 | `llm_client.py` | Provider-agnostic LLM API client (`generate(prompt, *, system=None) -> str`) |

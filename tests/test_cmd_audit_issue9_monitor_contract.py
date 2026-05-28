@@ -12,7 +12,7 @@ from cmd_audit import (
     validate_monitor_anomaly_reason,
     validate_monitor_payload,
 )
-from baselines.comparators import LeakSafeMonitorError
+from cmd_audit.baselines.comparators import LeakSafeMonitorError
 
 
 class MonitorAnomalyReasonEnumTest(unittest.TestCase):

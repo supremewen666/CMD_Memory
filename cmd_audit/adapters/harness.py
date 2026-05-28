@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Callable
 
 from cmd_audit.attribution import assign_attribution_v1
-from baselines import run_baseline_suite
+from cmd_audit.baselines import run_baseline_suite
 from cmd_audit.harness import (
     AuditResult,
     _apply_dual_axis_recovery_gain,
@@ -16,10 +16,8 @@ from cmd_audit.provenance import ProvenanceTracker, get_graph_distractor_edges
 from cmd_audit.replays import AgentGenerate, EvidenceScorer, ReplayResult
 
 from .base import LettaTrace, Mem0Trace
-from .letta_adapter import LettaAdapter
-from .letta_replays import run_letta_replay_portfolio
-from .mem0_adapter import Mem0Adapter
-from .mem0_replays import run_mem0_replay_portfolio
+from .letta import LettaAdapter, run_letta_replay_portfolio
+from .mem0 import Mem0Adapter, run_mem0_replay_portfolio
 
 
 def _run_case_with_adapter(

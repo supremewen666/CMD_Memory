@@ -17,7 +17,7 @@ from cmd_audit import (
     validate_label,
 )
 from cmd_audit.harness import diagnosis_predictions, write_comparison_metrics_table
-from baselines.memory_probe import (
+from cmd_audit.baselines.memory_probe import (
     WRITE_STRATEGIES,
     RETRIEVAL_METHODS,
     MemoryProbeBaselineResult,

@@ -1,10 +1,12 @@
-"""LettaAdapter: intercepts Letta ``core_write``, ``archival_store``, and ``recall`` for counterfactual replay."""
+"""Letta adapter: intercepts ``core_write``, ``archival_store``, and ``recall`` and runs the adapter replay portfolio."""
 
 from __future__ import annotations
 
-from cmd_audit.core.models import MemoryItem
+from cmd_audit.core.models import MemoryItem, ProbeCase
 from cmd_audit.repair import UnsupportedActionError
+from cmd_audit.replays import AgentGenerate, EvidenceScorer, ReplayResult
 
+from ._replay_skeleton import run_adapter_replay_portfolio
 from ._shared import intercept_search_side, intercept_write_side
 from .base import (
     AdapterRepairMixin,
@@ -190,3 +192,21 @@ class LettaAdapter(AdapterRepairMixin):
                 f"Store checksum mismatch for case {self._trace.case_id!r}: "
                 f"pre={self._pre_checksum!r} post={current.checksum!r}"
             )
+
+
+def run_letta_replay_portfolio(
+    case: ProbeCase,
+    adapter: LettaAdapter,
+    *,
+    tracker: object | None = None,
+    scorer: EvidenceScorer | None = None,
+    agent_generate: AgentGenerate | None = None,
+) -> tuple[ReplayResult, ...]:
+    """Run 6 adapter-intercepted replays + 4 V1 passthrough replays."""
+    return run_adapter_replay_portfolio(
+        case,
+        adapter,
+        tracker=tracker,
+        scorer=scorer,
+        agent_generate=agent_generate,
+    )
