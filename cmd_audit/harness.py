@@ -156,6 +156,8 @@ def run_case(
     attribution = assign_attribution(
         replays,
         positive_gain_threshold=0.0,
+        use_extended_labels=False,
+        separate_reasoning_axis=False,
     )
     if attribution.attribution_failed:
         attribution = None
