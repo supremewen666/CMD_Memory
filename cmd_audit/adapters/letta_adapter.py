@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from cmd_audit.core.models import MemoryItem
-from cmd_audit.repairs import UnsupportedActionError
+from cmd_audit.repair import UnsupportedActionError
 
 from ._shared import intercept_search_side, intercept_write_side
 from .base import (

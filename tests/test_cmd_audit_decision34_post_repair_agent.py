@@ -3,7 +3,7 @@ import unittest
 import warnings
 
 from cmd_audit import PhraseMatchShortcutWarning, load_probe_cases
-from cmd_audit.post_repair import (
+from cmd_audit.repair import (
     RepairedContext,
     run_post_repair_context_replay,
 )

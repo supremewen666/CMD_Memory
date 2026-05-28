@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Iterable
 
 from .core.labels import PIPELINE_LABEL_ORDER
 from .core.models import MemoryItem
-from .post_repair import validate_sandbox_path
+from .repair.post_repair import validate_sandbox_path
 from .provenance import compute_provenance_completeness
 
 if TYPE_CHECKING:

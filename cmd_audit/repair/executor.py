@@ -13,7 +13,7 @@ from .post_repair import (
     RepairedContext,
     run_post_repair_context_replay,
 )
-from .repairs import (
+from .actions import (
     REPAIR_ACTION_SYSTEM_PROMPT,
     RepairAction,
     RepairActionOutputError,

@@ -2,57 +2,20 @@
 
 from __future__ import annotations
 
-import re
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .core.models import GoldEvidence
-from .core.labels import OUT_OF_SCOPE_ITEM_LABELS, validate_label
-from .core.models import ProbeCase
-from .scoring import evidence_recall_from_text
-from .core import PhraseMatchShortcutWarning
+from ..core.models import GoldEvidence, ProbeCase
+from ..scoring import evidence_recall_from_text
+from ..core import PhraseMatchShortcutWarning
+from .ecs import ECSDraft
 
 REPAIR_ASSESSMENT_VALUES = ("recovered", "partial", "failed")
 AgentGenerate = Callable[[str, str], str]
 EvidenceScorer = Callable[[tuple[GoldEvidence, ...], str], float]
 AnswerVerifierCallable = Callable[[str, str], str]
-
-# Natural-language phrases that re-declare forbidden item labels.
-_FORBIDDEN_NL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(pattern)
-    for pattern in (
-        r"\bitem[_\s]?(is\s+)?wrong\b",
-        r"\bitem[_\s]?(is\s+)?stale\b",
-        r"\bitem[_\s]?(is\s+)?conflict(ed|ing)?\b",
-        r"\bitem[_\s]?(is\s+)?poisoned\b",
-        r"\bcompression[_\s]?distorted\b",
-    )
-)
-
-
-class ECSCauseValidationError(ValueError):
-    """Raised when ECS cause contains forbidden item label names or equivalents."""
-
-
-def _validate_ecs_cause(cause: str) -> str:
-    """Reject ECS cause text that uses forbidden item label names or NL equivalents."""
-    lowered = cause.casefold()
-    # Pipeline label terms are allowed here; only out-of-scope item labels leak scope.
-    for label in OUT_OF_SCOPE_ITEM_LABELS:
-        if label in lowered:
-            raise ECSCauseValidationError(
-                f"ECS cause must not use forbidden item label {label!r}; "
-                f"describe item state instead (e.g., 'stored preference was outdated')"
-            )
-    for pattern in _FORBIDDEN_NL_PATTERNS:
-        if pattern.search(lowered):
-            raise ECSCauseValidationError(
-                "ECS cause contains natural-language equivalent of a forbidden "
-                "item label; use descriptive state language instead"
-            )
-    return cause
 
 
 def classify_repair_assessment(
@@ -72,23 +35,6 @@ def classify_repair_assessment(
 
 
 # ── Data types ────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class ECSDraft:
-    """Error-Cause-Solution record drafted from attribution."""
-
-    case_id: str
-    predicted_label: str
-    cause: str
-    corrected_memory: str
-    repair_guidance: str
-    repaired_evidence_block: str
-    cascade_candidates: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        validate_label(self.predicted_label)
-        _validate_ecs_cause(self.cause)
 
 
 @dataclass(frozen=True)
@@ -163,8 +109,8 @@ def draft_ecs_for_label(
     Raises:
         ValueError: If the label is not supported or no replay maps to it.
     """
-    from .core.labels import REPLAY_TO_LABEL, validate_label
-    from .replays import ReplayResult
+    from ..core.labels import REPLAY_TO_LABEL, validate_label
+    from ..replays import ReplayResult
 
     validate_label(label)
 
@@ -344,7 +290,7 @@ def validate_sandbox_path(
 
 def _ecs_for_label(case, predicted_label: str, replay) -> tuple[str, str, str]:
     """Return (cause, corrected_memory, repair_guidance) for a predicted label."""
-    from .repairs import (
+    from .actions import (
         get_targeted_repair_action_v1,
     )  # lazy import to avoid circular dependency
 

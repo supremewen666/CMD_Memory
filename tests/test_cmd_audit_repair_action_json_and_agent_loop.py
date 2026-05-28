@@ -15,7 +15,7 @@ from cmd_audit import (
 from cmd_audit.adapters.base import Mem0Trace
 from cmd_audit.adapters.mem0_adapter import Mem0Adapter
 from cmd_audit.core.labels import PIPELINE_LABELS
-from cmd_audit.post_repair import draft_ecs
+from cmd_audit.repair import draft_ecs
 
 
 RETRIEVAL_FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")

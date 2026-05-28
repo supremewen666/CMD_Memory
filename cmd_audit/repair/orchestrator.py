@@ -12,9 +12,9 @@ from .failure_memory import (
     FailureMemoryStoreV1,
     build_failure_memory_context_v1,
 )
-from .core.labels import LabelValidationError
+from ..core.labels import LabelValidationError
 from .post_repair import draft_ecs_for_label
-from .repair_executor import RepairExecutor, RepairExecutorResult
+from .executor import RepairExecutor, RepairExecutorResult
 
 
 class AttributionFailed(Exception):
