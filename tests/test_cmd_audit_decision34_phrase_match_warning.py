@@ -12,7 +12,7 @@ FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")
 class Decision34PhraseMatchWarningTest(unittest.TestCase):
     def setUp(self) -> None:
         self.case = load_probe_cases(FIXTURE)[0]
-        replays._PHRASE_MATCH_SHORTCUT_WARNED = False
+        replays._scoring_bridge._PHRASE_MATCH_SHORTCUT_WARNED = False
 
     def test_legacy_shortcut_warning_fires(self) -> None:
         with warnings.catch_warnings(record=True) as caught:
@@ -57,7 +57,7 @@ class Decision34PhraseMatchWarningTest(unittest.TestCase):
 
 def test_legacy_phrase_match_fixture_enables_warning(legacy_phrase_match_path) -> None:
     case = load_probe_cases(FIXTURE)[0]
-    replays._PHRASE_MATCH_SHORTCUT_WARNED = False
+    replays._scoring_bridge._PHRASE_MATCH_SHORTCUT_WARNED = False
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
