@@ -157,6 +157,8 @@ def run_case(
         replays,
         positive_gain_threshold=0.0,
     )
+    if attribution.attribution_failed:
+        attribution = None
     return AuditResult(
         case_id=case.case_id,
         perturbation_label=case.perturbation_label,
@@ -477,6 +479,8 @@ def run_case_v1(
         queried_stores=queried_stores,
         default_store=case.default_store,
     )
+    if attribution.attribution_failed:
+        attribution = None
     return AuditResult(
         case_id=case.case_id,
         perturbation_label=case.perturbation_label,
@@ -645,19 +649,18 @@ def run_case_v1_with_hook(
                 break
 
     gold_stores, queried_stores = _derive_store_sets(case)
-    try:
-        attribution = assign_attribution_v1(
-            replays,
-            has_ingestion_trace=case.has_ingestion_trace,
-            positive_gain_threshold=0.0,
-            tie_margin=tie_margin,
-            top_k=2,
-            distractor_edges=distractor_edges,
-            gold_stores=gold_stores,
-            queried_stores=queried_stores,
-            default_store=case.default_store,
-        )
-    except ValueError:
+    attribution = assign_attribution_v1(
+        replays,
+        has_ingestion_trace=case.has_ingestion_trace,
+        positive_gain_threshold=0.0,
+        tie_margin=tie_margin,
+        top_k=2,
+        distractor_edges=distractor_edges,
+        gold_stores=gold_stores,
+        queried_stores=queried_stores,
+        default_store=case.default_store,
+    )
+    if attribution.attribution_failed:
         attribution = None
 
     return AuditResult(
