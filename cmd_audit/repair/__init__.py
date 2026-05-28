@@ -10,6 +10,7 @@ Subpackage structure (Decision 35 Day 4):
 """
 
 from .actions import (
+    REPAIR_ACTION_BY_LABEL,
     REPAIR_ACTION_SYSTEM_PROMPT,
     REPAIR_ACTION_TOOL_DEFINITION,
     REPAIR_ACTION_TYPES,
