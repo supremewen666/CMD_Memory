@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cmd_audit.hook import V1_REPLAY_NAME_ORDER, post_retrieve_hook
-from cmd_audit.models import ProbeCase, RetrievedItem, load_real_cases_by_source
+from cmd_audit.core.models import ProbeCase, RetrievedItem, load_real_cases_by_source
 
 
 HookDecisionFn = Callable[[str, tuple[RetrievedItem, ...]], tuple[str, ...]]

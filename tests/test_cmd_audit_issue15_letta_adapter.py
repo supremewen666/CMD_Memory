@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 
 from cmd_audit import (
-    V0_PIPELINE_LABELS,
+    PIPELINE_LABELS_BASE,
     compute_diagnosis_metrics,
     diagnosis_predictions,
     load_probe_cases,
@@ -70,7 +70,7 @@ class LettaTraceValidationTest(unittest.TestCase):
                 )
 
     def test_recall_results_are_memory_items(self) -> None:
-        from cmd_audit.models import MemoryItem
+        from cmd_audit.core.models import MemoryItem
 
         for case_id, trace in self.traces.items():
             with self.subTest(case_id=case_id):
@@ -175,7 +175,7 @@ class LettaAdapterInterceptionTest(unittest.TestCase):
     # ── intercept_recall routing ─────────────────────────────────────
 
     def test_intercept_recall_oracle_retrieval_returns_memory_items(self) -> None:
-        from cmd_audit.models import MemoryItem
+        from cmd_audit.core.models import MemoryItem
 
         adapter = self._adapter_for("v0-retrieval-001")
         trace = self.traces["v0-retrieval-001"]
@@ -446,21 +446,21 @@ class LettaAdapterV0V1BoundaryTest(unittest.TestCase):
     """Letta adapter respects V0/V1 label boundaries."""
 
     def test_adapter_label_is_valid_v0_label(self) -> None:
-        from cmd_audit import validate_v0_label
+        from cmd_audit import validate_label_base
 
         cases = load_probe_cases(V0_SMOKE)
         traces = load_letta_traces(LETTA_TRACES)
         for case in cases:
             with self.subTest(case_id=case.case_id):
                 result = run_case_with_letta(case, traces[case.case_id])
-                validate_v0_label(result.attribution.predicted_label)
+                validate_label_base(result.attribution.predicted_label)
 
     def test_adapter_accepts_v1_labels_in_v1_pipeline(self) -> None:
-        from cmd_audit import validate_v1_label
+        from cmd_audit import validate_label
 
-        for label in V0_PIPELINE_LABELS:
+        for label in PIPELINE_LABELS_BASE:
             with self.subTest(label=label):
-                validate_v1_label(label)
+                validate_label(label)
 
     def test_load_letta_traces_functional(self) -> None:
         traces = _load_traces(LETTA_TRACES)
@@ -566,7 +566,7 @@ class CrossAgentNonRegressionTest(unittest.TestCase):
 
     def test_multi_store_trace_reads_correct_blocks(self) -> None:
         """LettaTrace with distinct core/archival blocks exercises tiering."""
-        from cmd_audit.models import MemoryItem
+        from cmd_audit.core.models import MemoryItem
 
         # Verify that core_blocks and archival_blocks are independently accessible
         trace = self.letta_traces["v0-write-001"]

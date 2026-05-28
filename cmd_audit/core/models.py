@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .labels import validate_v0_label
+from .labels import validate_label_base
 
 
 class ProbeCaseError(ValueError):
@@ -227,7 +227,7 @@ class ProbeCase:
 
     @classmethod
     def from_mapping_v1(cls, value: dict[str, Any]) -> "ProbeCase":
-        from .labels import validate_v1_label
+        from .labels import validate_label
 
         case = cls(
             case_id=_required_str(value, "case_id"),
@@ -351,18 +351,18 @@ def _optional_label_v0(raw: Any) -> str | None:
         return None
     if not isinstance(raw, str) or not raw.strip():
         raise ProbeCaseError("perturbation_label must be a non-empty string or null")
-    return validate_v0_label(raw)
+    return validate_label_base(raw)
 
 
 def _optional_label_v1(raw: Any) -> str | None:
     """Accept None or a valid V1 pipeline label; reject invalid labels."""
-    from .labels import validate_v1_label
+    from .labels import validate_label
 
     if raw is None:
         return None
     if not isinstance(raw, str) or not raw.strip():
         raise ProbeCaseError("perturbation_label must be a non-empty string or null")
-    return validate_v1_label(raw)
+    return validate_label(raw)
 
 
 # ---------------------------------------------------------------------------

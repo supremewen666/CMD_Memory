@@ -13,7 +13,7 @@ from cmd_audit import (
     load_probe_cases,
     validate_repair_action_type,
 )
-from cmd_audit.labels import LabelValidationError
+from cmd_audit.core.labels import LabelValidationError
 
 from cmd_audit.adapters.base import (
     AdapterRepairMixin,

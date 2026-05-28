@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from cmd_audit import (
-    V0_PIPELINE_LABELS,
+    PIPELINE_LABELS_BASE,
     LLMClientConfig,
     LLMClientError,
     LLMEmptyResponseError,
@@ -106,7 +106,7 @@ class LLMPromptConstructionTest(unittest.TestCase):
 
     def test_prompt_includes_all_six_v0_labels(self) -> None:
         prompt = build_judge_prompt(self.case)
-        for label in V0_PIPELINE_LABELS:
+        for label in PIPELINE_LABELS_BASE:
             self.assertIn(label, prompt)
 
     def test_prompt_has_expected_sections(self) -> None:
@@ -214,7 +214,7 @@ class LLMJudgeFallbackTest(unittest.TestCase):
         from baselines.comparators import run_llm_judge_baseline
         result = run_llm_judge_baseline(self.cases[0], llm_client=None)
         self.assertEqual(result.comparator_name, "llm_judge")
-        self.assertIn(result.predicted_label, V0_PIPELINE_LABELS)
+        self.assertIn(result.predicted_label, PIPELINE_LABELS_BASE)
 
     def test_fallback_explanation_mentions_unavailable(self) -> None:
         from baselines.comparators import run_llm_judge_baseline
@@ -225,6 +225,18 @@ class LLMJudgeFallbackTest(unittest.TestCase):
         from baselines.comparators import run_llm_judge_baseline
         result = run_llm_judge_baseline(self.cases[0], llm_client=None)
         self.assertEqual(result.cost_per_diagnosis, 0.5)
+
+    def test_parse_error_fallback_uses_heuristic_explanation(self) -> None:
+        from baselines.comparators import run_llm_judge_baseline
+
+        class BadClient:
+            def generate(self, prompt):
+                return "not parseable"
+
+        result = run_llm_judge_baseline(self.cases[0], llm_client=BadClient())
+
+        self.assertEqual(result.comparator_name, "llm_judge")
+        self.assertIn("parse error", result.explanation.lower())
 
 
 # ── Suite Integration ─────────────────────────────────────────────────

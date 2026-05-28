@@ -11,7 +11,7 @@ def pytest_configure(config):
 
 def pytest_collection_modifyitems(config, items):
     marker = pytest.mark.filterwarnings(
-        "ignore::cmd_audit.warnings.PhraseMatchShortcutWarning"
+        "ignore::cmd_audit.core.PhraseMatchShortcutWarning"
     )
     for item in items:
         item.add_marker(marker)

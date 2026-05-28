@@ -11,7 +11,7 @@ from cmd_audit.harness import (
     _apply_dual_axis_recovery_gain,
     _score_baseline_with_agent,
 )
-from cmd_audit.models import ProbeCase
+from cmd_audit.core.models import ProbeCase
 from cmd_audit.provenance import ProvenanceTracker, get_graph_distractor_edges
 from cmd_audit.replays import AgentGenerate, EvidenceScorer, ReplayResult
 

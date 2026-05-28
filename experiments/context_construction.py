@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from cmd_audit.harness import run_case_full_v1
-from cmd_audit.models import ProbeCase, load_probe_cases_v1
+from cmd_audit.core.models import ProbeCase, load_probe_cases_v1
 
 
 EXPERIMENT_01_CONTEXT_MODES = (

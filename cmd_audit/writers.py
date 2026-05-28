@@ -11,8 +11,8 @@ import csv
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
-from .labels import V1_PIPELINE_LABEL_ORDER
-from .models import MemoryItem
+from .core.labels import PIPELINE_LABEL_ORDER
+from .core.models import MemoryItem
 from .post_repair import validate_sandbox_path
 from .provenance import compute_provenance_completeness
 
@@ -174,17 +174,17 @@ def write_confusion_matrix_table(
 ) -> None:
     """Write the CMD-Audit attribution confusion matrix CSV."""
     counts = {
-        gold_label: {predicted_label: 0 for predicted_label in V1_PIPELINE_LABEL_ORDER}
-        for gold_label in V1_PIPELINE_LABEL_ORDER
+        gold_label: {predicted_label: 0 for predicted_label in PIPELINE_LABEL_ORDER}
+        for gold_label in PIPELINE_LABEL_ORDER
     }
     for result in results:
         if result.attribution is None or result.perturbation_label is None:
             continue
         counts[result.perturbation_label][result.attribution.predicted_label] += 1
 
-    fieldnames = ["gold_label", *V1_PIPELINE_LABEL_ORDER]
+    fieldnames = ["gold_label", *PIPELINE_LABEL_ORDER]
     rows: list[dict[str, str]] = []
-    for gold_label in V1_PIPELINE_LABEL_ORDER:
+    for gold_label in PIPELINE_LABEL_ORDER:
         row: dict[str, str] = {"gold_label": gold_label}
         row.update({k: str(v) for k, v in counts[gold_label].items()})
         rows.append(row)

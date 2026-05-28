@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cmd_audit.models import RetrievedItem
+from cmd_audit.core.models import RetrievedItem
 
 from . import constants
 from .rpe_judge import rank_scores, score_replays

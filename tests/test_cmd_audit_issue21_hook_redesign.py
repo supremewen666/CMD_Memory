@@ -18,7 +18,7 @@ from cmd_audit.hook import (
     score_replays,
 )
 from cmd_audit.hook import constants as hook_constants
-from cmd_audit.models import RetrievedItem
+from cmd_audit.core.models import RetrievedItem
 
 
 RETRIEVAL_FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")

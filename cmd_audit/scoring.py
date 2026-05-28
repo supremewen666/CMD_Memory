@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from .models import GoldEvidence, ProbeCase
+from .core.models import GoldEvidence, ProbeCase
 
 
 def answer_score(answer: str, gold_answer: str) -> float:

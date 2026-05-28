@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .models import ProbeCase
+from .core.models import ProbeCase
 from .replays import AgentGenerate, EvidenceScorer
 from .scoring import evidence_recall_from_text
 

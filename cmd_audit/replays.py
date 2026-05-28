@@ -6,9 +6,9 @@ import warnings
 from dataclasses import dataclass
 from typing import Callable
 
-from .models import GoldEvidence, ProbeCase
+from .core.models import GoldEvidence, ProbeCase
 from .scoring import answer_score, evidence_recall_from_text
-from .warnings import PhraseMatchShortcutWarning
+from .core import PhraseMatchShortcutWarning
 
 EvidenceScorer = Callable[[tuple[GoldEvidence, ...], str], float]
 AgentGenerate = Callable[[str, str], str]

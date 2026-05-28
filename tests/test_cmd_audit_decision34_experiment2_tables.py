@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import patch
 
+from baselines.comparators import BaselineSuiteResult, ComparatorResult
 from cmd_audit.metrics import DiagnosisPrediction
 from scripts import build_experiment_02_tables as exp2
 
@@ -11,6 +13,7 @@ class FakeBaseline:
 
 class FakeCase:
     has_ingestion_trace = True
+    perturbation_label = "retrieval_error"
     primary_baseline = FakeBaseline()
 
 
@@ -142,6 +145,65 @@ class Experiment2TablesTest(unittest.TestCase):
         self.assertEqual(cmd_row["tokens_per_case"], "125.000000")
         self.assertEqual(cmd_row["usd_per_case"], "0.012000")
         self.assertEqual(cmd_row["cost_metadata_status"], "measured")
+
+    def test_build_baseline_predictions_threads_llm_client(self) -> None:
+        researcher = {
+            "c1": exp2.ResearcherCase(
+                case_id="c1",
+                gold_label="retrieval_error",
+                confidence="high",
+                source="unit",
+            )
+        }
+        fake_client = object()
+        comparator = ComparatorResult(
+            comparator_name="llm_judge",
+            predicted_label="retrieval_error",
+            top2_labels=("retrieval_error",),
+            explanation="llm baseline",
+            cost_per_diagnosis=0.5,
+        )
+        suite = BaselineSuiteResult(
+            case_id="c1",
+            memory_baselines=(),
+            evidence_recall_heuristic=comparator,
+            subagent_judge=comparator,
+            random_label=comparator,
+            llm_judge=comparator,
+            monitor=None,
+        )
+        fake_case = FakeCase()
+
+        with patch.object(exp2, "run_baseline_suite", return_value=suite) as run:
+            rows = exp2.build_baseline_predictions(
+                researcher,
+                {"c1": fake_case},
+                llm_client=fake_client,
+            )
+
+        self.assertEqual(len(rows), 4)
+        run.assert_called_once_with(fake_case, llm_client=fake_client)
+
+    def test_load_original_label_cases_uses_retest_ids_when_subset_empty(self) -> None:
+        retest = {
+            "c1": [
+                {
+                    "case_id": "c1",
+                    "source": "unit",
+                    "replay_name": "oracle_retrieval",
+                    "recovery_gain": "0.9",
+                }
+            ]
+        }
+
+        rows = exp2.load_original_label_cases(
+            retest_by_case=retest,
+            case_index={"c1": FakeCase()},
+        )
+
+        self.assertEqual(rows["c1"].gold_label, "retrieval_error")
+        self.assertEqual(rows["c1"].confidence, "medium")
+        self.assertEqual(rows["c1"].source, "unit")
 
     def test_missing_cost_metadata_is_explicit_not_faked(self) -> None:
         researcher = {

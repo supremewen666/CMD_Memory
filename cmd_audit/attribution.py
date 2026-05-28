@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .labels import (
+from .core.labels import (
     REPLAY_TO_LABEL,
-    V1_REPLAY_TO_LABEL,
-    validate_v0_label,
-    validate_v1_label,
+    validate_label,
+    validate_label_base,
 )
 from .replays import ReplayResult
 
@@ -43,9 +42,9 @@ def assign_attribution(
     if top.recovery_gain <= positive_gain_threshold:
         raise ValueError("no replay produced a positive recovery gain")
 
-    predicted_label = validate_v0_label(_label_for_replay(top.replay_name))
+    predicted_label = validate_label_base(_label_for_replay(top.replay_name))
     close = [
-        validate_v0_label(_label_for_replay(result.replay_name))
+        validate_label_base(_label_for_replay(result.replay_name))
         for result in ranked
         if top.recovery_gain - result.recovery_gain <= tie_margin
     ]
@@ -149,7 +148,7 @@ def assign_attribution_v1(
             shadow_noise_band=shadow_noise_band,
         )
 
-    predicted_label = validate_v1_label(
+    predicted_label = validate_label(
         _v1_label_for_replay(top.replay_name, has_ingestion_trace=has_ingestion_trace)
     )
 
@@ -160,7 +159,7 @@ def assign_attribution_v1(
         for result in ranked:
             delta = top.recovery_gain - result.recovery_gain
             if delta <= tie_margin:
-                label = validate_v1_label(
+                label = validate_label(
                     _v1_label_for_replay(
                         result.replay_name, has_ingestion_trace=has_ingestion_trace
                     )
@@ -246,6 +245,6 @@ def _v1_label_for_replay(replay_name: str, *, has_ingestion_trace: bool) -> str:
     if replay_name == "oracle_write" and not has_ingestion_trace:
         return "ingestion_error"
     try:
-        return V1_REPLAY_TO_LABEL[replay_name]
+        return REPLAY_TO_LABEL[replay_name]
     except KeyError as exc:
         raise ValueError(f"unknown replay {replay_name!r}") from exc

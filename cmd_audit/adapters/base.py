@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from cmd_audit.models import MemoryItem
+from cmd_audit.core.models import MemoryItem
 
 # ── Replay name type ────────────────────────────────────────────────────
 

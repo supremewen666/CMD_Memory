@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cmd_audit.models import ProbeCase
+from cmd_audit.core.models import ProbeCase
 from cmd_audit.replays import AgentGenerate, EvidenceScorer, ReplayResult
 
 from ._replay_skeleton import run_adapter_replay_portfolio

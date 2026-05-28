@@ -2,7 +2,7 @@ from pathlib import Path
 import unittest
 
 from cmd_audit import load_probe_cases
-from cmd_audit.labels import V1_PIPELINE_LABELS
+from cmd_audit.core.labels import PIPELINE_LABELS
 from cmd_audit.replays import run_oracle_retrieval
 
 
@@ -25,7 +25,7 @@ class Decision34ReplayContextNoLabelTest(unittest.TestCase):
         self.assertIn("BASELINE CONTEXT:", context)
         self.assertIn("COUNTERFACTUAL EVIDENCE BLOCK:", context)
         self.assertNotIn("CMD ATTRIBUTION LABEL", context)
-        for label in V1_PIPELINE_LABELS:
+        for label in PIPELINE_LABELS:
             self.assertNotIn(label, context)
 
 

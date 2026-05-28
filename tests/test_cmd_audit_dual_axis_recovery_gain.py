@@ -2,7 +2,7 @@ import unittest
 
 from cmd_audit.attribution import assign_attribution_v1
 from cmd_audit.harness import _apply_dual_axis_recovery_gain
-from cmd_audit.models import (
+from cmd_audit.core.models import (
     BaselineOutput,
     GoldEvidence,
     MemoryItem,

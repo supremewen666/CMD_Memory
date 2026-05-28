@@ -55,7 +55,7 @@ from .failure_memory import (
     run_recurrence_comparisons,
     write_recurrence_comparison_table,
 )
-from .llm_client import (
+from .core.llm_client import (
     LLMClient,
     LLMClientConfig,
     LLMClientError,
@@ -82,21 +82,21 @@ from .llm_scoring import (
     RubricVerifier,
     SubagentScorer,
 )
-from .labels import (
+from .core.labels import (
     MONITOR_ANOMALY_REASON_VALUES,
-    V0_PIPELINE_LABEL_ORDER,
-    V0_PIPELINE_LABELS,
-    V1_PIPELINE_LABEL_ORDER,
-    V1_PIPELINE_LABELS,
-    V1_REPLAY_TO_LABEL,
+    PIPELINE_LABELS_BASE_ORDER,
+    PIPELINE_LABELS_BASE,
+    PIPELINE_LABEL_ORDER,
+    PIPELINE_LABELS,
+    REPLAY_TO_LABEL,
     LabelValidationError,
     MonitorAnomalyReasonError,
     validate_monitor_anomaly_reason,
-    validate_v0_label,
-    validate_v1_label,
+    validate_label_base,
+    validate_label,
 )
 from .metrics import DiagnosisMetrics, DiagnosisPrediction, compute_diagnosis_metrics
-from .models import (
+from .core.models import (
     Citation,
     ProbeCase,
     ProvenanceEdge,
@@ -217,8 +217,8 @@ from .version_gates import (
     write_gate_review,
     write_gate_status,
 )
-from .warnings import PhraseMatchShortcutWarning
-from .constants import COUPLED_FAILURE_TIE_MARGIN
+from .core import PhraseMatchShortcutWarning
+from .core.constants import COUPLED_FAILURE_TIE_MARGIN
 
 __all__ = [
     "AnswerVerifier",
@@ -294,13 +294,13 @@ __all__ = [
     "TargetedRepairAction",
     "TokenLogprob",
     "UnsupportedActionError",
-    "V0_PIPELINE_LABEL_ORDER",
-    "V0_PIPELINE_LABELS",
-    "V1_PIPELINE_LABEL_ORDER",
-    "V1_PIPELINE_LABELS",
+    "PIPELINE_LABELS_BASE_ORDER",
+    "PIPELINE_LABELS_BASE",
+    "PIPELINE_LABEL_ORDER",
+    "PIPELINE_LABELS",
     "V1_REPLAY_NAME_ORDER",
     "V1_REPLAY_NAMES",
-    "V1_REPLAY_TO_LABEL",
+    "REPLAY_TO_LABEL",
     "assign_attribution",
     "assign_attribution_v1",
     "build_failure_memory_context",
@@ -374,8 +374,8 @@ __all__ = [
     "validate_monitor_anomaly_reason",
     "validate_monitor_payload",
     "validate_sandbox_path",
-    "validate_v0_label",
-    "validate_v1_label",
+    "validate_label_base",
+    "validate_label",
     "write_attribution_table",
     "write_comparison_metrics_table",
     "write_confusion_matrix_table",

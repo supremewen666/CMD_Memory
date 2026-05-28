@@ -20,9 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cmd_audit.labels import V1_PIPELINE_LABEL_ORDER, V1_REPLAY_TO_LABEL
+from cmd_audit.core.labels import PIPELINE_LABEL_ORDER, REPLAY_TO_LABEL
 from cmd_audit.metrics import DiagnosisPrediction, compute_diagnosis_metrics
-from cmd_audit.models import ProbeCase, load_real_cases_by_source
+from cmd_audit.core.models import ProbeCase, load_real_cases_by_source
 
 
 # DiagnosisPrediction still requires a numeric cost. This sentinel is only for
@@ -152,7 +152,7 @@ def summarize_predictions(predictions: list[ScalePrediction]) -> list[dict[str, 
         ]
         metrics = compute_diagnosis_metrics(
             metric_rows,
-            labels=V1_PIPELINE_LABEL_ORDER,
+            labels=PIPELINE_LABEL_ORDER,
         )["CMD-Audit"]
         failed = sum(row.attribution_failed for row in labeled_rows)
         summary_rows.append(
@@ -203,7 +203,7 @@ def write_summary_csv(path: str | Path, rows: list[dict[str, str]]) -> None:
 def _label_for_replay(replay_name: str, *, has_ingestion_trace: bool) -> str:
     if replay_name == "oracle_write" and not has_ingestion_trace:
         return "ingestion_error"
-    return V1_REPLAY_TO_LABEL[replay_name]
+    return REPLAY_TO_LABEL[replay_name]
 
 
 def main(argv: list[str] | None = None) -> int:

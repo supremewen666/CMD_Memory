@@ -9,9 +9,9 @@ from cmd_audit import (
     draft_ecs_for_label,
     load_probe_cases,
     run_case_v1,
-    V1_PIPELINE_LABEL_ORDER,
+    PIPELINE_LABEL_ORDER,
 )
-from cmd_audit.labels import LabelValidationError
+from cmd_audit.core.labels import LabelValidationError
 
 
 RETRIEVAL_FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")
@@ -45,7 +45,7 @@ class DraftECSForLabelTest(unittest.TestCase):
 
     def test_draft_for_each_v1_label(self) -> None:
         """Every V1 label can be drafted (some may fallback to minimal replay)."""
-        for label in V1_PIPELINE_LABEL_ORDER:
+        for label in PIPELINE_LABEL_ORDER:
             with self.subTest(label=label):
                 ecs = draft_ecs_for_label(self.case, self.audit, label)
                 self.assertIsInstance(ecs, ECSDraft)

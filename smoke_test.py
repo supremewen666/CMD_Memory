@@ -1,5 +1,5 @@
 """5-case smoke test: verify agent_generate + evaluator pipeline works."""
-from cmd_audit.llm_client import LLMClient, LLMClientConfig
+from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 
 def test_model(client, name, prompt, system=None):
     try:

@@ -17,7 +17,7 @@ from cmd_audit.harness import (
     write_repair_success_table_from_full,
 )
 from cmd_audit.metrics import compute_diagnosis_metrics
-from cmd_audit.models import load_probe_cases_v1
+from cmd_audit.core.models import load_probe_cases_v1
 from cmd_audit.writers import (
     write_attribution_table,
     write_confusion_matrix_table,

@@ -26,7 +26,7 @@ class ComputeMemoryTopTermsTest(unittest.TestCase):
         self.assertEqual(compute_memory_top_terms(()), ())
 
     def test_extracts_frequent_terms(self) -> None:
-        from cmd_audit.models import MemoryItem
+        from cmd_audit.core.models import MemoryItem
         items = (
             MemoryItem(memory_id="m1", text="The quick brown fox jumps over the lazy dog"),
             MemoryItem(memory_id="m2", text="The quick brown fox runs fast"),
@@ -39,7 +39,7 @@ class ComputeMemoryTopTermsTest(unittest.TestCase):
         self.assertIn("jumps", terms)  # fox has 3 letters, filtered by {4,} regex
 
     def test_filters_stop_words(self) -> None:
-        from cmd_audit.models import MemoryItem
+        from cmd_audit.core.models import MemoryItem
         items = (
             MemoryItem(memory_id="m1", text="The and or but if then"),
         )
