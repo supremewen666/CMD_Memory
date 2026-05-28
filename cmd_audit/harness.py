@@ -10,7 +10,7 @@ from .attribution import AttributionResult, assign_attribution, assign_attributi
 from baselines.comparators import BaselineSuiteResult, run_baseline_suite
 from .metrics import DiagnosisPrediction, compute_diagnosis_metrics
 from .core.models import ProbeCase, RetrievedItem, load_all_real_cases
-from .post_repair import (
+from .repair import (
     ECSDraft,
     PostRepairResult,
     RepairedContext,
@@ -24,7 +24,7 @@ from .provenance import (
     get_graph_distractor_edges,
 )
 from .hook import PreCmdDecision, post_retrieve_hook
-from .repairs import (
+from .repair import (
     RepairComparisonRow,
     make_repair_comparison,
     write_repair_success_table,
@@ -719,7 +719,7 @@ def run_case_v1_with_hook_and_repair(
     Returns:
         Dict with audit_result, orchestrator_result, and metadata.
     """
-    from .repair_orchestrator import RepairOrchestrator
+    from .repair import RepairOrchestrator
 
     # Step 1: Run hook + attribution
     audit = run_case_v1_with_hook(
@@ -736,7 +736,7 @@ def run_case_v1_with_hook_and_repair(
         }
 
     # Step 3: Run RepairOrchestrator for iterative repair
-    from .repair_executor import RepairExecutor
+    from .repair import RepairExecutor
 
     orchestrator = RepairOrchestrator(
         executor=RepairExecutor(

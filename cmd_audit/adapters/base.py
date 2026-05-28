@@ -137,7 +137,7 @@ def load_letta_traces(path: str | Path) -> dict[str, LettaTrace]:
 
 # ── Issue 0020-B: Adapter Repair Protocol ───────────────────────────────
 
-from cmd_audit.repairs import RepairAction, UnsupportedActionError
+from cmd_audit.repair import RepairAction, UnsupportedActionError
 
 
 class AdapterRepairMixin:

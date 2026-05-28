@@ -6,9 +6,9 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from .core.labels import PIPELINE_LABEL_ORDER, validate_label_base, validate_label
+from ..core.labels import PIPELINE_LABEL_ORDER, validate_label_base, validate_label
 from .post_repair import PostRepairResult
-from .writers import write_csv_table, write_text_artifact
+from ..writers import write_csv_table, write_text_artifact
 
 
 @dataclass(frozen=True)

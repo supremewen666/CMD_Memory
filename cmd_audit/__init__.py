@@ -40,7 +40,7 @@ from .writers import (
     write_retrieval_trace_table,
     write_text_artifact,
 )
-from .failure_memory import (
+from .repair import (
     FailureMemoryRecord,
     FailureMemoryStore,
     FailureMemoryStoreV1,
@@ -106,7 +106,7 @@ from .core.models import (
     load_probe_cases_v1,
     load_real_cases_by_source,
 )
-from .post_repair import (
+from .repair import (
     ECSDraft,
     PostRepairResult,
     RepairedContext,
@@ -118,8 +118,8 @@ from .post_repair import (
     run_post_repair_context_replay,
     validate_sandbox_path,
 )
-from .repair_executor import RepairExecutor, RepairExecutorResult
-from .repair_orchestrator import (
+from .repair import RepairExecutor, RepairExecutorResult
+from .repair import (
     AttributionFailed,
     RepairOrchestrator,
     RepairOrchestratorResult,
@@ -132,7 +132,7 @@ from .surrogate_gap import (
     measure_surrogate_gap,
     measure_surrogate_gaps,
 )
-from .repairs import (
+from .repair import (
     REPAIR_ACTION_SYSTEM_PROMPT,
     REPAIR_ACTION_TOOL_DEFINITION,
     REPAIR_ACTION_TYPES,

@@ -13,7 +13,7 @@ from cmd_audit import (
     draft_ecs_for_label,
     load_probe_cases_v1,
 )
-from cmd_audit.failure_memory import _score_composite_key
+from cmd_audit.repair.failure_memory import _score_composite_key
 
 
 # ── compute_memory_top_terms ────────────────────────────────────────────

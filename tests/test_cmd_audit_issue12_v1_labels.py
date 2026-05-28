@@ -596,7 +596,7 @@ class V1ECSCompatibilityTest(unittest.TestCase):
         )
 
     def test_new_repair_actions_exist_for_all_new_labels(self) -> None:
-        from cmd_audit.repairs import REPAIR_ACTION_BY_LABEL
+        from cmd_audit.repair import REPAIR_ACTION_BY_LABEL
 
         for label in ("granularity_error", "graph_error", "safety_error"):
             with self.subTest(label=label):
