@@ -17,9 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cmd_audit.labels import V1_PIPELINE_LABELS
-from cmd_audit.llm_client import LLMClient, LLMClientConfig
-from cmd_audit.models import ProbeCase, load_real_cases_by_source
+from cmd_audit.core.labels import PIPELINE_LABELS
+from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
+from cmd_audit.core.models import ProbeCase, load_real_cases_by_source
 
 
 SYSTEM_PROMPT = """You are a memory pipeline failure analyst.
@@ -82,7 +82,7 @@ def parse_suggestion(text: str) -> tuple[str, str]:
         rationale = str(raw.get("rationale", ""))
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
         raise ValueError(f"LLM-A response is not valid suggestion JSON: {text}") from exc
-    if label not in V1_PIPELINE_LABELS:
+    if label not in PIPELINE_LABELS:
         raise ValueError(f"invalid LLM-A suggested label: {label}")
     rationale = re.sub(r"\s+", " ", rationale).strip()
     return label, rationale

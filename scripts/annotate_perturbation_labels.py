@@ -64,8 +64,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cmd_audit.labels import V1_PIPELINE_LABELS
-from cmd_audit.llm_client import LLMClient, LLMClientConfig
+from cmd_audit.core.labels import PIPELINE_LABELS
+from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 
 
 DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
@@ -165,7 +165,7 @@ def parse_label_response(text: str) -> str:
                 stripped = str(raw[key]).strip()
                 break
     match = re.search(
-        r"\b(" + "|".join(re.escape(label) for label in V1_PIPELINE_LABELS) + r")\b",
+        r"\b(" + "|".join(re.escape(label) for label in PIPELINE_LABELS) + r")\b",
         stripped,
     )
     if match is None:

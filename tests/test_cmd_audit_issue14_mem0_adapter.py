@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 
 from cmd_audit import (
-    V0_PIPELINE_LABELS,
+    PIPELINE_LABELS_BASE,
     compute_diagnosis_metrics,
     diagnosis_predictions,
     load_probe_cases,
@@ -69,7 +69,7 @@ class Mem0TraceValidationTest(unittest.TestCase):
                 )
 
     def test_search_results_are_memory_items(self) -> None:
-        from cmd_audit.models import MemoryItem
+        from cmd_audit.core.models import MemoryItem
 
         for case_id, trace in self.traces.items():
             with self.subTest(case_id=case_id):
@@ -144,7 +144,7 @@ class Mem0AdapterInterceptionTest(unittest.TestCase):
     # ── intercept_search routing ──────────────────────────────────
 
     def test_intercept_search_oracle_retrieval_returns_memory_items(self) -> None:
-        from cmd_audit.models import MemoryItem
+        from cmd_audit.core.models import MemoryItem
 
         adapter = self._adapter_for("v0-retrieval-001")
         trace = self.traces["v0-retrieval-001"]
@@ -396,7 +396,7 @@ class Mem0AdapterV0V1BoundaryTest(unittest.TestCase):
     """Adapter respects V0/V1 label boundaries."""
 
     def test_adapter_label_is_valid_v0_label(self) -> None:
-        from cmd_audit import validate_v0_label
+        from cmd_audit import validate_label_base
 
         cases = load_probe_cases(V0_SMOKE)
         traces = load_mem0_traces(MEM0_TRACES)
@@ -404,14 +404,14 @@ class Mem0AdapterV0V1BoundaryTest(unittest.TestCase):
             with self.subTest(case_id=case.case_id):
                 result = run_case_with_mem0(case, traces[case.case_id])
                 # All labels should be valid V0 labels (adapter parity with standalone)
-                validate_v0_label(result.attribution.predicted_label)
+                validate_label_base(result.attribution.predicted_label)
 
     def test_adapter_accepts_v1_labels_in_v1_pipeline(self) -> None:
-        from cmd_audit import validate_v1_label
+        from cmd_audit import validate_label
 
-        for label in V0_PIPELINE_LABELS:
+        for label in PIPELINE_LABELS_BASE:
             with self.subTest(label=label):
-                validate_v1_label(label)
+                validate_label(label)
 
     def test_load_mem0_traces_functional(self) -> None:
         traces = _load_traces(MEM0_TRACES)

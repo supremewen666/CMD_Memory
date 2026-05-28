@@ -14,7 +14,7 @@ from cmd_audit import (
     RubricVerifier,
     TokenLogprob,
 )
-from cmd_audit.models import GoldEvidence
+from cmd_audit.core.models import GoldEvidence
 from cmd_audit.llm_scoring import (
     _expected_score_from_logprobs,
     _find_score_digit_logprobs,

@@ -41,7 +41,7 @@ from cmd_audit import (
     write_comparison_metrics_table,
     write_provenance_completeness_summary,
 )
-from cmd_audit.models import MemoryItem
+from cmd_audit.core.models import MemoryItem
 from cmd_audit.provenance import _compute_hmac
 from cmd_audit.replays import (
     ReplayResult,

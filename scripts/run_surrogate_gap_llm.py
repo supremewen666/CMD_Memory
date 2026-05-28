@@ -14,8 +14,8 @@ if str(ROOT) in sys.path:
     sys.path.remove(str(ROOT))
 sys.path.insert(0, str(ROOT))
 
-from cmd_audit.llm_client import LLMClient, LLMClientConfig
-from cmd_audit.models import ProbeCase, load_real_cases_by_source
+from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
+from cmd_audit.core.models import ProbeCase, load_real_cases_by_source
 from cmd_audit.surrogate_gap import SurrogateGapRow, measure_surrogate_gaps
 from scripts.run_at_scale_llm_retest import build_agent_generate, build_evidence_scorer
 

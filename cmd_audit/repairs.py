@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from .labels import V1_PIPELINE_LABEL_ORDER, validate_v0_label, validate_v1_label
+from .core.labels import PIPELINE_LABEL_ORDER, validate_label_base, validate_label
 from .post_repair import PostRepairResult
 from .writers import write_csv_table, write_text_artifact
 
@@ -21,7 +21,7 @@ class TargetedRepairAction:
     repair_guidance: str = ""
 
     def __post_init__(self) -> None:
-        validate_v1_label(self.label)
+        validate_label(self.label)
 
 
 REPAIR_ACTION_BY_LABEL: dict[str, TargetedRepairAction] = {
@@ -142,13 +142,13 @@ REPAIR_ACTION_BY_LABEL.update(
 
 def get_targeted_repair_action(label: str) -> TargetedRepairAction:
     """Return the targeted repair action for a V0 attribution label."""
-    validate_v0_label(label)
+    validate_label_base(label)
     return REPAIR_ACTION_BY_LABEL[label]
 
 
 def get_targeted_repair_action_v1(label: str) -> TargetedRepairAction:
     """Return the targeted repair action for a V1 attribution label."""
-    validate_v1_label(label)
+    validate_label(label)
     return REPAIR_ACTION_BY_LABEL[label]
 
 
@@ -249,13 +249,13 @@ def compute_repair_success_summary(
 ) -> dict[str, RepairSuccessLabelSummary]:
     """Aggregate repair outcomes per attribution label."""
     by_label: dict[str, list[RepairComparisonRow]] = {
-        label: [] for label in V1_PIPELINE_LABEL_ORDER
+        label: [] for label in PIPELINE_LABEL_ORDER
     }
     for row in rows:
         by_label[row.perturbation_label].append(row)
 
     summaries: dict[str, RepairSuccessLabelSummary] = {}
-    for label in V1_PIPELINE_LABEL_ORDER:
+    for label in PIPELINE_LABEL_ORDER:
         label_rows = by_label[label]
         total = len(label_rows)
         if total == 0:
@@ -459,7 +459,7 @@ def _write_label_summary_csv(rows: list[RepairComparisonRow], path: Path) -> Non
         "avg_hard_case_token_cost",
     ]
     row_dicts: list[dict[str, str]] = []
-    for label in V1_PIPELINE_LABEL_ORDER:
+    for label in PIPELINE_LABEL_ORDER:
         summary = summaries.get(label)
         if summary is None:
             continue
@@ -515,7 +515,7 @@ def _write_claim_ledger(rows: list[RepairComparisonRow], path: Path) -> None:
         "Per-label detail:",
     ]
 
-    for label in V1_PIPELINE_LABEL_ORDER:
+    for label in PIPELINE_LABEL_ORDER:
         s = summaries.get(label)
         if s is None:
             continue
@@ -581,7 +581,7 @@ class RepairAction:
 
     def __post_init__(self) -> None:
         validate_repair_action_type(self.action_type)
-        validate_v1_label(self.label)
+        validate_label(self.label)
         if not self.target_store:
             raise RepairActionTypeError("RepairAction target_store must be non-empty")
         if not self.content:
@@ -650,7 +650,7 @@ def build_repair_action_prompt(
     repair_guidance: str,
 ) -> str:
     """Build the JSON-only RepairAction subagent prompt."""
-    validate_v1_label(label)
+    validate_label(label)
     return "\n\n".join(
         (
             "CMD ATTRIBUTION LABEL:\n" + label,

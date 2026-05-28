@@ -14,7 +14,7 @@ from .harness import (
     write_comparison_metrics_table,
     write_confusion_matrix_table,
 )
-from .models import load_all_real_cases, load_probe_cases, load_probe_cases_v1
+from .core.models import load_all_real_cases, load_probe_cases, load_probe_cases_v1
 
 
 def main(argv: list[str] | None = None) -> int:

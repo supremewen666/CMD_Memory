@@ -16,10 +16,10 @@ from cmd_audit import (
     make_repair_comparison,
     run_cases_full,
     write_repair_success_table_from_full,
-    V0_PIPELINE_LABEL_ORDER,
-    V1_PIPELINE_LABEL_ORDER,
+    PIPELINE_LABELS_BASE_ORDER,
+    PIPELINE_LABEL_ORDER,
 )
-from cmd_audit.labels import LabelValidationError
+from cmd_audit.core.labels import LabelValidationError
 
 
 ISSUE_3_CASES = Path("data/probe_cases/v0_issue3_cases.json")
@@ -32,7 +32,7 @@ class LabelToRepairMappingTest(unittest.TestCase):
     """AC: Each major attribution label maps to a repair action."""
 
     def test_all_six_v0_labels_have_targeted_repair(self) -> None:
-        for label in V0_PIPELINE_LABEL_ORDER:
+        for label in PIPELINE_LABELS_BASE_ORDER:
             with self.subTest(label=label):
                 action = get_targeted_repair_action(label)
                 self.assertIsInstance(action, TargetedRepairAction)
@@ -51,7 +51,7 @@ class LabelToRepairMappingTest(unittest.TestCase):
     def test_targeted_repair_actions_are_distinct(self) -> None:
         names = {
             label: get_targeted_repair_action(label).action_name
-            for label in V0_PIPELINE_LABEL_ORDER
+            for label in PIPELINE_LABELS_BASE_ORDER
         }
         self.assertEqual(
             len(names), 6, "All six labels must have distinct repair action names"
@@ -62,7 +62,7 @@ class LabelToRepairMappingTest(unittest.TestCase):
             get_targeted_repair_action("item_wrong")
 
     def test_each_repair_action_describes_targeted_intervention(self) -> None:
-        for label in V0_PIPELINE_LABEL_ORDER:
+        for label in PIPELINE_LABELS_BASE_ORDER:
             action = get_targeted_repair_action(label)
             self.assertNotIn(
                 "all extracted memory",
@@ -214,7 +214,7 @@ class RepairSuccessSummaryTest(unittest.TestCase):
         summaries = compute_repair_success_summary([row])
         self.assertIn("route_error", summaries)
         self.assertEqual(summaries["route_error"].targeted_recovered, 1)
-        self.assertIn("route_error", V1_PIPELINE_LABEL_ORDER)
+        self.assertIn("route_error", PIPELINE_LABEL_ORDER)
 
 
 # ── Claim Ledger ───────────────────────────────────────────────────────

@@ -1,0 +1,24 @@
+=== test count ===
+tests/test_cmd_audit_tracer_bullet.py::RetrievalFailureTracerBulletTest::test_probe_case_contract_loads_retrieval_failure_case
+tests/test_cmd_audit_tracer_bullet.py::V0LabelBoundaryTest::test_probe_case_rejects_gold_evidence_missing_from_extracted_memory
+tests/test_cmd_audit_tracer_bullet.py::V0LabelBoundaryTest::test_v0_accepts_only_pipeline_labels
+
+945 tests collected in 0.20s
+=== test pass/fail ===
+................................... [ 86%]
+................... [ 88%]
+.................................................................................... [ 97%]
+....................                             [100%]
+945 passed, 2699 subtests passed in 1.02s
+=== grep counts ===
+from baselines:       12
+V0/V1_PIPELINE_LABELS:       13
+run_case_v1*:       21
+validate_v[01]_label:       15
+assign_attribution_v1:       11
+run_v[01]_replay_portfolio:        9
+from cmd_audit.models:       39
+from cmd_audit.labels:       17
+from cmd_audit.constants:        0
+from cmd_audit.llm_client:        9
+from cmd_audit.warnings:        0

@@ -3,8 +3,8 @@ import tempfile
 import unittest
 
 from cmd_audit import load_probe_cases, run_case, write_attribution_table
-from cmd_audit.labels import LabelValidationError, validate_v0_label
-from cmd_audit.models import ProbeCaseError
+from cmd_audit.core.labels import LabelValidationError, validate_label_base
+from cmd_audit.core.models import ProbeCaseError
 
 
 FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")
@@ -50,13 +50,13 @@ class RetrievalFailureTracerBulletTest(unittest.TestCase):
 
 class V0LabelBoundaryTest(unittest.TestCase):
     def test_v0_accepts_only_pipeline_labels(self) -> None:
-        self.assertEqual(validate_v0_label("retrieval_error"), "retrieval_error")
+        self.assertEqual(validate_label_base("retrieval_error"), "retrieval_error")
 
         with self.assertRaises(LabelValidationError):
-            validate_v0_label("item_wrong")
+            validate_label_base("item_wrong")
 
         with self.assertRaises(LabelValidationError):
-            validate_v0_label("route_error")
+            validate_label_base("route_error")
 
     def test_probe_case_rejects_gold_evidence_missing_from_extracted_memory(
         self,
@@ -100,7 +100,7 @@ class V0LabelBoundaryTest(unittest.TestCase):
         }
 
         with self.assertRaises(ProbeCaseError):
-            from cmd_audit.models import ProbeCase
+            from cmd_audit.core.models import ProbeCase
 
             ProbeCase.from_mapping(broken)
 

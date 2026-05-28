@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cmd_audit.adapters.base import Mem0Trace
 from cmd_audit.adapters.harness import run_case_with_mem0
 from cmd_audit.harness import run_case_v1
-from cmd_audit.models import load_probe_cases_v1
+from cmd_audit.core.models import load_probe_cases_v1
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "probe_cases"

@@ -20,9 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cmd_audit.labels import V1_REPLAY_TO_LABEL
+from cmd_audit.core.labels import REPLAY_TO_LABEL
+from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.metrics import DiagnosisPrediction, compute_diagnosis_metrics
-from cmd_audit.models import ProbeCase, load_real_cases_by_source
+from cmd_audit.core.models import ProbeCase, load_real_cases_by_source
 from baselines import run_baseline_suite
 
 
@@ -116,7 +117,68 @@ def load_researcher_cases(path: str | Path) -> dict[str, ResearcherCase]:
             source=row.get("source", ""),
         )
     if not rows:
-        raise ValueError("researcher subset has no labeled cases")
+        raise ValueError(
+            "researcher subset has no labeled cases; either populate "
+            "cases[*].researcher_label or rerun with --label-source original "
+            "for an unadjudicated baseline sanity table"
+        )
+    return rows
+
+
+def load_original_label_cases(
+    *,
+    retest_by_case: dict[str, list[dict[str, str]]],
+    case_index: dict[str, ProbeCase],
+    subset_path: str | Path | None = None,
+) -> dict[str, ResearcherCase]:
+    """Build unadjudicated cases using source perturbation labels.
+
+    This is for scale-sanity/baseline debugging only. It deliberately reuses
+    the same ResearcherCase shape so downstream table builders stay unchanged,
+    but the labels are not researcher-adjudicated headline labels.
+    """
+    subset_rows: list[dict] = []
+    if subset_path is not None:
+        payload = json.loads(Path(subset_path).read_text(encoding="utf-8"))
+        raw_rows = payload.get("cases", []) if isinstance(payload, dict) else payload
+        if not isinstance(raw_rows, list):
+            raise ValueError("researcher subset must contain an array or cases array")
+        subset_rows = [row for row in raw_rows if isinstance(row, dict)]
+
+    if subset_rows:
+        case_ids = [str(row["case_id"]) for row in subset_rows if row.get("case_id")]
+        source_by_case = {
+            str(row["case_id"]): str(row.get("source", ""))
+            for row in subset_rows
+            if row.get("case_id")
+        }
+    else:
+        case_ids = sorted(retest_by_case)
+        source_by_case = {}
+
+    rows: dict[str, ResearcherCase] = {}
+    missing: list[str] = []
+    for case_id in case_ids:
+        case = case_index.get(case_id)
+        if case is None or case.perturbation_label is None:
+            missing.append(case_id)
+            continue
+        retest_source = (
+            retest_by_case.get(case_id, [{}])[0].get("source", "")
+            if retest_by_case.get(case_id)
+            else ""
+        )
+        rows[case_id] = ResearcherCase(
+            case_id=case_id,
+            gold_label=case.perturbation_label,
+            confidence="medium",
+            source=source_by_case.get(case_id) or retest_source,
+        )
+    if missing:
+        preview = ", ".join(missing[:10])
+        raise ValueError(f"missing original labels for case ids: {preview}")
+    if not rows:
+        raise ValueError("no cases available for --label-source original")
     return rows
 
 
@@ -268,6 +330,8 @@ def bootstrap_metric_ci(
 def build_baseline_predictions(
     researcher_cases: dict[str, ResearcherCase],
     case_index: dict[str, ProbeCase],
+    *,
+    llm_client=None,
 ) -> list[DiagnosisPrediction]:
     rows: list[DiagnosisPrediction] = []
     missing: list[str] = []
@@ -276,7 +340,7 @@ def build_baseline_predictions(
         if case is None:
             missing.append(case_id)
             continue
-        suite = run_baseline_suite(case)
+        suite = run_baseline_suite(case, llm_client=llm_client)
         for comparator in suite.comparator_results:
             rows.append(
                 DiagnosisPrediction(
@@ -451,7 +515,7 @@ def write_csv(path: str | Path, rows: list[dict[str, str]]) -> None:
 def _label_for_replay(replay_name: str, *, has_ingestion_trace: bool) -> str:
     if replay_name == "oracle_write" and not has_ingestion_trace:
         return "ingestion_error"
-    return V1_REPLAY_TO_LABEL[replay_name]
+    return REPLAY_TO_LABEL[replay_name]
 
 
 def _cost_from_retest_rows(rows: list[dict[str, str]]) -> CostLatency:
@@ -512,19 +576,67 @@ def _fmt_optional(value: float | None) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build Experiment 2 headline tables")
     parser.add_argument("--retest-csv", required=True)
-    parser.add_argument("--researcher-subset", required=True)
+    parser.add_argument("--researcher-subset", default=None)
+    parser.add_argument(
+        "--label-source",
+        choices=("researcher", "original"),
+        default="researcher",
+        help=(
+            "researcher = require cases[*].researcher_label for headline tables; "
+            "original = use source perturbation_label/deepseek labels for "
+            "unadjudicated baseline sanity"
+        ),
+    )
     parser.add_argument("--input-dir", default="data/probe_cases")
     parser.add_argument("--out-dir", default="artifacts/headline_130")
+    parser.add_argument(
+        "--run-llm-judge",
+        action="store_true",
+        help=(
+            "run the llm_judge comparator through an OpenAI-compatible endpoint; "
+            "without this flag llm_judge remains the offline fallback"
+        ),
+    )
+    parser.add_argument("--llm-judge-base-url", default=None)
+    parser.add_argument("--llm-judge-model", default=None)
+    parser.add_argument("--llm-judge-timeout", type=float, default=120.0)
     args = parser.parse_args(argv)
 
-    researcher_cases = load_researcher_cases(args.researcher_subset)
+    llm_client = None
+    if args.run_llm_judge:
+        env_defaults = LLMClientConfig()
+        llm_client = LLMClient(
+            LLMClientConfig(
+                base_url=args.llm_judge_base_url or env_defaults.base_url,
+                model=args.llm_judge_model or env_defaults.model,
+                timeout_seconds=args.llm_judge_timeout,
+                temperature=0.0,
+                max_retries=1,
+            )
+        )
+
     case_index = load_case_index(args.input_dir)
+    retest_by_case = load_retest_by_case(args.retest_csv)
+    if args.label_source == "researcher":
+        if args.researcher_subset is None:
+            raise ValueError("--researcher-subset is required with --label-source researcher")
+        researcher_cases = load_researcher_cases(args.researcher_subset)
+    else:
+        researcher_cases = load_original_label_cases(
+            retest_by_case=retest_by_case,
+            case_index=case_index,
+            subset_path=args.researcher_subset,
+        )
     predictions = build_cmd_predictions(
         researcher_cases,
-        load_retest_by_case(args.retest_csv),
+        retest_by_case,
         case_index,
     )
-    baseline_predictions = build_baseline_predictions(researcher_cases, case_index)
+    baseline_predictions = build_baseline_predictions(
+        researcher_cases,
+        case_index,
+        llm_client=llm_client,
+    )
     out_dir = Path(args.out_dir)
     write_csv(out_dir / "experiment_02_headline.csv", build_headline_rows(predictions))
     write_csv(

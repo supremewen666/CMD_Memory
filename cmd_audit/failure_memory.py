@@ -6,8 +6,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .labels import validate_v0_label, validate_v1_label
-from .models import ProbeCase
+from .core.labels import validate_label_base, validate_label
+from .core.models import ProbeCase
 from .post_repair import ECSDraft
 from .scoring import evidence_recall_from_text
 from .writers import write_csv_table, write_text_artifact
@@ -94,7 +94,7 @@ class FailureMemoryRecord:
     memory_top_terms: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        validate_v1_label(self.error_type)
+        validate_label(self.error_type)
 
     @classmethod
     def from_ecs_draft(cls, ecs: ECSDraft, case: ProbeCase) -> "FailureMemoryRecord":

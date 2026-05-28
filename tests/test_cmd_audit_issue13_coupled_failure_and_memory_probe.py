@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from cmd_audit import (
-    V1_PIPELINE_LABELS,
+    PIPELINE_LABELS,
     assign_attribution,
     assign_attribution_v1,
     load_probe_cases,
@@ -194,7 +194,7 @@ class CoupledFailureEdgeCaseTest(unittest.TestCase):
         )
         result = assign_attribution_v1(replays, top_k=3, tie_margin=0.05)
         for label in result.top_k_labels:
-            self.assertIn(label, V1_PIPELINE_LABELS)
+            self.assertIn(label, PIPELINE_LABELS)
 
 
 # ── V0 Backward Compatibility ────────────────────────────────────────────
@@ -463,7 +463,7 @@ class AttributionTableNewColumnsTest(unittest.TestCase):
                 if row["close_deltas"]:
                     for pair in row["close_deltas"].split("|"):
                         label, delta_str = pair.split(":")
-                        self.assertIn(label, V1_PIPELINE_LABELS)
+                        self.assertIn(label, PIPELINE_LABELS)
                         float(delta_str)  # parseable
 
 
@@ -484,7 +484,7 @@ class RetrievedHelpersPublicTest(unittest.TestCase):
         self.assertGreater(scores[0], scores[1])
 
     def test_build_tfidf_vectors_is_callable(self) -> None:
-        from cmd_audit.models import MemoryItem
+        from cmd_audit.core.models import MemoryItem
 
         items = [
             MemoryItem(memory_id="a", text="hello world", store="episodic"),

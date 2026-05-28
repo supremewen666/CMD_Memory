@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
-from .labels import validate_v1_label
+from .core.labels import validate_label
 
 
 @dataclass(frozen=True)
@@ -20,11 +20,11 @@ class DiagnosisPrediction:
 
     def __post_init__(self) -> None:
         if self.gold_label is not None:
-            validate_v1_label(self.gold_label)
+            validate_label(self.gold_label)
         if self.predicted_label is not None:
-            validate_v1_label(self.predicted_label)
+            validate_label(self.predicted_label)
         for label in self.top2_labels:
-            validate_v1_label(label)
+            validate_label(label)
 
 
 @dataclass(frozen=True)

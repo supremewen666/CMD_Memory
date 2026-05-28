@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cmd_audit.models import MemoryItem
+from cmd_audit.core.models import MemoryItem
 from cmd_audit.scoring import evidence_recall_from_text
 from .base import ReplayName
 

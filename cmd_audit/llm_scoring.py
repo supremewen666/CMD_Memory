@@ -13,8 +13,8 @@ from typing import Any, Callable
 
 from typing import Literal
 
-from .llm_client import LLMResponse, TokenLogprob
-from .models import GoldEvidence
+from .core.llm_client import LLMResponse, TokenLogprob
+from .core.models import GoldEvidence
 from .scoring import evidence_recall_from_text
 
 _logger = logging.getLogger(__name__)

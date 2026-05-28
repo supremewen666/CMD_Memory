@@ -9,7 +9,7 @@ from cmd_audit import (
     write_attribution_table,
     write_confusion_matrix_table,
 )
-from cmd_audit.labels import V0_PIPELINE_LABEL_ORDER, V1_PIPELINE_LABEL_ORDER
+from cmd_audit.core.labels import PIPELINE_LABELS_BASE_ORDER, PIPELINE_LABEL_ORDER
 
 
 PREMATURE_FIXTURE = Path("data/probe_cases/v0_premature_extraction_error_case.json")
@@ -77,11 +77,11 @@ class VerbatimEventOracleBoundaryTest(unittest.TestCase):
         results = run_cases(load_probe_cases(ISSUE3_SUITE))
         by_label = {result.perturbation_label: result for result in results}
 
-        self.assertEqual(set(by_label), set(V0_PIPELINE_LABEL_ORDER))
+        self.assertEqual(set(by_label), set(PIPELINE_LABELS_BASE_ORDER))
         for label, result in by_label.items():
             self.assertEqual(result.attribution.predicted_label, label)
             self.assertEqual(result.attribution.top_replay, expected_top_replays[label])
-            self.assertEqual(len(result.replays), len(V0_PIPELINE_LABEL_ORDER))
+            self.assertEqual(len(result.replays), len(PIPELINE_LABELS_BASE_ORDER))
             self.assertTrue(result.attribution_correct)
 
     def test_confusion_matrix_contains_one_diagonal_count_per_v0_label(self) -> None:
@@ -94,12 +94,12 @@ class VerbatimEventOracleBoundaryTest(unittest.TestCase):
 
         self.assertEqual(
             lines[0],
-            "gold_label," + ",".join(V1_PIPELINE_LABEL_ORDER),
+            "gold_label," + ",".join(PIPELINE_LABEL_ORDER),
         )
-        for label in V0_PIPELINE_LABEL_ORDER:
+        for label in PIPELINE_LABELS_BASE_ORDER:
             row = next(line for line in lines if line.startswith(f"{label},"))
             values = row.split(",")[1:]
-            self.assertEqual(values[list(V1_PIPELINE_LABEL_ORDER).index(label)], "1")
+            self.assertEqual(values[list(PIPELINE_LABEL_ORDER).index(label)], "1")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import time
 
-from .models import Citation, MemoryItem, ProbeCase, ProvenanceEdge
+from .core.models import Citation, MemoryItem, ProbeCase, ProvenanceEdge
 from .replays import ReplayResult
 
 

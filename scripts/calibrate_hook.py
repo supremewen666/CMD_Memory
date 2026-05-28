@@ -30,9 +30,9 @@ if str(ROOT) not in sys.path:
 
 from cmd_audit.hook import constants as hook_constants
 from cmd_audit.hook.rpe_judge import extract_features, score_replays
-from cmd_audit.llm_client import LLMClient, LLMClientConfig
+from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.llm_scoring import SubagentScorer
-from cmd_audit.models import ProbeCase, RetrievedItem
+from cmd_audit.core.models import ProbeCase, RetrievedItem
 from cmd_audit.replays import run_v1_replay_portfolio
 from cmd_audit.scoring import evidence_recall_from_text
 from cmd_audit.surrogate_gap import (

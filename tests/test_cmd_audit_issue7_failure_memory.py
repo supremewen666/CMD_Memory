@@ -16,9 +16,9 @@ from cmd_audit import (
     run_case_full,
     run_recurrence_comparisons,
     write_recurrence_comparison_table,
-    V0_PIPELINE_LABEL_ORDER,
+    PIPELINE_LABELS_BASE_ORDER,
 )
-from cmd_audit.labels import LabelValidationError
+from cmd_audit.core.labels import LabelValidationError
 
 ISSUE_3_CASES = Path("data/probe_cases/v0_issue3_cases.json")
 ISSUE_7_CASES = Path("data/probe_cases/v0_issue7_future_cases.json")
@@ -42,7 +42,7 @@ class FailureMemoryRecordCreationTest(unittest.TestCase):
 
             with self.subTest(case_id=case.case_id):
                 self.assertIsInstance(record.error_type, str)
-                self.assertIn(record.error_type, V0_PIPELINE_LABEL_ORDER)
+                self.assertIn(record.error_type, PIPELINE_LABELS_BASE_ORDER)
                 self.assertIsInstance(record.wrong_memory, str)
                 self.assertIsInstance(record.original_evidence, str)
                 self.assertIsInstance(record.cause, str)
@@ -457,7 +457,7 @@ class FullPipelineRecurrenceTest(unittest.TestCase):
         self.assertEqual(len(self.rows), 3)
         for row in self.rows:
             with self.subTest(case_id=row.case_id):
-                self.assertIn(row.perturbation_label, V0_PIPELINE_LABEL_ORDER)
+                self.assertIn(row.perturbation_label, PIPELINE_LABELS_BASE_ORDER)
 
     def test_corrected_guidance_outperforms_full_trace(self) -> None:
         better_count = sum(

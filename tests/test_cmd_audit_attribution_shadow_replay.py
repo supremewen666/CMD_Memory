@@ -10,7 +10,7 @@ from cmd_audit.attribution import (
     assign_attribution_v1,
 )
 from cmd_audit.harness import _derive_store_sets
-from cmd_audit.models import (
+from cmd_audit.core.models import (
     BaselineOutput,
     GoldEvidence,
     MemoryItem,

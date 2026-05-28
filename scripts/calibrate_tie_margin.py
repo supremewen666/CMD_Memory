@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cmd_audit.labels import V1_REPLAY_TO_LABEL
-from cmd_audit.models import load_real_cases_by_source
+from cmd_audit.core.labels import REPLAY_TO_LABEL
+from cmd_audit.core.models import load_real_cases_by_source
 
 
 @dataclass(frozen=True)
@@ -165,8 +165,8 @@ def build_inspection_payload(
                 "source": gap.source,
                 "top_replay": gap.top_replay,
                 "second_replay": gap.second_replay,
-                "top_label": V1_REPLAY_TO_LABEL.get(gap.top_replay, ""),
-                "second_label": V1_REPLAY_TO_LABEL.get(gap.second_replay, ""),
+                "top_label": REPLAY_TO_LABEL.get(gap.top_replay, ""),
+                "second_label": REPLAY_TO_LABEL.get(gap.second_replay, ""),
                 "top_gain": round(gap.top_gain, 6),
                 "second_gain": round(gap.second_gain, 6),
                 "top2_gap": round(gap.top2_gap, 6),

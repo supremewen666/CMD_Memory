@@ -14,7 +14,7 @@ from cmd_audit import (
 )
 from cmd_audit.adapters.base import Mem0Trace
 from cmd_audit.adapters.mem0_adapter import Mem0Adapter
-from cmd_audit.labels import V1_PIPELINE_LABELS
+from cmd_audit.core.labels import PIPELINE_LABELS
 from cmd_audit.post_repair import draft_ecs
 
 
@@ -173,7 +173,7 @@ class AttributionAgentLoopTest(unittest.TestCase):
         self.assertIn("BASELINE CONTEXT", first_context)
         self.assertIn("COUNTERFACTUAL EVIDENCE BLOCK", first_context)
         self.assertNotIn("CMD ATTRIBUTION LABEL", first_context)
-        for label_name in V1_PIPELINE_LABELS:
+        for label_name in PIPELINE_LABELS:
             self.assertNotIn(label_name, first_context)
         self.assertIn("COUNTERFACTUAL EVIDENCE BLOCK", retrieval.answer)
         self.assertIn("Lisbon", retrieval.answer)

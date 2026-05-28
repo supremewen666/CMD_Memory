@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .models import GoldEvidence
-from .labels import OUT_OF_SCOPE_ITEM_LABELS, validate_v1_label
-from .models import ProbeCase
+from .core.models import GoldEvidence
+from .core.labels import OUT_OF_SCOPE_ITEM_LABELS, validate_label
+from .core.models import ProbeCase
 from .scoring import evidence_recall_from_text
-from .warnings import PhraseMatchShortcutWarning
+from .core import PhraseMatchShortcutWarning
 
 REPAIR_ASSESSMENT_VALUES = ("recovered", "partial", "failed")
 AgentGenerate = Callable[[str, str], str]
@@ -87,7 +87,7 @@ class ECSDraft:
     cascade_candidates: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        validate_v1_label(self.predicted_label)
+        validate_label(self.predicted_label)
         _validate_ecs_cause(self.cause)
 
 
@@ -163,17 +163,17 @@ def draft_ecs_for_label(
     Raises:
         ValueError: If the label is not supported or no replay maps to it.
     """
-    from .labels import V1_REPLAY_TO_LABEL, validate_v1_label
+    from .core.labels import REPLAY_TO_LABEL, validate_label
     from .replays import ReplayResult
 
-    validate_v1_label(label)
+    validate_label(label)
 
     # Find the replay that maps to this label
     replay: ReplayResult | None = None
     if audit_result is not None:
         for r in audit_result.replays:
             # Map replay name to label (handle ingestion/write split)
-            replay_label = V1_REPLAY_TO_LABEL.get(r.replay_name, r.replay_name)
+            replay_label = REPLAY_TO_LABEL.get(r.replay_name, r.replay_name)
             if r.replay_name == "oracle_write" and not case.has_ingestion_trace:
                 replay_label = "ingestion_error"
             if replay_label == label:

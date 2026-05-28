@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cmd_audit.models import ProbeCase, load_real_cases_by_source
+from cmd_audit.core.models import ProbeCase, load_real_cases_by_source
 
 
 EXPERIMENT_1_LABELS = (

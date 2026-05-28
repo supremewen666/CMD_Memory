@@ -7,23 +7,23 @@ import unittest
 
 from cmd_audit import (
     LabelValidationError,
-    V0_PIPELINE_LABELS,
-    V1_PIPELINE_LABELS,
-    V1_PIPELINE_LABEL_ORDER,
-    V1_REPLAY_TO_LABEL,
+    PIPELINE_LABELS_BASE,
+    PIPELINE_LABELS,
+    PIPELINE_LABEL_ORDER,
+    REPLAY_TO_LABEL,
     assign_attribution_v1,
     load_probe_cases,
     load_probe_cases_v1,
     run_case_v1,
     run_cases_v1,
     run_v1_replay_portfolio,
-    validate_v0_label,
-    validate_v1_label,
+    validate_label_base,
+    validate_label,
 )
-from cmd_audit.labels import (
+from cmd_audit.core.labels import (
     DEFERRED_PIPELINE_LABELS,
     OUT_OF_SCOPE_ITEM_LABELS,
-    REPLAY_TO_LABEL,
+    REPLAY_TO_LABEL_BASE,
 )
 from cmd_audit.replays import run_oracle_route
 
@@ -36,49 +36,49 @@ ROUTE_FIXTURE = Path("data/probe_cases/v1_route_error_case.json")
 
 
 class V1LabelValidationTest(unittest.TestCase):
-    """validate_v1_label accepts V0+V1 labels; validate_v0_label rejects V1 labels."""
+    """validate_label accepts V0+V1 labels; validate_label_base rejects V1 labels."""
 
     def test_v1_label_order_has_eleven_labels(self) -> None:
-        self.assertEqual(len(V1_PIPELINE_LABEL_ORDER), 11)
+        self.assertEqual(len(PIPELINE_LABEL_ORDER), 11)
 
     def test_v1_labels_are_superset_of_v0(self) -> None:
-        self.assertTrue(V0_PIPELINE_LABELS.issubset(V1_PIPELINE_LABELS))
+        self.assertTrue(PIPELINE_LABELS_BASE.issubset(PIPELINE_LABELS))
 
-    def test_validate_v1_label_accepts_all_eight_labels(self) -> None:
-        for label in V1_PIPELINE_LABEL_ORDER:
+    def test_validate_label_accepts_all_eight_labels(self) -> None:
+        for label in PIPELINE_LABEL_ORDER:
             with self.subTest(label=label):
-                self.assertEqual(validate_v1_label(label), label)
+                self.assertEqual(validate_label(label), label)
 
-    def test_validate_v1_label_accepts_v0_labels(self) -> None:
-        for label in V0_PIPELINE_LABELS:
+    def test_validate_label_accepts_v0_labels(self) -> None:
+        for label in PIPELINE_LABELS_BASE:
             with self.subTest(label=label):
-                self.assertEqual(validate_v1_label(label), label)
+                self.assertEqual(validate_label(label), label)
 
-    def test_validate_v1_label_rejects_bad_item_labels(self) -> None:
+    def test_validate_label_rejects_bad_item_labels(self) -> None:
         for label in OUT_OF_SCOPE_ITEM_LABELS:
             with self.subTest(label=label):
                 with self.assertRaises(LabelValidationError):
-                    validate_v1_label(label)
+                    validate_label(label)
 
-    def test_validate_v1_label_rejects_deferred_labels(self) -> None:
+    def test_validate_label_rejects_deferred_labels(self) -> None:
         for label in DEFERRED_PIPELINE_LABELS:
             with self.subTest(label=label):
                 with self.assertRaises(LabelValidationError):
-                    validate_v1_label(label)
+                    validate_label(label)
 
-    def test_validate_v0_label_rejects_ingestion_error(self) -> None:
+    def test_validate_label_base_rejects_ingestion_error(self) -> None:
         with self.assertRaises(LabelValidationError):
-            validate_v0_label("ingestion_error")
+            validate_label_base("ingestion_error")
 
-    def test_validate_v0_label_rejects_route_error(self) -> None:
+    def test_validate_label_base_rejects_route_error(self) -> None:
         with self.assertRaises(LabelValidationError):
-            validate_v0_label("route_error")
+            validate_label_base("route_error")
 
-    def test_validate_v0_label_rejects_bad_item_labels(self) -> None:
+    def test_validate_label_base_rejects_bad_item_labels(self) -> None:
         for label in OUT_OF_SCOPE_ITEM_LABELS:
             with self.subTest(label=label):
                 with self.assertRaises(LabelValidationError):
-                    validate_v0_label(label)
+                    validate_label_base(label)
 
     def test_ingestion_error_not_in_deferred(self) -> None:
         self.assertNotIn("ingestion_error", DEFERRED_PIPELINE_LABELS)
@@ -90,17 +90,17 @@ class V1LabelValidationTest(unittest.TestCase):
         self.assertNotIn("granularity_error", DEFERRED_PIPELINE_LABELS)
         self.assertNotIn("graph_error", DEFERRED_PIPELINE_LABELS)
         self.assertNotIn("safety_error", DEFERRED_PIPELINE_LABELS)
-        self.assertIn("granularity_error", V1_PIPELINE_LABELS)
-        self.assertIn("graph_error", V1_PIPELINE_LABELS)
-        self.assertIn("safety_error", V1_PIPELINE_LABELS)
+        self.assertIn("granularity_error", PIPELINE_LABELS)
+        self.assertIn("graph_error", PIPELINE_LABELS)
+        self.assertIn("safety_error", PIPELINE_LABELS)
 
     def test_v1_replay_to_label_includes_oracle_route(self) -> None:
-        self.assertIn("oracle_route", V1_REPLAY_TO_LABEL)
-        self.assertEqual(V1_REPLAY_TO_LABEL["oracle_route"], "route_error")
+        self.assertIn("oracle_route", REPLAY_TO_LABEL)
+        self.assertEqual(REPLAY_TO_LABEL["oracle_route"], "route_error")
 
     def test_v0_replay_to_label_unchanged(self) -> None:
-        self.assertEqual(REPLAY_TO_LABEL["oracle_write"], "write_error")
-        self.assertNotIn("oracle_route", REPLAY_TO_LABEL)
+        self.assertEqual(REPLAY_TO_LABEL_BASE["oracle_write"], "write_error")
+        self.assertNotIn("oracle_route", REPLAY_TO_LABEL_BASE)
 
 
 # ── V1 Probe Case Loading ──────────────────────────────────────────────
@@ -259,12 +259,12 @@ class V1ReplayPortfolioTest(unittest.TestCase):
         replays = run_v1_replay_portfolio(self.v0_cases[0])
         for replay in replays:
             with self.subTest(replay_name=replay.replay_name):
-                self.assertIn(replay.replay_name, V1_REPLAY_TO_LABEL)
+                self.assertIn(replay.replay_name, REPLAY_TO_LABEL)
 
     def test_oracle_route_has_valid_label(self) -> None:
-        label = V1_REPLAY_TO_LABEL["oracle_route"]
+        label = REPLAY_TO_LABEL["oracle_route"]
         self.assertEqual(label, "route_error")
-        self.assertIn(label, V1_PIPELINE_LABELS)
+        self.assertIn(label, PIPELINE_LABELS)
 
 
 # ── V0 Non-Regression through V1 Pipeline ──────────────────────────────
@@ -312,28 +312,28 @@ class V1NonRegressionTest(unittest.TestCase):
         results = run_cases_v1(list(self.v0_cases), tie_margin=0.05)
         self.assertEqual(len(results), 6)
         labels = {r.attribution.predicted_label for r in results}
-        self.assertEqual(labels, set(V0_PIPELINE_LABELS))
+        self.assertEqual(labels, set(PIPELINE_LABELS_BASE))
 
 
 # ── V1 Replay-to-Label Mapping ────────────────────────────────────────
 
 
 class V1ReplayToLabelMappingTest(unittest.TestCase):
-    """V1_REPLAY_TO_LABEL maps every V1 replay to a valid V1 label."""
+    """REPLAY_TO_LABEL maps every V1 replay to a valid V1 label."""
 
     def test_all_mappings_are_valid_v1_labels(self) -> None:
-        for replay_name, label in V1_REPLAY_TO_LABEL.items():
+        for replay_name, label in REPLAY_TO_LABEL.items():
             with self.subTest(replay_name=replay_name):
-                self.assertIn(label, V1_PIPELINE_LABELS)
+                self.assertIn(label, PIPELINE_LABELS)
 
     def test_v1_mapping_is_superset_of_v0(self) -> None:
         for replay_name, label in REPLAY_TO_LABEL.items():
             with self.subTest(replay_name=replay_name):
-                self.assertEqual(V1_REPLAY_TO_LABEL[replay_name], label)
+                self.assertEqual(REPLAY_TO_LABEL[replay_name], label)
 
     def test_oracle_route_only_in_v1(self) -> None:
-        self.assertNotIn("oracle_route", REPLAY_TO_LABEL)
-        self.assertIn("oracle_route", V1_REPLAY_TO_LABEL)
+        self.assertNotIn("oracle_route", REPLAY_TO_LABEL_BASE)
+        self.assertIn("oracle_route", REPLAY_TO_LABEL)
 
 
 # ── ECS Compatibility ──────────────────────────────────────────────────

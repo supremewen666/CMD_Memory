@@ -13,7 +13,7 @@ from cmd_audit import (
     SubagentScorer,
     load_probe_cases,
 )
-from cmd_audit.models import GoldEvidence
+from cmd_audit.core.models import GoldEvidence
 from cmd_audit.llm_scoring import (
     _validate_context_isolation,
     _validate_output_format,

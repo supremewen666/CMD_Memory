@@ -18,13 +18,13 @@ import hashlib
 from typing import Any
 import logging
 
-from cmd_audit.labels import (
-    V0_PIPELINE_LABEL_ORDER,
-    V1_PIPELINE_LABEL_ORDER,
+from cmd_audit.core.labels import (
+    PIPELINE_LABELS_BASE_ORDER,
+    PIPELINE_LABEL_ORDER,
     validate_monitor_anomaly_reason,
-    validate_v1_label,
+    validate_label,
 )
-from cmd_audit.models import BaselineOutput, ProbeCase
+from cmd_audit.core.models import BaselineOutput, ProbeCase
 from cmd_audit.scoring import evidence_recall_from_memory_ids, evidence_recall_from_text
 
 
@@ -133,9 +133,9 @@ class ComparatorResult:
     uses_counterfactual_replay: bool = False
 
     def __post_init__(self) -> None:
-        validate_v1_label(self.predicted_label)
+        validate_label(self.predicted_label)
         for label in self.top2_labels:
-            validate_v1_label(label)
+            validate_label(label)
 
 
 @dataclass(frozen=True)
@@ -214,7 +214,7 @@ _LABEL_DESCRIPTIONS: dict[str, str] = {
 }
 
 _LABEL_LIST = "\n".join(
-    f"  - {label}: {_LABEL_DESCRIPTIONS[label]}" for label in V1_PIPELINE_LABEL_ORDER
+    f"  - {label}: {_LABEL_DESCRIPTIONS[label]}" for label in PIPELINE_LABEL_ORDER
 )
 
 _PROMPT_TEMPLATE = """\
@@ -314,7 +314,7 @@ def parse_label_from_response(response: str) -> tuple[str, str]:
     raw_label = label_line.split(":", 1)[1].strip()
 
     try:
-        predicted_label = validate_v1_label(raw_label)
+        predicted_label = validate_label(raw_label)
     except Exception as exc:
         raise LLMJudgeOutputError(
             f"Invalid label {raw_label!r} in LLM response. Response: {response!r}"
@@ -436,13 +436,13 @@ def run_subagent_judge_baseline(
 
 def run_random_label_baseline(case: ProbeCase) -> ComparatorResult:
     digest = hashlib.sha256(case.case_id.encode("utf-8")).digest()
-    first_index = digest[0] % len(V0_PIPELINE_LABEL_ORDER)
+    first_index = digest[0] % len(PIPELINE_LABELS_BASE_ORDER)
     second_index = (
-        first_index + 1 + digest[1] % (len(V0_PIPELINE_LABEL_ORDER) - 1)
-    ) % len(V0_PIPELINE_LABEL_ORDER)
+        first_index + 1 + digest[1] % (len(PIPELINE_LABELS_BASE_ORDER) - 1)
+    ) % len(PIPELINE_LABELS_BASE_ORDER)
     labels = (
-        V0_PIPELINE_LABEL_ORDER[first_index],
-        V0_PIPELINE_LABEL_ORDER[second_index],
+        PIPELINE_LABELS_BASE_ORDER[first_index],
+        PIPELINE_LABELS_BASE_ORDER[second_index],
     )
     return ComparatorResult(
         comparator_name="random_label",
@@ -493,7 +493,7 @@ def run_llm_judge_baseline(
             comparator_name="llm_judge",
             predicted_label=heuristic.predicted_label,
             top2_labels=heuristic.top2_labels,
-            explanation=f"LLM judge parse error — fallback: {explanation}",
+            explanation=f"LLM judge parse error — fallback: {heuristic.explanation}",
             cost_per_diagnosis=0.5,
             uses_counterfactual_replay=False,
         )

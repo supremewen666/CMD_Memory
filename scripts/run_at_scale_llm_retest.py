@@ -32,7 +32,7 @@ from cmd_audit.harness import (
     write_comparison_metrics_table,
     write_confusion_matrix_table,
 )
-from cmd_audit.llm_client import LLMClient, LLMClientConfig
+from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.llm_scoring import (
     AnswerVerifier,
     RUBRIC_MAX_SCORE,
@@ -40,7 +40,7 @@ from cmd_audit.llm_scoring import (
     SubagentScorer,
     _continuous_verify,
 )
-from cmd_audit.models import GoldEvidence, ProbeCase, load_real_cases_by_source
+from cmd_audit.core.models import GoldEvidence, ProbeCase, load_real_cases_by_source
 from cmd_audit.provenance import ProvenanceTracker, get_graph_distractor_edges
 from cmd_audit.replays import ReplayResult, run_v1_replay_portfolio
 from baselines.comparators import run_baseline_suite

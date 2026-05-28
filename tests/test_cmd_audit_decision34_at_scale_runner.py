@@ -5,8 +5,8 @@ import tempfile
 import unittest
 
 from cmd_audit.harness import AuditResult
-from cmd_audit.llm_client import LLMResponse, TokenLogprob
-from cmd_audit.models import GoldEvidence
+from cmd_audit.core.llm_client import LLMResponse, TokenLogprob
+from cmd_audit.core.models import GoldEvidence
 from cmd_audit.replays import ReplayResult
 from scripts.run_at_scale_llm_retest import (
     RetestCaseResult,

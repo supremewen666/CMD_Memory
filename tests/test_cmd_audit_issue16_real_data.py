@@ -7,14 +7,14 @@ import unittest
 
 from cmd_audit import (
     LabelValidationError,
-    V1_PIPELINE_LABELS,
+    PIPELINE_LABELS,
     load_probe_cases,
     load_probe_cases_v1,
     run_case_v1,
     run_case_full_v1,
     run_cases_v1,
-    validate_v0_label,
-    validate_v1_label,
+    validate_label_base,
+    validate_label,
 )
 from cmd_audit.harness import diagnosis_predictions, write_comparison_metrics_table
 from baselines.memory_probe import (
@@ -85,19 +85,19 @@ class RealDataLoadingTest(unittest.TestCase):
         cases = load_probe_cases_v1(REAL_LONGMEMEVAL)
         for case in cases:
             with self.subTest(case_id=case.case_id):
-                self.assertIn(case.perturbation_label, V1_PIPELINE_LABELS)
+                self.assertIn(case.perturbation_label, PIPELINE_LABELS)
 
     def test_memoryarena_cases_have_valid_v1_labels(self) -> None:
         cases = load_probe_cases_v1(REAL_MEMORYARENA)
         for case in cases:
             with self.subTest(case_id=case.case_id):
-                self.assertIn(case.perturbation_label, V1_PIPELINE_LABELS)
+                self.assertIn(case.perturbation_label, PIPELINE_LABELS)
 
     def test_toolbench_cases_have_valid_v1_labels(self) -> None:
         cases = load_probe_cases_v1(REAL_TOOLBENCH)
         for case in cases:
             with self.subTest(case_id=case.case_id):
-                self.assertIn(case.perturbation_label, V1_PIPELINE_LABELS)
+                self.assertIn(case.perturbation_label, PIPELINE_LABELS)
 
     def test_all_real_cases_have_non_empty_extracted_memory(self) -> None:
         for f in (REAL_LONGMEMEVAL, REAL_MEMORYARENA, REAL_TOOLBENCH):
@@ -371,13 +371,13 @@ class RealDataSourceIntegrityTest(unittest.TestCase):
 
     def test_longmemeval_has_all_v0_labels(self) -> None:
         """LongMemEval cases cover multiple V0 pipeline labels."""
-        from cmd_audit.labels import V0_PIPELINE_LABELS
+        from cmd_audit.core.labels import PIPELINE_LABELS_BASE
         cases = load_probe_cases_v1(REAL_LONGMEMEVAL)
         labels = {c.perturbation_label for c in cases}
         # Exactly which V0 labels appear depends on data construction;
         # verify each label is a valid V0 or V1 label.
         for label in labels:
-            self.assertIn(label, V1_PIPELINE_LABELS)
+            self.assertIn(label, PIPELINE_LABELS)
 
     def test_null_label_file_ids_are_distinct(self) -> None:
         """Null-label test cases have distinct IDs from real cases."""

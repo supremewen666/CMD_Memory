@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .labels import V0_PIPELINE_LABEL_ORDER
+from .core.labels import PIPELINE_LABELS_BASE_ORDER
 from .provenance import detect_tamper
 from .writers import write_text_artifact
 
@@ -397,7 +397,7 @@ def _check_confusion_diagonal(confusion_path: Path) -> GateCriterion:
 
     try:
         data = _read_confusion_csv(confusion_path)
-        v0_labels = list(V0_PIPELINE_LABEL_ORDER)
+        v0_labels = list(PIPELINE_LABELS_BASE_ORDER)
         violations: list[str] = []
 
         for label in v0_labels:
