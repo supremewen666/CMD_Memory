@@ -1,0 +1,63 @@
+"""Public API for cmd_audit.scoring."""
+
+from .llm import (
+    AnswerVerifier,
+    ContextLeakError,
+    EvidenceVerifier,
+    OutputFormatError,
+    RUBRIC_MAX_SCORE,
+    RubricParseError,
+    RubricScorer,
+    RubricVerifier,
+    SubagentScorer,
+    score_answer_with_verifier,
+)
+from .phrase import (
+    answer_score,
+    evidence_recall_from_memory_ids,
+    evidence_recall_from_text,
+)
+from .retrieval import (
+    RankedRetrievalTrace,
+    RetrievalBaselineResult,
+    RetrievalBaselineSuiteResult,
+    RetrievalMetrics,
+    build_tfidf_vectors,
+    compute_bm25_scores,
+    compute_evidence_boundary_audit,
+    compute_retrieval_metrics,
+    cosine_similarity,
+    enforce_retrieval_error_boundary,
+    run_bm25_retrieval,
+    run_retrieval_baseline_suite,
+    tokenize,
+)
+
+__all__ = [
+    "AnswerVerifier",
+    "ContextLeakError",
+    "EvidenceVerifier",
+    "OutputFormatError",
+    "RUBRIC_MAX_SCORE",
+    "RankedRetrievalTrace",
+    "RetrievalBaselineResult",
+    "RetrievalBaselineSuiteResult",
+    "RetrievalMetrics",
+    "RubricParseError",
+    "RubricScorer",
+    "RubricVerifier",
+    "SubagentScorer",
+    "answer_score",
+    "build_tfidf_vectors",
+    "compute_bm25_scores",
+    "compute_evidence_boundary_audit",
+    "compute_retrieval_metrics",
+    "cosine_similarity",
+    "enforce_retrieval_error_boundary",
+    "evidence_recall_from_memory_ids",
+    "evidence_recall_from_text",
+    "run_bm25_retrieval",
+    "run_retrieval_baseline_suite",
+    "score_answer_with_verifier",
+    "tokenize",
+]

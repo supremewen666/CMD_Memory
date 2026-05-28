@@ -18,7 +18,7 @@ from .provenance import compute_provenance_completeness
 
 if TYPE_CHECKING:
     from .harness import AuditResult, FullAuditResult
-    from .retrieval_baselines import RetrievalBaselineSuiteResult
+    from .scoring import RetrievalBaselineSuiteResult
 
 
 REPLAY_TABLE_ORDER = (

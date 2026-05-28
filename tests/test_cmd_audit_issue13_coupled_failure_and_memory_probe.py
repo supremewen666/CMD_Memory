@@ -28,7 +28,7 @@ from baselines.memory_probe import (
     _write_summarization,
 )
 from cmd_audit.replays import ReplayResult
-from cmd_audit.retrieval_baselines import (
+from cmd_audit.scoring import (
     tokenize,
     compute_bm25_scores,
     build_tfidf_vectors,

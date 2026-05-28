@@ -14,8 +14,8 @@ import math
 import re
 from dataclasses import dataclass
 
-from .core.models import GoldEvidence, ProbeCase
-from .scoring import answer_score, evidence_recall_from_text
+from ..core.models import GoldEvidence, ProbeCase
+from .phrase import answer_score, evidence_recall_from_text
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@ from cmd_audit.harness import (
     write_confusion_matrix_table,
 )
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
-from cmd_audit.llm_scoring import (
+from cmd_audit.scoring.llm import (
     AnswerVerifier,
     RUBRIC_MAX_SCORE,
     RubricScorer,

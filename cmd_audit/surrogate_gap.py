@@ -60,7 +60,7 @@ def _find_surrogate_evidence(case: ProbeCase) -> tuple[str, ...]:
     if not case.extracted_memory:
         return ()
 
-    from .retrieval_baselines import compute_bm25_scores, tokenize
+    from .scoring import compute_bm25_scores, tokenize
 
     query_tokens = tokenize(case.query)
     doc_tokens_list = [tokenize(item.text) for item in case.extracted_memory]

@@ -13,9 +13,9 @@ from typing import Any, Callable
 
 from typing import Literal
 
-from .core.llm_client import LLMResponse, TokenLogprob
-from .core.models import GoldEvidence
-from .scoring import evidence_recall_from_text
+from ..core.llm_client import LLMResponse, TokenLogprob
+from ..core.models import GoldEvidence
+from .phrase import evidence_recall_from_text
 
 _logger = logging.getLogger(__name__)
 
@@ -270,7 +270,7 @@ def score_answer_with_verifier(
     / ``NOT_EQUIVALENT`` map to ``1.0`` / ``0.0``.
     """
     if answer_verifier is None:
-        from .scoring import answer_score as _substring_answer_score
+        from .phrase import answer_score as _substring_answer_score
 
         if fallback is not None:
             return fallback(answer, gold_answer)
