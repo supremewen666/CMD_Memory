@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .attribution import AttributionResult, assign_attribution, assign_attribution_v1
-from baselines.comparators import BaselineSuiteResult, run_baseline_suite
+from cmd_audit.baselines.comparators import BaselineSuiteResult, run_baseline_suite
 from .metrics import DiagnosisPrediction, compute_diagnosis_metrics
 from .core.models import ProbeCase, RetrievedItem, load_all_real_cases
 from .repair import (

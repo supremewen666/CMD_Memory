@@ -13,7 +13,7 @@ from cmd_audit import (
     run_v1_replay_portfolio,
 )
 from cmd_audit.adapters.base import Mem0Trace
-from cmd_audit.adapters.mem0_adapter import Mem0Adapter
+from cmd_audit.adapters.mem0 import Mem0Adapter
 from cmd_audit.core.labels import PIPELINE_LABELS
 from cmd_audit.repair import draft_ecs
 

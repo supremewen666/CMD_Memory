@@ -211,23 +211,23 @@ class LLMJudgeFallbackTest(unittest.TestCase):
         cls.cases = load_probe_cases(V0_SMOKE)
 
     def test_fallback_produces_comparator_result(self) -> None:
-        from baselines.comparators import run_llm_judge_baseline
+        from cmd_audit.baselines.comparators import run_llm_judge_baseline
         result = run_llm_judge_baseline(self.cases[0], llm_client=None)
         self.assertEqual(result.comparator_name, "llm_judge")
         self.assertIn(result.predicted_label, PIPELINE_LABELS_BASE)
 
     def test_fallback_explanation_mentions_unavailable(self) -> None:
-        from baselines.comparators import run_llm_judge_baseline
+        from cmd_audit.baselines.comparators import run_llm_judge_baseline
         result = run_llm_judge_baseline(self.cases[0], llm_client=None)
         self.assertIn("unavailable", result.explanation.lower())
 
     def test_fallback_cost_is_point_five(self) -> None:
-        from baselines.comparators import run_llm_judge_baseline
+        from cmd_audit.baselines.comparators import run_llm_judge_baseline
         result = run_llm_judge_baseline(self.cases[0], llm_client=None)
         self.assertEqual(result.cost_per_diagnosis, 0.5)
 
     def test_parse_error_fallback_uses_heuristic_explanation(self) -> None:
-        from baselines.comparators import run_llm_judge_baseline
+        from cmd_audit.baselines.comparators import run_llm_judge_baseline
 
         class BadClient:
             def generate(self, prompt):
@@ -278,7 +278,7 @@ class LLMJudgeIsolationTest(unittest.TestCase):
         cls.cases = load_probe_cases(V0_SMOKE)
 
     def test_each_case_produces_independent_fallback_result(self) -> None:
-        from baselines.comparators import run_llm_judge_baseline
+        from cmd_audit.baselines.comparators import run_llm_judge_baseline
         results = [
             run_llm_judge_baseline(c, llm_client=None) for c in self.cases
         ]

@@ -43,7 +43,7 @@ from cmd_audit.scoring.llm import (
 from cmd_audit.core.models import GoldEvidence, ProbeCase, load_real_cases_by_source
 from cmd_audit.provenance import ProvenanceTracker, get_graph_distractor_edges
 from cmd_audit.replays import ReplayResult, run_v1_replay_portfolio
-from baselines.comparators import run_baseline_suite
+from cmd_audit.baselines.comparators import run_baseline_suite
 from scripts.write_at_scale_retest_run_meta import build_run_meta, write_run_meta
 
 

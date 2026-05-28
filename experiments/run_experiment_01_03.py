@@ -16,7 +16,7 @@ from cmd_audit.harness import (
     diagnosis_predictions,
     run_cases_v1,
 )
-from baselines.memory_probe import run_memory_probe_baselines
+from cmd_audit.baselines.memory_probe import run_memory_probe_baselines
 from cmd_audit.metrics import compute_diagnosis_metrics
 from cmd_audit.core.models import load_probe_cases_v1
 from cmd_audit.writers import write_csv_table

@@ -15,7 +15,7 @@ from cmd_audit import (
     run_case_v1,
 )
 from cmd_audit.adapters.base import Mem0Trace
-from cmd_audit.adapters.mem0_adapter import Mem0Adapter
+from cmd_audit.adapters.mem0 import Mem0Adapter
 
 
 RETRIEVAL_FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")

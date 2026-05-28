@@ -4,7 +4,7 @@
 from .agreement import cohen_kappa
 from .attribution import AttributionResult, assign_attribution, assign_attribution_v1
 from .bootstrap import bootstrap_metric
-from baselines.comparators import (
+from cmd_audit.baselines.comparators import (
     BaselineSuiteResult,
     SubagentJudgeMonitorDecision,
     run_baseline_suite,
@@ -66,7 +66,7 @@ from .core.llm_client import (
     LLMUnavailableError,
     TokenLogprob,
 )
-from baselines.comparators import (
+from cmd_audit.baselines.comparators import (
     LLMJudgeOutputError,
     build_judge_prompt,
     parse_label_from_response,
@@ -171,7 +171,7 @@ from .replays import (
     run_v1_replay_portfolio,
     run_v1_replay_portfolio_subset,
 )
-from baselines.memory_probe import (
+from cmd_audit.baselines.memory_probe import (
     MemoryProbeBaselineResult,
     MemoryProbeCaseResult,
     MemoryProbeCellResult,

@@ -22,8 +22,8 @@ from cmd_audit.adapters.base import (
     RepairAction,
     SandboxViolationError,
 )
-from cmd_audit.adapters.mem0_adapter import Mem0Adapter
-from cmd_audit.adapters.letta_adapter import LettaAdapter
+from cmd_audit.adapters.mem0 import Mem0Adapter
+from cmd_audit.adapters.letta import LettaAdapter
 
 
 # ── RepairAction Core Tests ─────────────────────────────────────────────
