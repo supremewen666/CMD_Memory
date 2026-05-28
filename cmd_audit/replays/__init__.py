@@ -6,9 +6,9 @@ import warnings
 from dataclasses import dataclass
 from typing import Callable
 
-from .core.models import GoldEvidence, ProbeCase
-from .scoring import answer_score, evidence_recall_from_text
-from .core import PhraseMatchShortcutWarning
+from ..core.models import GoldEvidence, ProbeCase
+from ..scoring import answer_score, evidence_recall_from_text
+from ..core import PhraseMatchShortcutWarning
 
 EvidenceScorer = Callable[[tuple[GoldEvidence, ...], str], float]
 AgentGenerate = Callable[[str, str], str]
@@ -669,7 +669,7 @@ def _score_replay_answer(
     with the baseline path (which goes through the same helper via
     :func:`cmd_audit.llm_scoring.score_answer_with_verifier`).
     """
-    from .llm_scoring import score_answer_with_verifier
+    from ..scoring import score_answer_with_verifier
 
     return score_answer_with_verifier(answer_verifier, answer, gold_answer)
 

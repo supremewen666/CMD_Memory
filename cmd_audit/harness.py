@@ -228,7 +228,7 @@ def _score_answer_with_verifier(
     gold_answer: str,
 ) -> float:
     """Score answer equivalence using a verifier when provided."""
-    from .llm_scoring import score_answer_with_verifier
+    from .scoring import score_answer_with_verifier
 
     return score_answer_with_verifier(answer_verifier, answer, gold_answer)
 

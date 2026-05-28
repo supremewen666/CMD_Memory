@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 
 from cmd_audit.core.models import MemoryItem, ProbeCase
-from cmd_audit.retrieval_baselines import (
+from cmd_audit.scoring import (
     build_tfidf_vectors,
     compute_bm25_scores,
     cosine_similarity,

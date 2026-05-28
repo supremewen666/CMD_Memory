@@ -6,7 +6,7 @@ import math
 from typing import TYPE_CHECKING
 
 from cmd_audit.core.models import RetrievedItem
-from cmd_audit.retrieval_baselines import compute_bm25_scores, tokenize
+from cmd_audit.scoring import compute_bm25_scores, tokenize
 
 from . import constants
 

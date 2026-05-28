@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from cmd_audit import load_probe_cases
-from cmd_audit.retrieval_baselines import (
+from cmd_audit.scoring import (
     RankedRetrievalTrace,
     RetrievalMetrics,
     compute_evidence_boundary_audit,
