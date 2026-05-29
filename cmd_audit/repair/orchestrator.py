@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .failure_memory import (
-    FailureMemoryStoreV1,
-    build_failure_memory_context_v1,
+    FailureMemoryStore,
+    build_failure_memory_context,
 )
 from ..core.labels import LabelValidationError
 from .post_repair import draft_ecs_for_label
@@ -58,7 +58,7 @@ class RepairOrchestrator:
     def __init__(
         self,
         executor: RepairExecutor | None = None,
-        fm_store: FailureMemoryStoreV1 | None = None,
+        fm_store: FailureMemoryStore | None = None,
     ) -> None:
         self._executor = executor if executor is not None else RepairExecutor()
         self._fm_store = fm_store
@@ -92,7 +92,7 @@ class RepairOrchestrator:
                 query=case.query,
                 label=attribution.predicted_label,
             )
-            fm_context = build_failure_memory_context_v1(records)
+            fm_context = build_failure_memory_context(records)
 
         labels_to_try: list[str] = []
         if attribution.predicted_label:

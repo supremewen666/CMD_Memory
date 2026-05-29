@@ -14,8 +14,8 @@ from cmd_audit.replays import (
     ReplayResult,
     _score_recovered_evidence,
     recover_raw_event_only_gold_evidence,
-    run_v1_passthrough_replays,
 )
+from cmd_audit.replays.portfolio import _run_v1_passthrough_replays
 
 
 def run_adapter_replay_portfolio(
@@ -70,7 +70,7 @@ def run_adapter_replay_portfolio(
             scorer=scorer,
             agent_generate=agent_generate,
         ),
-        *run_v1_passthrough_replays(
+        *_run_v1_passthrough_replays(
             case,
             adapter,
             tracker=tracker,

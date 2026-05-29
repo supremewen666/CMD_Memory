@@ -8,18 +8,11 @@ from unittest.mock import patch
 
 from cmd_audit import (
     PIPELINE_LABELS_BASE,
-    LLMClientConfig,
-    LLMClientError,
-    LLMEmptyResponseError,
-    LLMJudgeOutputError,
-    LLMResponseError,
-    LLMTimeoutError,
-    LLMUnavailableError,
-    build_judge_prompt,
     load_probe_cases,
-    parse_label_from_response,
     run_baseline_suite,
 )
+from cmd_audit.baselines.comparators import LLMJudgeOutputError, build_judge_prompt, parse_label_from_response
+from cmd_audit.core.llm_client import LLMClientConfig, LLMClientError, LLMEmptyResponseError, LLMResponseError, LLMTimeoutError, LLMUnavailableError
 
 V0_SMOKE = Path("data/probe_cases/v0_issue3_cases.json")
 

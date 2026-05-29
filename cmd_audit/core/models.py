@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
-from pathlib import Path
 from typing import Any
 
 from .labels import validate_label_base
@@ -305,36 +303,6 @@ class ProbeCase:
                 )
 
 
-def load_probe_cases(path: str | Path) -> list[ProbeCase]:
-    """Load a JSON file containing one case object or a list of case objects."""
-
-    raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    if isinstance(raw, dict):
-        cases = [raw]
-    elif isinstance(raw, list):
-        cases = raw
-    else:
-        raise ProbeCaseError(
-            "probe case JSON must contain an object or a list of objects"
-        )
-    return [ProbeCase.from_mapping(item) for item in cases]
-
-
-def load_probe_cases_v1(path: str | Path) -> list[ProbeCase]:
-    """Load a JSON file of probe cases with V1 label validation."""
-
-    raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    if isinstance(raw, dict):
-        cases = [raw]
-    elif isinstance(raw, list):
-        cases = raw
-    else:
-        raise ProbeCaseError(
-            "probe case JSON must contain an object or a list of objects"
-        )
-    return [ProbeCase.from_mapping_v1(item) for item in cases]
-
-
 def _required_str(value: dict[str, Any], key: str) -> str:
     try:
         raw = value[key]
@@ -363,45 +331,3 @@ def _optional_label_v1(raw: Any) -> str | None:
     if not isinstance(raw, str) or not raw.strip():
         raise ProbeCaseError("perturbation_label must be a non-empty string or null")
     return validate_label(raw)
-
-
-# ---------------------------------------------------------------------------
-# Unified real-data loaders (issue 0016)
-# ---------------------------------------------------------------------------
-
-_REAL_DATA_DIR = Path("data/probe_cases")
-
-_REAL_DATA_FILES: tuple[tuple[str, str], ...] = (
-    ("longmemeval", "real_longmemeval_cases.json"),
-    ("memoryarena", "real_memoryarena_cases.json"),
-    ("toolbench", "real_toolbench_cases.json"),
-    ("null_label", "v1_null_label_cases.json"),
-)
-
-
-def load_all_real_cases(
-    base_dir: str | Path | None = None,
-) -> list[ProbeCase]:
-    """Load all 601 real-data probe cases (596 labeled + 5 null-label).
-
-    Returns a single flat list from all four source files.
-    """
-    root = Path(base_dir) if base_dir else _REAL_DATA_DIR
-    all_cases: list[ProbeCase] = []
-    for _source, filename in _REAL_DATA_FILES:
-        all_cases.extend(load_probe_cases_v1(root / filename))
-    return all_cases
-
-
-def load_real_cases_by_source(
-    base_dir: str | Path | None = None,
-) -> dict[str, list[ProbeCase]]:
-    """Load all 601 real-data probe cases keyed by source name.
-
-    Returns {"longmemeval": [...], "memoryarena": [...], "toolbench": [...], "null_label": [...]}.
-    """
-    root = Path(base_dir) if base_dir else _REAL_DATA_DIR
-    return {
-        source: load_probe_cases_v1(root / filename)
-        for source, filename in _REAL_DATA_FILES
-    }

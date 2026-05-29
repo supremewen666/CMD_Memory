@@ -6,10 +6,6 @@ from pathlib import Path
 import unittest
 
 from cmd_audit import (
-    AnswerVerifier,
-    ContextLeakError,
-    EvidenceVerifier,
-    OutputFormatError,
     SubagentScorer,
     load_probe_cases,
 )
@@ -19,6 +15,7 @@ from cmd_audit.scoring.llm import (
     _validate_output_format,
     _phrase_fallback,
 )
+from cmd_audit.scoring import AnswerVerifier, ContextLeakError, EvidenceVerifier, OutputFormatError
 
 V0_SMOKE = Path("data/probe_cases/v0_issue3_cases.json")
 

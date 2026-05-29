@@ -5,17 +5,17 @@ import unittest
 
 from cmd_audit import (
     RepairAction,
-    RepairActionOutputError,
     RepairExecutor,
     load_probe_cases,
-    parse_repair_action_response,
-    run_case_v1,
-    run_v1_replay_portfolio,
+    run_case,
 )
 from cmd_audit.adapters.base import Mem0Trace
 from cmd_audit.adapters.mem0 import Mem0Adapter
+from cmd_audit.replays import run_replay_portfolio
 from cmd_audit.core.labels import PIPELINE_LABELS
 from cmd_audit.repair import draft_ecs
+from cmd_audit.repair import RepairActionOutputError
+from cmd_audit.repair import parse_repair_action_response
 
 
 RETRIEVAL_FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")
@@ -95,7 +95,7 @@ class RepairActionJsonContractTest(unittest.TestCase):
 class RepairExecutorLLMActionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.case = load_probe_cases(RETRIEVAL_FIXTURE)[0]
-        self.audit = run_case_v1(self.case)
+        self.audit = run_case(self.case)
         self.ecs = draft_ecs(self.case, self.audit)
         self.adapter = Mem0Adapter(
             Mem0Trace(
@@ -163,7 +163,7 @@ class AttributionAgentLoopTest(unittest.TestCase):
         def scorer(gold_evidence, text: str) -> float:
             return 1.0 if "Lisbon" in text else 0.0
 
-        replays = run_v1_replay_portfolio(
+        replays = run_replay_portfolio(
             case, agent_generate=agent_generate, scorer=scorer
         )
         retrieval = next(r for r in replays if r.replay_name == "oracle_retrieval")

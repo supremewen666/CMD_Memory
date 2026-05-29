@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from cmd_audit import load_probe_cases, run_case_full_v1, write_attribution_table
+from cmd_audit import load_probe_cases, run_case, write_attribution_table
 
 
 FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")
@@ -31,7 +31,7 @@ class Decision34BaselineRescoreTest(unittest.TestCase):
                 return "NOT_EQUIVALENT"
             return "EQUIVALENT"
 
-        result = run_case_full_v1(
+        result = run_case(
             case,
             agent_generate=agent_generate,
             scorer=evidence_scorer,
@@ -40,10 +40,10 @@ class Decision34BaselineRescoreTest(unittest.TestCase):
             on_the_fly_baseline_rescore=True,
         )
 
-        self.assertEqual(result.audit.baseline_evidence_score_llm, 0.25)
-        self.assertEqual(result.audit.baseline_answer_score_llm, 0.0)
-        self.assertEqual(result.audit.replay.replay_name, "oracle_retrieval")
-        self.assertEqual(result.audit.replay.recovery_gain, 0.75)
+        self.assertEqual(result.baseline_evidence_score_llm, 0.25)
+        self.assertEqual(result.baseline_answer_score_llm, 0.0)
+        self.assertEqual(result.replay.replay_name, "oracle_retrieval")
+        self.assertEqual(result.replay.recovery_gain, 0.75)
 
     def test_attribution_table_writes_optional_llm_baseline_column(self) -> None:
         case = load_probe_cases(FIXTURE)[0]
@@ -56,7 +56,7 @@ class Decision34BaselineRescoreTest(unittest.TestCase):
         def evidence_scorer(gold_evidence, text: str) -> float:
             return 1.0 if "Lisbon" in text else 0.0
 
-        result = run_case_full_v1(
+        result = run_case(
             case,
             agent_generate=agent_generate,
             scorer=evidence_scorer,
@@ -67,7 +67,7 @@ class Decision34BaselineRescoreTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "attribution.csv"
-            write_attribution_table([result.audit], path)
+            write_attribution_table([result], path)
             text = path.read_text(encoding="utf-8")
 
         self.assertIn("baseline_evidence_score_llm", text.splitlines()[0])

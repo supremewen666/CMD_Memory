@@ -11,14 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.harness import (
     diagnosis_predictions,
-    run_case_full_v1,
-    run_cases_v1,
+    run_cases,
     write_comparison_metrics_table,
     write_repair_success_table_from_full,
 )
-from cmd_audit.metrics import compute_diagnosis_metrics
-from cmd_audit.core.models import load_probe_cases_v1
-from cmd_audit.writers import (
+from cmd_audit.eval.metrics import compute_diagnosis_metrics
+from cmd_audit.data_io import load_probe_cases_v1
+from cmd_audit.eval.writers import (
     write_attribution_table,
     write_confusion_matrix_table,
     write_post_repair_table,
@@ -49,7 +48,7 @@ def main() -> None:
         print(f"{'='*65}")
 
         # ── CMD attribution + comparators ──
-        results = run_cases_v1(cases)
+        results = run_cases(cases)
         all_cmd_results.extend(results)
 
         correct = sum(1 for r in results if r.attribution_correct)
@@ -100,7 +99,7 @@ def main() -> None:
         write_comparison_metrics_table(results, OUT / f"comparison_metrics_{suffix}.csv")
 
         # ── Post-Repair Context Replay ──
-        full_results = [run_case_full_v1(c) for c in cases]
+        full_results = [run_case(c, post_repair=True) for c in cases]
         rec = sum(1 for f in full_results if f.post_repair.repair_assessment == "recovered")
         part = sum(1 for f in full_results if f.post_repair.repair_assessment == "partial")
         fail = sum(1 for f in full_results if f.post_repair.repair_assessment == "failed")

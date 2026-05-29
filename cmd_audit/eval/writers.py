@@ -11,14 +11,13 @@ import csv
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
-from .core.labels import PIPELINE_LABEL_ORDER
-from .core.models import MemoryItem
-from .repair.post_repair import validate_sandbox_path
+from cmd_audit.core.labels import PIPELINE_LABEL_ORDER
+from cmd_audit.core.models import MemoryItem
 from .provenance import compute_provenance_completeness
 
 if TYPE_CHECKING:
-    from .harness import AuditResult, FullAuditResult
-    from .scoring import RetrievalBaselineSuiteResult
+    from cmd_audit.harness import AuditResult
+    from cmd_audit.scoring import RetrievalBaselineSuiteResult
 
 
 REPLAY_TABLE_ORDER = (
@@ -44,6 +43,7 @@ def write_csv_table(
     """Write a CSV table, optionally enforcing the sandbox write boundary."""
     output = Path(path)
     if sandbox_root is not None:
+        from cmd_audit.repair.post_repair import validate_sandbox_path
         validate_sandbox_path(output, sandbox_root)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", newline="", encoding="utf-8") as handle:
@@ -63,6 +63,7 @@ def write_text_artifact(
     """Write a text artifact (summary, ledger, status), optionally sandbox-validated."""
     output = Path(path)
     if sandbox_root is not None:
+        from cmd_audit.repair.post_repair import validate_sandbox_path
         validate_sandbox_path(output, sandbox_root)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -232,7 +233,7 @@ def write_provenance_completeness_summary(
 
 
 def write_post_repair_table(
-    results: list[FullAuditResult],
+    results: list[AuditResult],
     output_path: str | Path,
     *,
     sandbox_root: str | Path | None = None,
@@ -257,15 +258,15 @@ def write_post_repair_table(
     for result in results:
         rows.append(
             {
-                "case_id": result.audit.case_id,
-                "perturbation_label": result.audit.perturbation_label,
-                "predicted_label": result.audit.attribution.predicted_label,
-                "pre_repair_answer_score": f"{result.audit.baseline_answer_score:.3f}",
-                "pre_repair_evidence_score": f"{result.audit.baseline_evidence_score:.3f}",
+                "case_id": result.case_id,
+                "perturbation_label": result.perturbation_label,
+                "predicted_label": result.attribution.predicted_label,
+                "pre_repair_answer_score": f"{result.baseline_answer_score:.3f}",
+                "pre_repair_evidence_score": f"{result.baseline_evidence_score:.3f}",
                 "post_repair_answer_score": f"{result.post_repair.post_repair_answer_score:.3f}",
                 "post_repair_evidence_score": f"{result.post_repair.post_repair_evidence_score:.3f}",
                 "repair_assessment": result.post_repair.repair_assessment,
-                "repair_action": result.audit.attribution.predicted_label,
+                "repair_action": result.attribution.predicted_label,
                 "hard_case_baseline_assessment": result.hard_case_baseline.repair_assessment,
                 "token_cost": f"{result.post_repair.token_cost:.1f}",
                 "regression_risk": f"{result.post_repair.regression_risk:.3f}",

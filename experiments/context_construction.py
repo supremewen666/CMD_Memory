@@ -21,8 +21,8 @@ from math import comb
 from pathlib import Path
 from typing import Any
 
-from cmd_audit.harness import run_case_full_v1
-from cmd_audit.core.models import ProbeCase, load_probe_cases_v1
+from cmd_audit.core.models import ProbeCase
+from cmd_audit.data_io import load_probe_cases_v1
 
 
 EXPERIMENT_01_CONTEXT_MODES = (
@@ -217,7 +217,7 @@ def build_context_cases(
 
 
 def _build_one(pc: ProbeCase) -> ContextCase:
-    full = run_case_full_v1(pc)
+    full = run_case(pc, post_repair=True)
     ecs = full.ecs_draft
     baseline = pc.primary_baseline
 

@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import unittest
 
-from cmd_audit import load_probe_cases, load_probe_cases_v1, run_case_v1_with_hook
+from cmd_audit import load_probe_cases, load_probe_cases_v1, run_case
 from cmd_audit.hook import (
     PreCmdDecision,
     ReplayScore,
@@ -235,11 +235,11 @@ class TestRunCaseV1WithHook(unittest.TestCase):
         cls.graph_case = load_probe_cases_v1(GRAPH_FIXTURE)[0]
 
     def test_hook_stage_propagates_to_audit_result(self) -> None:
-        result = run_case_v1_with_hook(self.retrieval_case)
+        result = run_case(self.retrieval_case, hook=True)
         self.assertIn(result.hook_stage, {"empty_ctx", "rpe_top_k", "rpe_below_threshold"})
 
     def test_selected_replays_propagates(self) -> None:
-        result = run_case_v1_with_hook(self.retrieval_case)
+        result = run_case(self.retrieval_case, hook=True)
         self.assertEqual(len(result.per_replay_scores), 10)
         self.assertIsInstance(result.selected_replays, tuple)
 
@@ -249,7 +249,7 @@ class TestRunCaseV1WithHook(unittest.TestCase):
             RPE_JUDGE_WEIGHTS=(0.0,) * 16,
             RPE_JUDGE_INTERCEPT=-10.0,
         ):
-            result = run_case_v1_with_hook(self.retrieval_case)
+            result = run_case(self.retrieval_case, hook=True)
         self.assertIsNone(result.attribution)
         self.assertEqual(result.replays, ())
         self.assertEqual(result.hook_stage, "rpe_below_threshold")
@@ -257,7 +257,7 @@ class TestRunCaseV1WithHook(unittest.TestCase):
 
     def test_triggered_case_runs_subset_replays(self) -> None:
         with _patched_constants(TOP_K=3, FALLBACK_THRESHOLD=0.35):
-            result = run_case_v1_with_hook(self.retrieval_case)
+            result = run_case(self.retrieval_case, hook=True)
         self.assertEqual(result.hook_stage, "rpe_top_k")
         self.assertLessEqual(len(result.replays), 3)
 
@@ -269,7 +269,7 @@ class TestRunCaseV1WithHook(unittest.TestCase):
             RPE_JUDGE_WEIGHTS=weights,
             RPE_JUDGE_INTERCEPT=-4.0,
         ):
-            result = run_case_v1_with_hook(self.graph_case)
+            result = run_case(self.graph_case, hook=True)
         self.assertEqual(result.selected_replays, ("graph_off",))
         for replay in result.replays:
             self.assertIsInstance(replay.provenance_edges, tuple)

@@ -1,7 +1,7 @@
 from pathlib import Path
 import unittest
 
-from cmd_audit import load_probe_cases, run_case_v1
+from cmd_audit import load_probe_cases, run_case
 from cmd_audit.adapters import (
     load_letta_traces,
     load_mem0_traces,
@@ -36,7 +36,7 @@ class AdapterParityUnderLLMStack(unittest.TestCase):
     def test_mem0_adapter_label_parity_under_llm_stack(self) -> None:
         for case in self.cases:
             with self.subTest(case_id=case.case_id):
-                standalone = run_case_v1(
+                standalone = run_case(
                     case,
                     agent_generate=_stub_agent_generate,
                     scorer=_stub_scorer,
@@ -58,7 +58,7 @@ class AdapterParityUnderLLMStack(unittest.TestCase):
     def test_letta_adapter_label_parity_under_llm_stack(self) -> None:
         for case in self.cases:
             with self.subTest(case_id=case.case_id):
-                standalone = run_case_v1(
+                standalone = run_case(
                     case,
                     agent_generate=_stub_agent_generate,
                     scorer=_stub_scorer,

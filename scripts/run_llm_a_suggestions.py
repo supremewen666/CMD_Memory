@@ -19,7 +19,8 @@ if str(ROOT) not in sys.path:
 
 from cmd_audit.core.labels import PIPELINE_LABELS
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
-from cmd_audit.core.models import ProbeCase, load_real_cases_by_source
+from cmd_audit.core.models import ProbeCase
+from cmd_audit.data_io import load_real_cases_by_source
 
 
 SYSTEM_PROMPT = """You are a memory pipeline failure analyst.

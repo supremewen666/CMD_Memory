@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from cmd_audit.attribution import assign_attribution_v1
+from cmd_audit.attribution import assign_attribution
 from cmd_audit.baselines import run_baseline_suite
 from cmd_audit.harness import (
     AuditResult,
@@ -12,7 +12,7 @@ from cmd_audit.harness import (
     _score_baseline_with_agent,
 )
 from cmd_audit.core.models import ProbeCase
-from cmd_audit.provenance import ProvenanceTracker, get_graph_distractor_edges
+from cmd_audit.eval.provenance import ProvenanceTracker, get_graph_distractor_edges
 from cmd_audit.replays import AgentGenerate, EvidenceScorer, ReplayResult
 
 from .base import LettaTrace, Mem0Trace
@@ -69,7 +69,7 @@ def _run_case_with_adapter(
             distractor_edges = get_graph_distractor_edges(case, r)
             break
 
-    attribution = assign_attribution_v1(
+    attribution = assign_attribution(
         replays,
         has_ingestion_trace=case.has_ingestion_trace,
         positive_gain_threshold=0.0,

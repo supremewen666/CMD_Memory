@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .core.models import ProbeCase
-from .replays import AgentGenerate, EvidenceScorer
-from .scoring import evidence_recall_from_text
+from cmd_audit.core.models import ProbeCase
+from cmd_audit.replays import AgentGenerate, EvidenceScorer
+from cmd_audit.scoring import evidence_recall_from_text
 
 
 GOLD_DEPENDENT_LABELS = (
@@ -60,7 +60,7 @@ def _find_surrogate_evidence(case: ProbeCase) -> tuple[str, ...]:
     if not case.extracted_memory:
         return ()
 
-    from .scoring import compute_bm25_scores, tokenize
+    from cmd_audit.scoring import compute_bm25_scores, tokenize
 
     query_tokens = tokenize(case.query)
     doc_tokens_list = [tokenize(item.text) for item in case.extracted_memory]

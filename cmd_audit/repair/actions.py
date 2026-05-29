@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..core.labels import PIPELINE_LABEL_ORDER, validate_label_base, validate_label
 from .post_repair import PostRepairResult
-from ..writers import write_csv_table, write_text_artifact
+from ..eval.writers import write_csv_table, write_text_artifact
 
 
 @dataclass(frozen=True)
@@ -174,8 +174,8 @@ class RepairComparisonRow:
 
 
 def make_repair_comparison(full_result) -> RepairComparisonRow:
-    """Build a comparison row from a FullAuditResult."""
-    audit = full_result.audit
+    """Build a comparison row from a post-repair AuditResult."""
+    audit = full_result
     targeted = full_result.post_repair
     hard_case = full_result.hard_case_baseline
     repair_action = get_targeted_repair_action_v1(audit.attribution.predicted_label)

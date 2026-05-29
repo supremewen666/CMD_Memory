@@ -8,7 +8,7 @@ from cmd_audit import (
     build_repaired_context,
     draft_ecs,
     load_probe_cases,
-    run_case_v1,
+    run_case,
 )
 
 
@@ -21,7 +21,7 @@ class CascadeCandidatesFieldTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.case = load_probe_cases(RETRIEVAL_FIXTURE)[0]
-        cls.audit = run_case_v1(cls.case)
+        cls.audit = run_case(cls.case)
 
     def test_ecs_draft_has_cascade_candidates_field(self) -> None:
         ecs = draft_ecs(self.case, self.audit)

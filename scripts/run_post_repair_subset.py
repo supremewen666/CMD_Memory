@@ -19,12 +19,12 @@ if str(ROOT) in sys.path:
 sys.path.insert(0, str(ROOT))
 
 from cmd_audit.harness import (
-    run_case_full_v1,
     write_repair_success_table_from_full,
 )
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
-from cmd_audit.core.models import ProbeCase, load_real_cases_by_source
-from cmd_audit.writers import write_post_repair_table, write_text_artifact
+from cmd_audit.core.models import ProbeCase
+from cmd_audit.data_io import load_real_cases_by_source
+from cmd_audit.eval.writers import write_post_repair_table, write_text_artifact
 from scripts.run_at_scale_llm_retest import (
     build_agent_generate,
     build_answer_verifier,
@@ -243,8 +243,9 @@ def main(argv: list[str] | None = None) -> int:
 
     full_results = []
     for index, case in enumerate(cases, start=1):
-        result = run_case_full_v1(
+        result = run_case(
             case,
+            post_repair=True,
             top_k=args.top_k,
             tie_margin=args.tie_margin,
             scorer=scorer,

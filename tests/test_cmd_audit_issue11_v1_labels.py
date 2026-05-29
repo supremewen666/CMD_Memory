@@ -11,12 +11,11 @@ from cmd_audit import (
     PIPELINE_LABELS,
     PIPELINE_LABEL_ORDER,
     REPLAY_TO_LABEL,
-    assign_attribution_v1,
+    assign_attribution,
     load_probe_cases,
     load_probe_cases_v1,
-    run_case_v1,
-    run_cases_v1,
-    run_v1_replay_portfolio,
+    run_case,
+    run_cases,
     validate_label_base,
     validate_label,
 )
@@ -25,7 +24,7 @@ from cmd_audit.core.labels import (
     OUT_OF_SCOPE_ITEM_LABELS,
     REPLAY_TO_LABEL_BASE,
 )
-from cmd_audit.replays import run_oracle_route
+from cmd_audit.replays import run_oracle_route, run_replay_portfolio
 
 V0_SMOKE = Path("data/probe_cases/v0_issue3_cases.json")
 INGESTION_FIXTURE = Path("data/probe_cases/v1_ingestion_error_case.json")
@@ -159,8 +158,8 @@ class IngestionErrorAttributionTest(unittest.TestCase):
         self.assertTrue(write_case.has_ingestion_trace)
 
     def test_ingestion_case_attributed_as_ingestion_error(self) -> None:
-        replays = run_v1_replay_portfolio(self.ingestion_case)
-        attribution = assign_attribution_v1(
+        replays = run_replay_portfolio(self.ingestion_case)
+        attribution = assign_attribution(
             replays, has_ingestion_trace=self.ingestion_case.has_ingestion_trace
         )
         self.assertEqual(attribution.predicted_label, "ingestion_error")
@@ -171,8 +170,8 @@ class IngestionErrorAttributionTest(unittest.TestCase):
         write_case = [
             c for c in self.v0_cases if c.perturbation_label == "write_error"
         ][0]
-        replays = run_v1_replay_portfolio(write_case)
-        attribution = assign_attribution_v1(
+        replays = run_replay_portfolio(write_case)
+        attribution = assign_attribution(
             replays, has_ingestion_trace=write_case.has_ingestion_trace
         )
         self.assertEqual(attribution.predicted_label, "write_error")
@@ -188,8 +187,8 @@ class IngestionErrorAttributionTest(unittest.TestCase):
     def test_no_v0_case_gets_ingestion_error(self) -> None:
         for case in self.v0_cases:
             with self.subTest(case_id=case.case_id):
-                replays = run_v1_replay_portfolio(case)
-                attribution = assign_attribution_v1(
+                replays = run_replay_portfolio(case)
+                attribution = assign_attribution(
                     replays, has_ingestion_trace=case.has_ingestion_trace
                 )
                 self.assertNotEqual(
@@ -241,22 +240,22 @@ class V1ReplayPortfolioTest(unittest.TestCase):
         cls.v0_cases = load_probe_cases(V0_SMOKE)
 
     def test_portfolio_has_ten_replays(self) -> None:
-        replays = run_v1_replay_portfolio(self.v0_cases[0])
+        replays = run_replay_portfolio(self.v0_cases[0])
         self.assertEqual(len(replays), 10)
 
     def test_portfolio_includes_oracle_route(self) -> None:
-        replays = run_v1_replay_portfolio(self.v0_cases[0])
+        replays = run_replay_portfolio(self.v0_cases[0])
         names = {r.replay_name for r in replays}
         self.assertIn("oracle_route", names)
 
     def test_portfolio_includes_all_v0_replays(self) -> None:
-        replays = run_v1_replay_portfolio(self.v0_cases[0])
+        replays = run_replay_portfolio(self.v0_cases[0])
         names = {r.replay_name for r in replays}
         for v0_name in REPLAY_TO_LABEL:
             self.assertIn(v0_name, names, f"V1 portfolio missing V0 replay {v0_name}")
 
     def test_every_replay_in_portfolio_has_label_mapping(self) -> None:
-        replays = run_v1_replay_portfolio(self.v0_cases[0])
+        replays = run_replay_portfolio(self.v0_cases[0])
         for replay in replays:
             with self.subTest(replay_name=replay.replay_name):
                 self.assertIn(replay.replay_name, REPLAY_TO_LABEL)
@@ -280,7 +279,7 @@ class V1NonRegressionTest(unittest.TestCase):
     def test_all_v0_labels_match_through_v1_pipeline(self) -> None:
         for case in self.v0_cases:
             with self.subTest(case_id=case.case_id):
-                result = run_case_v1(case, tie_margin=0.05)
+                result = run_case(case, tie_margin=0.05)
                 self.assertEqual(
                     result.attribution.predicted_label,
                     case.perturbation_label,
@@ -291,7 +290,7 @@ class V1NonRegressionTest(unittest.TestCase):
     def test_no_v0_case_gets_route_error(self) -> None:
         for case in self.v0_cases:
             with self.subTest(case_id=case.case_id):
-                result = run_case_v1(case, tie_margin=0.05)
+                result = run_case(case, tie_margin=0.05)
                 self.assertNotEqual(
                     result.attribution.predicted_label,
                     "route_error",
@@ -301,7 +300,7 @@ class V1NonRegressionTest(unittest.TestCase):
     def test_no_v0_case_gets_ingestion_error(self) -> None:
         for case in self.v0_cases:
             with self.subTest(case_id=case.case_id):
-                result = run_case_v1(case, tie_margin=0.05)
+                result = run_case(case, tie_margin=0.05)
                 self.assertNotEqual(
                     result.attribution.predicted_label,
                     "ingestion_error",
@@ -309,7 +308,7 @@ class V1NonRegressionTest(unittest.TestCase):
                 )
 
     def test_v1_pipeline_runs_all_six_and_returns_results(self) -> None:
-        results = run_cases_v1(list(self.v0_cases), tie_margin=0.05)
+        results = run_cases(list(self.v0_cases), tie_margin=0.05)
         self.assertEqual(len(results), 6)
         labels = {r.attribution.predicted_label for r in results}
         self.assertEqual(labels, set(PIPELINE_LABELS_BASE))
@@ -348,16 +347,14 @@ class V1ECSCompatibilityTest(unittest.TestCase):
         cls.route_case = load_probe_cases_v1(ROUTE_FIXTURE)[0]
 
     def test_run_case_full_v1_for_ingestion_case(self) -> None:
-        from cmd_audit import run_case_full_v1
 
-        result = run_case_full_v1(self.ingestion_case)
-        self.assertEqual(result.audit.attribution.predicted_label, "ingestion_error")
+        result = run_case(self.ingestion_case, post_repair=True)
+        self.assertEqual(result.attribution.predicted_label, "ingestion_error")
         self.assertTrue(result.ecs_draft.cause)
         self.assertTrue(result.ecs_draft.corrected_memory)
 
     def test_run_case_full_v1_for_route_case(self) -> None:
-        from cmd_audit import run_case_full_v1
 
-        result = run_case_full_v1(self.route_case)
-        self.assertIsNotNone(result.audit.attribution.predicted_label)
+        result = run_case(self.route_case, post_repair=True)
+        self.assertIsNotNone(result.attribution.predicted_label)
         self.assertTrue(result.ecs_draft.cause)

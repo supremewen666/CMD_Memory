@@ -8,7 +8,6 @@ import unittest
 from cmd_audit import (
     PIPELINE_LABELS_BASE,
     compute_diagnosis_metrics,
-    diagnosis_predictions,
     load_probe_cases,
     run_case,
 )
@@ -22,6 +21,7 @@ from cmd_audit.adapters import (
     run_letta_replay_portfolio,
 )
 from cmd_audit.adapters.base import load_letta_traces as _load_traces
+from cmd_audit.harness import diagnosis_predictions
 
 V0_SMOKE = Path("data/probe_cases/v0_issue3_cases.json")
 LETTA_TRACES = Path("data/probe_cases/letta_v0_smoke_traces.json")
@@ -585,7 +585,7 @@ class V1V2GateTest(unittest.TestCase):
     """V1→V2 gate behavior: 2 agents required, gate passes with both adapters."""
 
     def test_gate_passes_with_both_adapters(self) -> None:
-        from cmd_audit.version_gates import check_v1_to_v2_gate
+        from cmd_audit.eval.release_gates import check_v1_to_v2_gate
 
         result = check_v1_to_v2_gate(mem0_integrated=True, letta_integrated=True)
         self.assertTrue(result.all_passed)
@@ -595,21 +595,21 @@ class V1V2GateTest(unittest.TestCase):
         self.assertIn("Letta", result.criteria[0].evidence)
 
     def test_gate_fails_with_only_mem0(self) -> None:
-        from cmd_audit.version_gates import check_v1_to_v2_gate
+        from cmd_audit.eval.release_gates import check_v1_to_v2_gate
 
         result = check_v1_to_v2_gate(mem0_integrated=True, letta_integrated=False)
         self.assertFalse(result.all_passed)
         self.assertEqual(result.criteria[0].missing, "Integrate second adapter target (Letta if mem0 done).")
 
     def test_gate_fails_with_only_letta(self) -> None:
-        from cmd_audit.version_gates import check_v1_to_v2_gate
+        from cmd_audit.eval.release_gates import check_v1_to_v2_gate
 
         result = check_v1_to_v2_gate(mem0_integrated=False, letta_integrated=True)
         self.assertFalse(result.all_passed)
         self.assertIn("1 adapter integration(s)", result.criteria[0].evidence)
 
     def test_gate_fails_with_no_adapters(self) -> None:
-        from cmd_audit.version_gates import check_v1_to_v2_gate
+        from cmd_audit.eval.release_gates import check_v1_to_v2_gate
 
         result = check_v1_to_v2_gate(mem0_integrated=False, letta_integrated=False)
         self.assertFalse(result.all_passed)
@@ -618,7 +618,7 @@ class V1V2GateTest(unittest.TestCase):
 
     def test_gate_backward_compatible_mem0_only(self) -> None:
         """Existing callers using only mem0_integrated parameter still work."""
-        from cmd_audit.version_gates import check_v1_to_v2_gate
+        from cmd_audit.eval.release_gates import check_v1_to_v2_gate
 
         result = check_v1_to_v2_gate(mem0_integrated=True)
         self.assertFalse(result.all_passed)

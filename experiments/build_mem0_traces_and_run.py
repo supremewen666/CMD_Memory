@@ -20,8 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.adapters.base import Mem0Trace
 from cmd_audit.adapters.harness import run_case_with_mem0
-from cmd_audit.harness import run_case_v1
-from cmd_audit.core.models import load_probe_cases_v1
+from cmd_audit.harness import run_case
+from cmd_audit.data_io import load_probe_cases_v1
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "probe_cases"
@@ -106,7 +106,7 @@ def main() -> None:
             trace_obj = traces[case.case_id]
 
             # Path A: standalone
-            s_result = run_case_v1(case)
+            s_result = run_case(case)
             s_label = s_result.attribution.predicted_label
             s_top2 = set(s_result.attribution.top2_labels)
             s_correct = s_label == case.perturbation_label

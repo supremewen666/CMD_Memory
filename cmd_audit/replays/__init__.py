@@ -30,10 +30,8 @@ from .interventions import (
     run_verbatim_event_oracle,
 )
 from .portfolio import (
-    run_v0_replay_portfolio,
-    run_v1_passthrough_replays,
-    run_v1_replay_portfolio,
-    run_v1_replay_portfolio_subset,
+    run_replay_portfolio,
+    run_replay_portfolio_subset,
 )
 
 __all__ = [
@@ -51,11 +49,9 @@ __all__ = [
     "run_oracle_retrieval",
     "run_oracle_route",
     "run_oracle_write",
+    "run_replay_portfolio",
+    "run_replay_portfolio_subset",
     "run_safety_off",
-    "run_v0_replay_portfolio",
-    "run_v1_passthrough_replays",
-    "run_v1_replay_portfolio",
-    "run_v1_replay_portfolio_subset",
     "run_verbatim_event_oracle",
     "score_recovered_evidence",
 ]

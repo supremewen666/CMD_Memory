@@ -5,21 +5,14 @@ from __future__ import annotations
 import math
 import unittest
 
-from cmd_audit import (
-    ContextLeakError,
-    LLMResponse,
-    RUBRIC_MAX_SCORE,
-    RubricParseError,
-    RubricScorer,
-    RubricVerifier,
-    TokenLogprob,
-)
 from cmd_audit.core.models import GoldEvidence
 from cmd_audit.scoring.llm import (
     _expected_score_from_logprobs,
     _find_score_digit_logprobs,
     _parse_rubric_output,
 )
+from cmd_audit.core.llm_client import LLMResponse, TokenLogprob
+from cmd_audit.scoring import ContextLeakError, RUBRIC_MAX_SCORE, RubricParseError, RubricScorer, RubricVerifier
 
 
 class _FakeClient:
@@ -72,8 +65,7 @@ class ParseRubricOutputTest(unittest.TestCase):
 
     def test_score_max(self):
         self.assertEqual(
-            _parse_rubric_output('{"reasoning": "x", "score": 4}'),
-            RUBRIC_MAX_SCORE,
+            _parse_rubric_output('{"reasoning": "x", "score": 4}'), 4
         )
 
     def test_extra_prose_around_json(self):

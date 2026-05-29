@@ -27,27 +27,24 @@ from cmd_audit import (
     Citation,
     ProvenanceEdge,
     ProvenanceTracker,
-    compute_provenance_completeness,
-    detect_tamper,
-    get_graph_distractor_edges,
     load_probe_cases,
     load_probe_cases_v1,
-    record_provenance_edge,
     run_case,
-    run_case_v1,
-    run_case_v1_with_hook,
-    check_v1_to_v2_gate,
+    run_case,
+    run_case,
     write_attribution_table,
-    write_comparison_metrics_table,
-    write_provenance_completeness_summary,
 )
 from cmd_audit.core.models import MemoryItem
-from cmd_audit.provenance import _compute_hmac
+from cmd_audit.eval.provenance import _compute_hmac
 from cmd_audit.replays import (
     ReplayResult,
-    run_v0_replay_portfolio,
-    run_v1_replay_portfolio,
+    run_replay_portfolio,
 )
+from cmd_audit.eval import write_provenance_completeness_summary
+from cmd_audit.eval.provenance import compute_provenance_completeness, detect_tamper, record_provenance_edge
+from cmd_audit.eval.release_gates import check_v1_to_v2_gate
+from cmd_audit.eval import get_graph_distractor_edges
+from cmd_audit.harness import write_comparison_metrics_table
 
 V0_SMOKE = Path("data/probe_cases/v0_issue3_cases.json")
 GRAPH_FIXTURE = Path("data/probe_cases/v1_graph_error_case.json")
@@ -383,14 +380,14 @@ class ProvenanceRecordingTest(unittest.TestCase):
     def test_v0_portfolio_forwards_tracker(self) -> None:
         case = self._v0_map["v0-write-001"]
         tracker = ProvenanceTracker(case.case_id)
-        replays = run_v0_replay_portfolio(case, tracker=tracker)
+        replays = run_replay_portfolio(case, tracker=tracker)
         total_edges = sum(len(r.provenance_edges) for r in replays)
         self.assertGreater(total_edges, 0)
 
     def test_v1_portfolio_forwards_tracker(self) -> None:
         case = self._v0_map["v0-write-001"]
         tracker = ProvenanceTracker(case.case_id)
-        replays = run_v1_replay_portfolio(case, tracker=tracker)
+        replays = run_replay_portfolio(case, tracker=tracker)
         total_edges = sum(len(r.provenance_edges) for r in replays)
         self.assertGreater(total_edges, 0)
 
@@ -511,14 +508,14 @@ class GraphErrorProvenanceTest(unittest.TestCase):
             self.assertEqual(edge.operation, "retrieve")
 
     def test_distractor_ids_flow_into_attribution(self) -> None:
-        from cmd_audit.attribution import assign_attribution_v1
+        from cmd_audit.attribution import assign_attribution
         case = self.graph_case
         tracker = ProvenanceTracker(case.case_id)
         from cmd_audit.replays import run_graph_off
         graph_off = run_graph_off(case, tracker=tracker)
         distractor_edges = get_graph_distractor_edges(case, graph_off)
-        replays = run_v1_replay_portfolio(case, tracker=tracker)
-        attribution = assign_attribution_v1(
+        replays = run_replay_portfolio(case, tracker=tracker)
+        attribution = assign_attribution(
             replays,
             has_ingestion_trace=case.has_ingestion_trace,
             top_k=2,
@@ -564,13 +561,13 @@ class BackwardCompatibilityTest(unittest.TestCase):
 
     def test_v0_portfolio_without_tracker_empty_provenance(self) -> None:
         case = self.cases[0]
-        replays = run_v0_replay_portfolio(case, tracker=None)
+        replays = run_replay_portfolio(case, tracker=None)
         for replay in replays:
             self.assertEqual(replay.provenance_edges, ())
 
     def test_v1_portfolio_without_tracker_empty_provenance(self) -> None:
         case = self.cases[0]
-        replays = run_v1_replay_portfolio(case, tracker=None)
+        replays = run_replay_portfolio(case, tracker=None)
         for replay in replays:
             self.assertEqual(replay.provenance_edges, ())
 
@@ -584,11 +581,11 @@ class BackwardCompatibilityTest(unittest.TestCase):
         self.assertEqual(attr.distractor_provenance_edges, ())
 
     def test_attribution_v1_defaults(self) -> None:
-        from cmd_audit.attribution import assign_attribution_v1
+        from cmd_audit.attribution import assign_attribution
         case = self.cases[0]
         from cmd_audit.replays import run_oracle_write
         result = run_oracle_write(case)
-        attr = assign_attribution_v1((result,))
+        attr = assign_attribution((result,))
         self.assertEqual(attr.distractor_provenance_ids, ())
         self.assertEqual(attr.distractor_provenance_edges, ())
 
@@ -600,7 +597,7 @@ class BackwardCompatibilityTest(unittest.TestCase):
 
     def test_run_case_v1_produces_provenance(self) -> None:
         case = self.cases[0]
-        result = run_case_v1(case)
+        result = run_case(case)
         total_prov = sum(len(r.provenance_edges) for r in result.replays)
         self.assertGreater(total_prov, 0)
 
@@ -732,7 +729,7 @@ class CSVOutputTest(unittest.TestCase):
         cls.cases = load_probe_cases(V0_SMOKE)
 
     def test_attribution_table_has_distractor_provenance_ids_column(self) -> None:
-        results = [run_case_v1(case) for case in self.cases]
+        results = [run_case(case) for case in self.cases]
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "attribution.csv"
             write_attribution_table(results, path)
@@ -743,7 +740,7 @@ class CSVOutputTest(unittest.TestCase):
                 self.assertIn("distractor_provenance_ids", row)
 
     def test_comparison_metrics_table_has_provenance_completeness(self) -> None:
-        results = [run_case_v1(case) for case in self.cases]
+        results = [run_case(case) for case in self.cases]
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "comparison.csv"
             write_comparison_metrics_table(results, path)
@@ -756,7 +753,7 @@ class CSVOutputTest(unittest.TestCase):
             self.assertTrue(found, "No provenance_completeness row for CMD-Audit")
 
     def test_provenance_completeness_summary_writer(self) -> None:
-        result = run_case_v1(load_probe_cases_v1(GRAPH_FIXTURE)[0])
+        result = run_case(load_probe_cases_v1(GRAPH_FIXTURE)[0])
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "provenance_completeness.csv"
             write_provenance_completeness_summary([result], path)
@@ -806,31 +803,31 @@ class HarnessIntegrationTest(unittest.TestCase):
 
     def test_run_case_v1_all_replays_have_provenance_field(self) -> None:
         case = self.v0_cases[0]
-        result = run_case_v1(case)
+        result = run_case(case)
         for replay in result.replays:
             with self.subTest(replay=replay.replay_name):
                 self.assertIsInstance(replay.provenance_edges, tuple)
 
     def test_run_case_v1_graph_error_gets_distractors(self) -> None:
         case = self.graph_case
-        result = run_case_v1(case)
+        result = run_case(case)
         self.assertGreater(len(result.attribution.distractor_provenance_ids), 0)
 
     def test_run_case_v1_graph_off_replay_produces_recovery(self) -> None:
         case = self.graph_case
-        result = run_case_v1(case)
+        result = run_case(case)
         graph_off = result.replay_by_name("graph_off")
         self.assertGreater(graph_off.recovery_gain, 0)
 
-    def test_run_case_v1_with_hook_includes_provenance(self) -> None:
+    def test_run_case_with_hook_includes_provenance(self) -> None:
         case = self.graph_case
-        result = run_case_v1_with_hook(case)
+        result = run_case(case, hook=True)
         for replay in result.replays:
             self.assertIsInstance(replay.provenance_edges, tuple)
 
     def test_provenance_edges_have_hmac_content_hashes(self) -> None:
         case = self.v0_cases[0]
-        result = run_case_v1(case)
+        result = run_case(case)
         for replay in result.replays:
             for edge in replay.provenance_edges:
                 with self.subTest(replay=replay.replay_name):
@@ -841,7 +838,7 @@ class HarnessIntegrationTest(unittest.TestCase):
     def test_all_ten_replay_names_available(self) -> None:
         case = self.graph_case
         tracker = ProvenanceTracker(case.case_id)
-        replays = run_v1_replay_portfolio(case, tracker=tracker)
+        replays = run_replay_portfolio(case, tracker=tracker)
         self.assertEqual(len(replays), 10)
         replays_with_edges = sum(1 for r in replays if r.provenance_edges)
         self.assertGreaterEqual(replays_with_edges, 3)

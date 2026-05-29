@@ -6,19 +6,17 @@ import unittest
 
 from cmd_audit import (
     FailureMemoryRecord,
-    FailureMemoryStore,
     RecurrenceSummary,
-    build_failure_memory_context,
     compute_recurrence_summary,
     draft_ecs,
     load_probe_cases,
     run_case,
-    run_case_full,
     run_recurrence_comparisons,
     write_recurrence_comparison_table,
     PIPELINE_LABELS_BASE_ORDER,
 )
 from cmd_audit.core.labels import LabelValidationError
+from cmd_audit.repair.failure_memory import _FailureMemoryStoreV0, _build_failure_memory_context_v0
 
 ISSUE_3_CASES = Path("data/probe_cases/v0_issue3_cases.json")
 ISSUE_7_CASES = Path("data/probe_cases/v0_issue7_future_cases.json")
@@ -118,7 +116,7 @@ class FailureMemoryStoreRetrieveTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.cases = load_probe_cases(ISSUE_3_CASES)
-        cls.store = FailureMemoryStore()
+        cls.store = _FailureMemoryStoreV0()
         for case in cls.cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
@@ -146,7 +144,7 @@ class FailureMemoryStoreRetrieveTest(unittest.TestCase):
         self.assertEqual(len(results), 0)
 
     def test_empty_store_retrieve_returns_empty(self) -> None:
-        empty = FailureMemoryStore()
+        empty = _FailureMemoryStoreV0()
         results = empty.retrieve("any query")
         self.assertEqual(len(results), 0)
 
@@ -170,7 +168,7 @@ class BuildFailureMemoryContextTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.cases = load_probe_cases(ISSUE_3_CASES)
-        cls.store = FailureMemoryStore()
+        cls.store = _FailureMemoryStoreV0()
         for case in cls.cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
@@ -178,27 +176,27 @@ class BuildFailureMemoryContextTest(unittest.TestCase):
         cls.records = cls.store.retrieve("Q3 offsite city")
 
     def test_none_mode_returns_empty_string(self) -> None:
-        ctx = build_failure_memory_context(self.records, "none")
+        ctx = _build_failure_memory_context_v0(self.records, "none")
         self.assertEqual(ctx, "")
 
     def test_none_mode_with_empty_records_returns_empty(self) -> None:
-        ctx = build_failure_memory_context((), "none")
+        ctx = _build_failure_memory_context_v0((), "none")
         self.assertEqual(ctx, "")
 
     def test_full_trace_mode_injects_wrong_memory(self) -> None:
-        ctx = build_failure_memory_context(self.records, "full_trace")
+        ctx = _build_failure_memory_context_v0(self.records, "full_trace")
         self.assertIn("Past Failure Trace", ctx)
         self.assertTrue(len(ctx) > 0)
 
     def test_corrected_guidance_mode_injects_guidance(self) -> None:
-        ctx = build_failure_memory_context(self.records, "corrected_guidance")
+        ctx = _build_failure_memory_context_v0(self.records, "corrected_guidance")
         self.assertIn("Failure Memory Guidance", ctx)
         self.assertIn("Corrected:", ctx)
         self.assertIn("Guidance:", ctx)
         self.assertTrue(len(ctx) > 0)
 
     def test_corrected_guidance_does_not_inject_wrong_memory_text(self) -> None:
-        ctx = build_failure_memory_context(self.records, "corrected_guidance")
+        ctx = _build_failure_memory_context_v0(self.records, "corrected_guidance")
         for record in self.records:
             if record.wrong_memory:
                 self.assertNotIn(
@@ -208,19 +206,19 @@ class BuildFailureMemoryContextTest(unittest.TestCase):
                 )
 
     def test_corrected_guidance_does_not_inject_full_failed_trace(self) -> None:
-        ctx = build_failure_memory_context(self.records, "corrected_guidance")
+        ctx = _build_failure_memory_context_v0(self.records, "corrected_guidance")
         self.assertNotIn("Past Failure Trace", ctx)
 
     def test_invalid_mode_raises(self) -> None:
         with self.assertRaises(ValueError):
-            build_failure_memory_context(self.records, "invalid_mode")
+            _build_failure_memory_context_v0(self.records, "invalid_mode")
 
     def test_empty_records_with_full_trace_returns_empty(self) -> None:
-        ctx = build_failure_memory_context((), "full_trace")
+        ctx = _build_failure_memory_context_v0((), "full_trace")
         self.assertEqual(ctx, "")
 
     def test_empty_records_with_corrected_guidance_returns_empty(self) -> None:
-        ctx = build_failure_memory_context((), "corrected_guidance")
+        ctx = _build_failure_memory_context_v0((), "corrected_guidance")
         self.assertEqual(ctx, "")
 
 
@@ -234,7 +232,7 @@ class RecurrenceComparisonRowTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         # Build Failure Memory from original cases
         cls.original_cases = load_probe_cases(ISSUE_3_CASES)
-        cls.store = FailureMemoryStore()
+        cls.store = _FailureMemoryStoreV0()
         for case in cls.original_cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
@@ -324,7 +322,7 @@ class RecurrenceSummaryTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.original_cases = load_probe_cases(ISSUE_3_CASES)
-        cls.store = FailureMemoryStore()
+        cls.store = _FailureMemoryStoreV0()
         for case in cls.original_cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
@@ -365,7 +363,7 @@ class RecurrenceTableOutputTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.original_cases = load_probe_cases(ISSUE_3_CASES)
-        cls.store = FailureMemoryStore()
+        cls.store = _FailureMemoryStoreV0()
         for case in cls.original_cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
@@ -435,10 +433,10 @@ class FullPipelineRecurrenceTest(unittest.TestCase):
         cls.future_cases = load_probe_cases(ISSUE_7_CASES)
 
         # Run full CMD pipeline on original cases
-        cls.full_results = [run_case_full(c) for c in cls.original_cases]
+        cls.full_results = [run_case(c, post_repair=True) for c in cls.original_cases]
 
         # Build Failure Memory
-        cls.store = FailureMemoryStore()
+        cls.store = _FailureMemoryStoreV0()
         for fr in cls.full_results:
             record = FailureMemoryRecord.from_ecs_draft(
                 fr.ecs_draft, cls.original_cases[0]
@@ -446,7 +444,7 @@ class FullPipelineRecurrenceTest(unittest.TestCase):
             cls.store = cls.store.add(record)
 
         # Actually build store properly per case
-        cls.store = FailureMemoryStore()
+        cls.store = _FailureMemoryStoreV0()
         for case, fr in zip(cls.original_cases, cls.full_results):
             record = FailureMemoryRecord.from_ecs_draft(fr.ecs_draft, case)
             cls.store = cls.store.add(record)
