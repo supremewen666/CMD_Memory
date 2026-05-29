@@ -102,11 +102,15 @@ Python >= 3.11, zero external PyPI dependencies. Tests use `unittest` via `pytes
 # Run all tests
 python -m pytest tests/ -v
 
+# Run a subpackage's tests
+python -m pytest tests/repair/ -v
+python -m pytest tests/eval/ -v
+
 # Run a single test file
-python -m pytest tests/test_cmd_audit_issue11_v1_labels.py -v
+python -m pytest tests/attribution/test_labels_ingestion_route.py -v
 
 # Run a single test method
-python -m pytest tests/test_cmd_audit_issue11_v1_labels.py::V1LabelValidationTest::test_v1_labels_are_superset_of_v0 -v
+python -m pytest tests/attribution/test_labels_ingestion_route.py::V1LabelValidationTest::test_v1_labels_are_superset_of_v0 -v
 
 # Run the V0 CMD-Audit CLI harness
 python -m cmd_audit run --cases data/probe_cases/v0_issue3_cases.json
@@ -165,21 +169,18 @@ cmd_audit/hook/
 
 ### Test Files
 
-Tests follow the pattern `tests/test_cmd_audit_issueNN_*.py`, one file per issue:
-- `test_cmd_audit_tracer_bullet.py` — issues 0001-0004 (V0 smoke)
-- `test_cmd_audit_issue5_post_repair.py` — issue 0005
-- `test_cmd_audit_issue6_targeted_fixes.py` — issue 0006
-- `test_cmd_audit_issue7_failure_memory.py` — issue 0007
-- `test_cmd_audit_issue8_retrieval_baselines.py` — issue 0008
-- `test_cmd_audit_issue9_monitor_contract.py` — issue 0009
-- `test_cmd_audit_issue10_version_gates.py` — issue 0010
-- `test_cmd_audit_issue11_v1_labels.py` — issue 0011 (44 tests, 9 classes)
-- `test_cmd_audit_issue12_v1_labels.py` — issue 0012 (81 tests)
-- `test_cmd_audit_issue13_coupled_failure.py` — issue 0013 (42 tests)
-- `test_cmd_audit_issue14_mem0_adapter.py` — issue 0014 (30 tests)
-- `test_cmd_audit_issue15_letta_adapter.py` — issue 0015 (44 tests, 7 classes)
-- `test_cmd_audit_issue17_provenance.py` — issue 0017 (78 tests, 12 classes)
-- `test_cmd_audit_issue19_subagent_scoring.py` — issue 0019 (planned, ~48 tests, ~8 classes)
+Tests are organized by subpackage under `tests/`:
+
+| Directory | Contents |
+|-----------|----------|
+| `tests/integration/` | Harness-level smoke + comparator + attribution table (issues 0001-0004, 0002, 0003, 0009) |
+| `tests/repair/` | Post-repair, targeted repairs, failure memory, executor, orchestrator, surrogate (issues 0005-0007, 0020-A/B/C/D/E/G/H) |
+| `tests/eval/` | Version gates, provenance, agreement, bootstrap, all decision34 eval tests (issues 0010, 0017, 0020-F, D34 series) |
+| `tests/scoring/` | Retrieval baselines, subagent scoring phases A/B/C, dual-axis recovery gain (issues 0008, 0019) |
+| `tests/attribution/` | Label expansion (ingestion/route, granularity/graph/safety), coupled failure, shadow replay (issues 0011-0013) |
+| `tests/hook/` | Hook redesign two-stage + RPE judge (issue 0021) |
+| `tests/adapters/` | mem0 adapter, Letta adapter (issues 0014-0015) |
+| `tests/data_io/` | Real data integration (issue 0016) |
 
 ## Domain Rules (coding boundaries)
 
