@@ -282,13 +282,19 @@ def run_oracle_route(
     agent_generate: AgentGenerate | None = None,
     answer_verifier: object | None = None,
 ) -> ReplayResult:
-    """Replay by testing retrieval from each available store/tier.
+    """Replay by testing retrieval from stores the baseline did not query.
 
     This intervention diagnoses `route_error`: correct memory exists but was stored
-    in a store/tier the baseline retrieval did not access. Enumerates all stores,
-    picks the one with the best evidence recovery.
+    in a store/tier the baseline retrieval did not access. Only enumerates stores
+    not already queried by the baseline (derived from retrieved_memory_ids).
     """
-    stores = _collect_stores(case)
+    memory_by_id = {item.memory_id: item for item in case.extracted_memory}
+    queried_stores = {
+        memory_by_id[mid].store
+        for mid in case.primary_baseline.retrieved_memory_ids
+        if mid in memory_by_id
+    }
+    stores = [s for s in _collect_stores(case) if s not in queried_stores]
     best_score = -1.0
     best_block = ""
     best_store = ""
@@ -303,7 +309,6 @@ def run_oracle_route(
 
     if tracker is not None and best_store:
         target_id = f"{case.case_id}__route"
-        memory_by_id = {item.memory_id: item for item in case.extracted_memory}
         for evidence in case.gold_evidence:
             if not evidence.source_memory_id:
                 continue

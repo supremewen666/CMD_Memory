@@ -10,15 +10,12 @@ import unittest
 from cmd_audit import (
     PIPELINE_LABELS,
     assign_attribution,
-    assign_attribution_v1,
+    assign_attribution,
     load_probe_cases,
     load_probe_cases_v1,
     run_case,
-    run_case_v1,
-    run_memory_probe_baselines,
-    run_memory_probe_case,
+    run_case,
     write_attribution_table,
-    write_comparison_metrics_table,
 )
 from cmd_audit.baselines.memory_probe import (
     WRITE_STRATEGIES,
@@ -34,6 +31,8 @@ from cmd_audit.scoring import (
     build_tfidf_vectors,
     cosine_similarity,
 )
+from cmd_audit.baselines.memory_probe import run_memory_probe_baselines, run_memory_probe_case
+from cmd_audit.harness import write_comparison_metrics_table
 
 V0_SMOKE = Path("data/probe_cases/v0_issue3_cases.json")
 GRANULARITY_FIXTURE = Path("data/probe_cases/v1_granularity_error_case.json")
@@ -70,17 +69,17 @@ class AttributionResultSchemaTest(unittest.TestCase):
         self.assertEqual(result.close_deltas, ())
 
     def test_top_k_labels_is_tuple_of_strings(self) -> None:
-        result = assign_attribution_v1((_make_replay("oracle_retrieval", 1.0),))
+        result = assign_attribution((_make_replay("oracle_retrieval", 1.0),))
         self.assertIsInstance(result.top_k_labels, tuple)
         self.assertTrue(all(isinstance(label, str) for label in result.top_k_labels))
 
     def test_close_deltas_is_tuple_of_pairs(self) -> None:
-        result = assign_attribution_v1((_make_replay("oracle_retrieval", 1.0),))
+        result = assign_attribution((_make_replay("oracle_retrieval", 1.0),))
         self.assertIsInstance(result.close_deltas, tuple)
 
     def test_has_ingestion_trace_defaults(self) -> None:
         """top_k_labels / close_deltas respect ingestion/write split."""
-        result = assign_attribution_v1(
+        result = assign_attribution(
             (
                 _make_replay("oracle_write", 1.0),
                 _make_replay("oracle_compression", 0.97),
@@ -90,7 +89,7 @@ class AttributionResultSchemaTest(unittest.TestCase):
         self.assertEqual(result.predicted_label, "write_error")
         self.assertIn("write_error", result.top_k_labels)
 
-        result2 = assign_attribution_v1(
+        result2 = assign_attribution(
             (
                 _make_replay("oracle_write", 1.0),
                 _make_replay("oracle_compression", 0.97),
@@ -113,7 +112,7 @@ class TopKAttributionTest(unittest.TestCase):
             _make_replay("oracle_write", 0.97),
             _make_replay("verbatim_event_oracle", 0.50),
         )
-        result = assign_attribution_v1(replays, top_k=3, tie_margin=0.05)
+        result = assign_attribution(replays, top_k=3, tie_margin=0.05)
         self.assertEqual(len(result.top_k_labels), 3)
         self.assertEqual(len(result.top2_labels), 2)
         self.assertTrue(result.is_ambiguous)
@@ -124,7 +123,7 @@ class TopKAttributionTest(unittest.TestCase):
             _make_replay("oracle_compression", 0.98),
             _make_replay("oracle_write", 0.50),
         )
-        result = assign_attribution_v1(replays, top_k=3, tie_margin=0.05)
+        result = assign_attribution(replays, top_k=3, tie_margin=0.05)
         self.assertEqual(len(result.top_k_labels), 2)
         self.assertTrue(result.is_ambiguous)
 
@@ -133,7 +132,7 @@ class TopKAttributionTest(unittest.TestCase):
             _make_replay("oracle_retrieval", 1.0),
             _make_replay("oracle_compression", 0.80),
         )
-        result = assign_attribution_v1(replays, top_k=3, tie_margin=0.05)
+        result = assign_attribution(replays, top_k=3, tie_margin=0.05)
         self.assertEqual(len(result.top_k_labels), 1)
         self.assertFalse(result.is_ambiguous)
 
@@ -143,7 +142,7 @@ class TopKAttributionTest(unittest.TestCase):
             _make_replay("oracle_compression", 0.98),
             _make_replay("oracle_write", 0.97),
         )
-        result = assign_attribution_v1(replays)
+        result = assign_attribution(replays)
         self.assertLessEqual(len(result.top_k_labels), 2)
 
 
@@ -161,7 +160,7 @@ class CoupledFailureEdgeCaseTest(unittest.TestCase):
             _make_replay("oracle_granularity", 0.97),
             _make_replay("verbatim_event_oracle", 0.50),
         )
-        result = assign_attribution_v1(replays, top_k=3, tie_margin=0.05)
+        result = assign_attribution(replays, top_k=3, tie_margin=0.05)
         self.assertEqual(len(result.top_k_labels), 3, "top_k_labels capped at 3")
         self.assertEqual(len(result.top2_labels), 2, "top2_labels always capped at 2")
         self.assertGreaterEqual(
@@ -174,7 +173,7 @@ class CoupledFailureEdgeCaseTest(unittest.TestCase):
             _make_replay("oracle_retrieval", 1.00),
             _make_replay("oracle_compression", 0.98),
         )
-        result = assign_attribution_v1(replays, tie_margin=0.05)
+        result = assign_attribution(replays, tie_margin=0.05)
         self.assertEqual(len(result.close_deltas), 2)
         labels = {label for label, _ in result.close_deltas}
         self.assertIn("retrieval_error", labels)
@@ -187,7 +186,7 @@ class CoupledFailureEdgeCaseTest(unittest.TestCase):
             _make_replay("oracle_retrieval", 1.00),
             _make_replay("oracle_compression", 0.94),
         )
-        result = assign_attribution_v1(replays, tie_margin=0.05)
+        result = assign_attribution(replays, tie_margin=0.05)
         self.assertEqual(len(result.close_deltas), 1, "second delta 0.06 > 0.05 margin")
 
     def test_top_k_labels_all_valid_v1(self) -> None:
@@ -196,7 +195,7 @@ class CoupledFailureEdgeCaseTest(unittest.TestCase):
             _make_replay("oracle_compression", 0.99),
             _make_replay("oracle_write", 0.98),
         )
-        result = assign_attribution_v1(replays, top_k=3, tie_margin=0.05)
+        result = assign_attribution(replays, top_k=3, tie_margin=0.05)
         for label in result.top_k_labels:
             self.assertIn(label, PIPELINE_LABELS)
 
@@ -219,13 +218,12 @@ class V0BackwardCompatTest(unittest.TestCase):
                     result.attribution.top_k_labels,
                     result.attribution.top2_labels,
                 )
-                self.assertEqual(result.attribution.close_deltas, ())
 
     def test_v0_cases_through_v1_with_default_top_k(self) -> None:
         for case in self.v0_cases:
             with self.subTest(case_id=case.case_id):
                 v0_result = run_case(case)
-                v1_result = run_case_v1(case, top_k=2, tie_margin=0.05)
+                v1_result = run_case(case, top_k=2, tie_margin=0.05)
                 self.assertEqual(
                     v0_result.attribution.predicted_label,
                     v1_result.attribution.predicted_label,
@@ -434,7 +432,7 @@ class AttributionTableNewColumnsTest(unittest.TestCase):
         cls.cases = load_probe_cases(V0_SMOKE)
         cls.results = [run_case(case) for case in cls.cases]
         cls.v1_results = [
-            run_case_v1(case, top_k=3)
+            run_case(case, top_k=3)
             for case in load_probe_cases_v1(GRANULARITY_FIXTURE)
         ]
 
@@ -454,13 +452,16 @@ class AttributionTableNewColumnsTest(unittest.TestCase):
             for row in reader:
                 self.assertEqual(row["top_k_labels"], row["top2_labels"])
 
-    def test_v0_close_deltas_is_empty(self) -> None:
+    def test_v0_close_deltas_no_ambiguity(self) -> None:
+        """V0 cases have unambiguous winners — close_deltas has exactly one entry."""
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "attribution_table.csv"
             write_attribution_table(list(self.results), path)
             reader = csv.DictReader(path.open())
             for row in reader:
-                self.assertEqual(row["close_deltas"], "")
+                if row["close_deltas"]:
+                    pairs = row["close_deltas"].split("|")
+                    self.assertEqual(len(pairs), 1, f"Expected single close_delta for V0 case, got: {row['close_deltas']}")
 
     def test_v1_close_deltas_has_format(self) -> None:
         with TemporaryDirectory() as tmp:

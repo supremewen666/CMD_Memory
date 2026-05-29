@@ -7,14 +7,12 @@ from pathlib import Path
 
 from .harness import (
     run_cases,
-    run_cases_v1,
-    run_cases_v1_with_hook,
-    run_full_real_suite,
+    run_real_suite,
     write_attribution_table,
     write_comparison_metrics_table,
     write_confusion_matrix_table,
 )
-from .core.models import load_all_real_cases, load_probe_cases, load_probe_cases_v1
+from .data_io import load_all_real_cases, load_probe_cases, load_probe_cases_v1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -146,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.output:
             args.out_dir = args.output
         if args.real_data:
-            results = run_full_real_suite(
+            results = run_real_suite(
                 out_dir=args.out_dir,
                 use_hook=args.use_hook,
                 tie_margin=args.tie_margin,
@@ -155,13 +153,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cases:
             cases = load_probe_cases_v1(args.cases)
             if args.use_hook:
-                results = run_cases_v1_with_hook(
+                results = run_cases(
                     cases,
+                    hook=True,
                     tie_margin=args.tie_margin,
                     on_the_fly_baseline_rescore=args.on_the_fly_baseline_rescore,
                 )
             else:
-                results = run_cases_v1(
+                results = run_cases(
                     cases,
                     tie_margin=args.tie_margin,
                     on_the_fly_baseline_rescore=args.on_the_fly_baseline_rescore,

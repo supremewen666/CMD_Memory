@@ -19,7 +19,7 @@ from .interventions import (
 )
 
 
-def run_v0_replay_portfolio(
+def _run_v0_replay_portfolio(
     case: ProbeCase,
     *,
     tracker: object | None = None,
@@ -51,7 +51,7 @@ def run_v0_replay_portfolio(
     )
 
 
-def run_v1_replay_portfolio(
+def run_replay_portfolio(
     case: ProbeCase,
     *,
     tracker: object | None = None,
@@ -59,7 +59,7 @@ def run_v1_replay_portfolio(
     agent_generate: AgentGenerate | None = None,
     answer_verifier: object | None = None,
 ) -> tuple[ReplayResult, ...]:
-    """Run the V1 replay portfolio (10 replays) for one case."""
+    """Run the 10-replay portfolio for one case."""
 
     return (
         run_oracle_write(
@@ -80,13 +80,13 @@ def run_v1_replay_portfolio(
         run_evidence_given_reasoning(
             case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
-        *run_v1_passthrough_replays(
+        *_run_v1_passthrough_replays(
             case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
         ),
     )
 
 
-def run_v1_passthrough_replays(
+def _run_v1_passthrough_replays(
     case: ProbeCase,
     adapter=None,
     *,
@@ -246,7 +246,7 @@ _V1_REPLAY_DISPATCH = {
 }
 
 
-def run_v1_replay_portfolio_subset(
+def run_replay_portfolio_subset(
     case: ProbeCase,
     replay_names: tuple[str, ...],
     *,
@@ -255,7 +255,7 @@ def run_v1_replay_portfolio_subset(
     agent_generate: AgentGenerate | None = None,
     answer_verifier: object | None = None,
 ) -> tuple[ReplayResult, ...]:
-    """Run only the named V1 replays, in portfolio order."""
+    """Run only the named replays, in portfolio order."""
     return tuple(
         _V1_REPLAY_DISPATCH[name](
             case,

@@ -6,14 +6,13 @@ import unittest
 from cmd_audit import (
     FailureMemoryRecord,
     FailureMemoryStore,
-    FailureMemoryStoreV1,
-    build_failure_memory_context_v1,
-    build_repair_context,
     compute_memory_top_terms,
     draft_ecs_for_label,
     load_probe_cases_v1,
 )
-from cmd_audit.repair.failure_memory import _score_composite_key
+from cmd_audit.repair.failure_memory import _score_composite_key, _FailureMemoryStoreV0
+from cmd_audit.repair import FailureMemoryStore, build_failure_memory_context
+from cmd_audit.repair import build_repair_context
 
 
 # ── compute_memory_top_terms ────────────────────────────────────────────
@@ -48,7 +47,7 @@ class ComputeMemoryTopTermsTest(unittest.TestCase):
             self.assertNotIn(stop_word, terms)
 
 
-# ── FailureMemoryStoreV1 ────────────────────────────────────────────────
+# ── FailureMemoryStore ────────────────────────────────────────────────
 
 
 class FailureMemoryStoreV1Test(unittest.TestCase):
@@ -88,7 +87,7 @@ class FailureMemoryStoreV1Test(unittest.TestCase):
             trigger_signature="retrieval_error london capital united kingdom",
             memory_top_terms=("london", "kingdom"),
         )
-        self.store = FailureMemoryStoreV1().add(self.record_a).add(self.record_b).add(self.record_c)
+        self.store = FailureMemoryStore().add(self.record_a).add(self.record_b).add(self.record_c)
 
     def test_retrieve_by_label_matches(self) -> None:
         results = self.store.retrieve(
@@ -142,26 +141,26 @@ class FailureMemoryStoreV1Test(unittest.TestCase):
         self.assertIn("route_error", record.trigger_signature)
 
     def test_empty_store_returns_empty(self) -> None:
-        empty = FailureMemoryStoreV1()
+        empty = FailureMemoryStore()
         results = empty.retrieve("test query")
         self.assertEqual(results, ())
 
     def test_add_returns_new_instance(self) -> None:
-        store1 = FailureMemoryStoreV1()
+        store1 = FailureMemoryStore()
         store2 = store1.add(self.record_a)
         self.assertIsNot(store1, store2)
         self.assertEqual(len(store1), 0)
         self.assertEqual(len(store2), 1)
 
 
-# ── build_failure_memory_context_v1 ─────────────────────────────────────
+# ── build_failure_memory_context ─────────────────────────────────────
 
 
 class BuildFailureMemoryContextV1Test(unittest.TestCase):
     """AC: fm_context = wrong_memory + original_evidence (diagnostic signal)."""
 
     def test_empty_records_returns_empty(self) -> None:
-        self.assertEqual(build_failure_memory_context_v1(()), "")
+        self.assertEqual(build_failure_memory_context(()), "")
 
     def test_contains_wrong_memory(self) -> None:
         record = FailureMemoryRecord(
@@ -174,7 +173,7 @@ class BuildFailureMemoryContextV1Test(unittest.TestCase):
             repair_guidance="update routing",
             trigger_signature="retrieval_error|tokyo capital japan",
         )
-        ctx = build_failure_memory_context_v1((record,))
+        ctx = build_failure_memory_context((record,))
         self.assertIn("wrong answer about Tokyo", ctx)
         self.assertIn("Tokyo is Japan's capital", ctx)
 
@@ -189,7 +188,7 @@ class BuildFailureMemoryContextV1Test(unittest.TestCase):
             repair_guidance="write it",
             trigger_signature="write_error|test",
         )
-        ctx = build_failure_memory_context_v1((record,))
+        ctx = build_failure_memory_context((record,))
         self.assertIn("[Failure Memory Diagnostic Context]", ctx)
         self.assertIn("incorrect memory content", ctx)
         self.assertIn("Evidence of error", ctx)
@@ -215,7 +214,7 @@ class BuildFailureMemoryContextV1Test(unittest.TestCase):
             repair_guidance="rg2",
             trigger_signature="compression_error|test2",
         )
-        ctx = build_failure_memory_context_v1((r1, r2))
+        ctx = build_failure_memory_context((r1, r2))
         self.assertIn("Past Error 1", ctx)
         self.assertIn("Past Error 2", ctx)
         self.assertIn("retrieval_error", ctx)
@@ -306,7 +305,7 @@ class CompositeKeyScoringTest(unittest.TestCase):
 
 
 class BackwardCompatibilityTest(unittest.TestCase):
-    """AC: V0 FailureMemoryStore unchanged."""
+    """AC: V0 keyword-only store still works via internal API."""
 
     def test_v0_store_still_works(self) -> None:
         record = FailureMemoryRecord(
@@ -319,7 +318,7 @@ class BackwardCompatibilityTest(unittest.TestCase):
             repair_guidance="rg",
             trigger_signature="retrieval_error paris france",
         )
-        store = FailureMemoryStore().add(record)
+        store = _FailureMemoryStoreV0().add(record)
         results = store.retrieve("about Paris")
         self.assertTrue(len(results) > 0)
 
@@ -355,7 +354,7 @@ class CompositeRetrievalPrecisionTest(unittest.TestCase):
             trigger_signature="retrieval_error berlin germany capital",
             memory_top_terms=("berlin", "germany"),
         )
-        store = FailureMemoryStoreV1().add(record_paris).add(record_berlin)
+        store = FailureMemoryStore().add(record_paris).add(record_berlin)
 
         # Query about Paris with memory_top_terms matching Paris record
         results = store.retrieve(
@@ -392,7 +391,7 @@ class CompositeRetrievalPrecisionTest(unittest.TestCase):
             trigger_signature="write_error london uk capital",
             memory_top_terms=("london",),
         )
-        store = FailureMemoryStoreV1().add(record_a).add(record_b)
+        store = FailureMemoryStore().add(record_a).add(record_b)
 
         # Stored memory_top_terms are used automatically; callers do not pass them.
         results_with_mem = store.retrieve(

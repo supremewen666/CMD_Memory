@@ -11,23 +11,21 @@ from cmd_audit import (
     PIPELINE_LABELS,
     PIPELINE_LABEL_ORDER,
     REPLAY_TO_LABEL,
-    assign_attribution_v1,
+    assign_attribution,
     load_probe_cases,
     load_probe_cases_v1,
-    run_case_v1,
-    run_cases_v1,
-    run_graph_off,
-    run_oracle_granularity,
-    run_safety_off,
-    run_v1_replay_portfolio,
+    run_case,
+    run_cases,
     validate_label_base,
     validate_label,
 )
+from cmd_audit.replays import run_replay_portfolio
 from cmd_audit.core.labels import (
     DEFERRED_PIPELINE_LABELS,
     OUT_OF_SCOPE_ITEM_LABELS,
     REPLAY_TO_LABEL_BASE,
 )
+from cmd_audit.replays import run_graph_off, run_oracle_granularity, run_safety_off
 
 V0_SMOKE = Path("data/probe_cases/v0_issue3_cases.json")
 GRANULARITY_FIXTURE = Path("data/probe_cases/v1_granularity_error_case.json")
@@ -303,29 +301,29 @@ class V1ReplayPortfolioTest(unittest.TestCase):
         cls.v0_cases = load_probe_cases(V0_SMOKE)
 
     def test_portfolio_has_ten_replays(self) -> None:
-        replays = run_v1_replay_portfolio(self.v0_cases[0])
+        replays = run_replay_portfolio(self.v0_cases[0])
         self.assertEqual(len(replays), 10)
 
     def test_portfolio_includes_new_replays(self) -> None:
-        replays = run_v1_replay_portfolio(self.v0_cases[0])
+        replays = run_replay_portfolio(self.v0_cases[0])
         names = {r.replay_name for r in replays}
         self.assertIn("oracle_granularity", names)
         self.assertIn("graph_off", names)
         self.assertIn("safety_off", names)
 
     def test_portfolio_includes_oracle_route(self) -> None:
-        replays = run_v1_replay_portfolio(self.v0_cases[0])
+        replays = run_replay_portfolio(self.v0_cases[0])
         names = {r.replay_name for r in replays}
         self.assertIn("oracle_route", names)
 
     def test_portfolio_includes_all_v0_replays(self) -> None:
-        replays = run_v1_replay_portfolio(self.v0_cases[0])
+        replays = run_replay_portfolio(self.v0_cases[0])
         names = {r.replay_name for r in replays}
         for v0_name in REPLAY_TO_LABEL:
             self.assertIn(v0_name, names, f"V1 portfolio missing V0 replay {v0_name}")
 
     def test_every_replay_in_portfolio_has_label_mapping(self) -> None:
-        replays = run_v1_replay_portfolio(self.v0_cases[0])
+        replays = run_replay_portfolio(self.v0_cases[0])
         for replay in replays:
             with self.subTest(replay_name=replay.replay_name):
                 self.assertIn(replay.replay_name, REPLAY_TO_LABEL)
@@ -347,7 +345,7 @@ class GranularityErrorAttributionTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.granularity_case = load_probe_cases_v1(GRANULARITY_FIXTURE)[0]
-        cls.replays = run_v1_replay_portfolio(cls.granularity_case)
+        cls.replays = run_replay_portfolio(cls.granularity_case)
 
     def test_oracle_granularity_has_positive_recovery_gain(self) -> None:
         for replay in self.replays:
@@ -357,7 +355,7 @@ class GranularityErrorAttributionTest(unittest.TestCase):
         self.fail("oracle_granularity replay not found")
 
     def test_oracle_granularity_produces_valid_attribution(self) -> None:
-        attribution = assign_attribution_v1(
+        attribution = assign_attribution(
             self.replays, has_ingestion_trace=self.granularity_case.has_ingestion_trace
         )
         self.assertIn(attribution.predicted_label, PIPELINE_LABELS)
@@ -374,8 +372,8 @@ class GranularityErrorAttributionTest(unittest.TestCase):
         v0_cases = load_probe_cases(V0_SMOKE)
         for case in v0_cases:
             with self.subTest(case_id=case.case_id):
-                replays = run_v1_replay_portfolio(case)
-                attribution = assign_attribution_v1(
+                replays = run_replay_portfolio(case)
+                attribution = assign_attribution(
                     replays, has_ingestion_trace=case.has_ingestion_trace
                 )
                 self.assertNotEqual(
@@ -391,7 +389,7 @@ class GraphErrorAttributionTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.graph_case = load_probe_cases_v1(GRAPH_FIXTURE)[0]
-        cls.replays = run_v1_replay_portfolio(cls.graph_case)
+        cls.replays = run_replay_portfolio(cls.graph_case)
 
     def test_graph_off_has_positive_recovery_gain(self) -> None:
         for replay in self.replays:
@@ -401,7 +399,7 @@ class GraphErrorAttributionTest(unittest.TestCase):
         self.fail("graph_off replay not found")
 
     def test_graph_off_produces_valid_attribution(self) -> None:
-        attribution = assign_attribution_v1(
+        attribution = assign_attribution(
             self.replays, has_ingestion_trace=self.graph_case.has_ingestion_trace
         )
         self.assertIn(attribution.predicted_label, PIPELINE_LABELS)
@@ -425,8 +423,8 @@ class GraphErrorAttributionTest(unittest.TestCase):
         v0_cases = load_probe_cases(V0_SMOKE)
         for case in v0_cases:
             with self.subTest(case_id=case.case_id):
-                replays = run_v1_replay_portfolio(case)
-                attribution = assign_attribution_v1(
+                replays = run_replay_portfolio(case)
+                attribution = assign_attribution(
                     replays, has_ingestion_trace=case.has_ingestion_trace
                 )
                 self.assertNotEqual(
@@ -457,8 +455,8 @@ class SafetyErrorAttributionTest(unittest.TestCase):
         v0_cases = load_probe_cases(V0_SMOKE)
         for case in v0_cases:
             with self.subTest(case_id=case.case_id):
-                replays = run_v1_replay_portfolio(case)
-                attribution = assign_attribution_v1(
+                replays = run_replay_portfolio(case)
+                attribution = assign_attribution(
                     replays, has_ingestion_trace=case.has_ingestion_trace
                 )
                 self.assertNotEqual(
@@ -482,7 +480,7 @@ class V1NonRegressionTest(unittest.TestCase):
     def test_all_v0_labels_match_through_v1_pipeline(self) -> None:
         for case in self.v0_cases:
             with self.subTest(case_id=case.case_id):
-                result = run_case_v1(case, tie_margin=0.05)
+                result = run_case(case, tie_margin=0.05)
                 self.assertEqual(
                     result.attribution.predicted_label,
                     case.perturbation_label,
@@ -493,7 +491,7 @@ class V1NonRegressionTest(unittest.TestCase):
     def test_no_v0_case_gets_granularity_error(self) -> None:
         for case in self.v0_cases:
             with self.subTest(case_id=case.case_id):
-                result = run_case_v1(case, tie_margin=0.05)
+                result = run_case(case, tie_margin=0.05)
                 self.assertNotEqual(
                     result.attribution.predicted_label,
                     "granularity_error",
@@ -502,7 +500,7 @@ class V1NonRegressionTest(unittest.TestCase):
     def test_no_v0_case_gets_graph_error(self) -> None:
         for case in self.v0_cases:
             with self.subTest(case_id=case.case_id):
-                result = run_case_v1(case, tie_margin=0.05)
+                result = run_case(case, tie_margin=0.05)
                 self.assertNotEqual(
                     result.attribution.predicted_label,
                     "graph_error",
@@ -511,18 +509,18 @@ class V1NonRegressionTest(unittest.TestCase):
     def test_no_v0_case_gets_safety_error(self) -> None:
         for case in self.v0_cases:
             with self.subTest(case_id=case.case_id):
-                result = run_case_v1(case, tie_margin=0.05)
+                result = run_case(case, tie_margin=0.05)
                 self.assertNotEqual(
                     result.attribution.predicted_label,
                     "safety_error",
                 )
 
     def test_ingestion_case_still_ingestion_error(self) -> None:
-        result = run_case_v1(self.ingestion_case)
+        result = run_case(self.ingestion_case)
         self.assertEqual(result.attribution.predicted_label, "ingestion_error")
 
     def test_v1_pipeline_runs_all_six_and_returns_results(self) -> None:
-        results = run_cases_v1(list(self.v0_cases), tie_margin=0.05)
+        results = run_cases(list(self.v0_cases), tie_margin=0.05)
         self.assertEqual(len(results), 6)
         labels = {r.attribution.predicted_label for r in results}
         self.assertEqual(labels, set(PIPELINE_LABELS_BASE))
@@ -569,29 +567,26 @@ class V1ECSCompatibilityTest(unittest.TestCase):
         cls.safety_case = load_probe_cases_v1(SAFETY_FIXTURE)[0]
 
     def test_run_case_full_v1_for_granularity_case(self) -> None:
-        from cmd_audit import run_case_full_v1
 
-        result = run_case_full_v1(self.granularity_case)
-        self.assertIn(result.audit.attribution.predicted_label, PIPELINE_LABELS)
+        result = run_case(self.granularity_case, post_repair=True)
+        self.assertIn(result.attribution.predicted_label, PIPELINE_LABELS)
         self.assertTrue(result.ecs_draft.cause)
         self.assertTrue(result.ecs_draft.corrected_memory)
 
     def test_run_case_full_v1_for_graph_case(self) -> None:
-        from cmd_audit import run_case_full_v1
 
-        result = run_case_full_v1(self.graph_case)
-        self.assertIn(result.audit.attribution.predicted_label, PIPELINE_LABELS)
+        result = run_case(self.graph_case, post_repair=True)
+        self.assertIn(result.attribution.predicted_label, PIPELINE_LABELS)
         self.assertTrue(result.ecs_draft.cause)
         self.assertTrue(result.ecs_draft.corrected_memory)
 
     def test_run_case_full_v1_for_safety_case(self) -> None:
-        from cmd_audit import run_case_full_v1
 
-        result = run_case_full_v1(self.safety_case)
-        self.assertIsNotNone(result.audit.attribution.predicted_label)
+        result = run_case(self.safety_case, post_repair=True)
+        self.assertIsNotNone(result.attribution.predicted_label)
         self.assertTrue(result.ecs_draft.cause)
         self.assertIn(
-            result.audit.attribution.predicted_label,
+            result.attribution.predicted_label,
             PIPELINE_LABELS,
         )
 

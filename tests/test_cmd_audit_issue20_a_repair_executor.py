@@ -10,12 +10,12 @@ from cmd_audit import (
     RepairOrchestrator,
     RepairOrchestratorResult,
     FailureMemoryRecord,
-    FailureMemoryStoreV1,
     load_probe_cases,
-    run_case_v1,
+    run_case,
 )
 from cmd_audit.adapters.base import Mem0Trace
 from cmd_audit.adapters.mem0 import Mem0Adapter
+from cmd_audit.repair import FailureMemoryStore, UnsupportedActionError
 
 
 RETRIEVAL_FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")
@@ -30,7 +30,7 @@ class RepairExecutorBasicTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.case = load_probe_cases(RETRIEVAL_FIXTURE)[0]
-        cls.audit = run_case_v1(cls.case)
+        cls.audit = run_case(cls.case)
         cls.trace = Mem0Trace(
             case_id=cls.case.case_id,
             add_inputs=["original"],
@@ -152,7 +152,7 @@ class RepairExecutorActionTypeTest(unittest.TestCase):
                 raise UnsupportedActionError("no actions supported")
 
         case = load_probe_cases(RETRIEVAL_FIXTURE)[0]
-        audit = run_case_v1(case)
+        audit = run_case(case)
         ecs = draft_ecs(case, audit)
         result = RepairExecutor().run(
             ecs_draft=ecs,
@@ -172,7 +172,7 @@ class RepairOrchestratorBasicTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.case = load_probe_cases(RETRIEVAL_FIXTURE)[0]
-        cls.audit = run_case_v1(cls.case)
+        cls.audit = run_case(cls.case)
         cls.trace = Mem0Trace(
             case_id=cls.case.case_id,
             add_inputs=["original"],
@@ -366,7 +366,7 @@ class RepairOrchestratorEdgeCaseTest(unittest.TestCase):
         )
         orchestrator = RepairOrchestrator(
             executor=executor,
-            fm_store=FailureMemoryStoreV1().add(record),
+            fm_store=FailureMemoryStore().add(record),
         )
         orchestrator.run(attribution=attr, case=case, adapter=object())
         self.assertIn("past wrong retrieval context", executor.fm_contexts[0])

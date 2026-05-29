@@ -118,17 +118,14 @@ python -m cmd_audit run --cases data/probe_cases/v0_issue3_cases.json
 
 ```
 data/probe_cases/*.json
-  -> models.py loaders
-  -> harness.py run_case* / run_case_full_v1
-    -> cmd_audit.baselines comparators and memory-probe baseline
-    -> replays.py V0/V1 replay portfolio
-    -> scoring.py phrase fallback or llm_scoring.py semantic scorer
-    -> attribution.py recovery-gain label assignment
-    -> post_repair.py ECS + validation
-    -> repair_executor.py / repair_orchestrator.py targeted repair loop
-    -> failure_memory.py recurrence store
-    -> provenance.py lineage tracking
-    -> writers.py CSV/text artifacts
+  -> data_io/ loaders
+  -> harness.py run_case / run_case_full / run_case_with_hook
+    -> baselines/ comparators and memory-probe baseline
+    -> replays/ V1 replay portfolio (10 replays)
+    -> scoring/ phrase fallback or LLM SubagentScorer
+    -> attribution/ recovery-gain label assignment
+    -> repair/ ECS + RepairExecutor / RepairOrchestrator + failure_memory
+    -> eval/ provenance, writers, metrics, gates
 
 cmd_audit/adapters/
   -> mem0.py / letta.py recorded-trace adapters
@@ -138,32 +135,33 @@ cmd_audit/hook/
   -> supplementary replay selection and cost-reduction analysis
 ```
 
-| Module | Role |
-|--------|------|
-| `models.py` | `ProbeCase`, `MemoryItem` dataclasses; `load_probe_cases` / `load_probe_cases_v1` loaders |
-| `labels.py` | Label registries (`V0_PIPELINE_LABELS`, `V1_PIPELINE_LABELS`, `V1_REPLAY_TO_LABEL`), `validate_v0_label` / `validate_v1_label` boundary, `DEFERRED_PIPELINE_LABELS` |
-| `replays.py` | 6 V0 replays + `oracle_route` (V1); `run_v0_replay_portfolio` / `run_v1_replay_portfolio` |
-| `attribution.py` | `assign_attribution` (V0) / `assign_attribution_v1` (V1) — ranks replays by recovery gain, handles `has_ingestion_trace` split |
-| `harness.py` | Public entry points: `run_case` / `run_case_v1`, `run_cases` / `run_cases_v1`, `run_case_full` / `run_case_full_v1`; also `run_case_with_mem0`/`run_case_with_letta` via adapters harness |
-| `adapters/` | CMD-Skill Adapter package: `base.py` (trace types, loaders), `harness.py` (adapter run helpers), `mem0.py` (Mem0Adapter + `run_mem0_replay_portfolio`, two cut points), `letta.py` (LettaAdapter + `run_letta_replay_portfolio`, three cut points) |
-| `hook/` | Current hook package: `post_retrieve_hook.py`, `rpe_judge.py`, `constants.py`; two-stage empty-context + RPE Judge top-k selector for supplementary hook analysis |
-| `post_repair.py` | `ECSDraft`, `RepairedContext`, `PostRepairResult`; `draft_ecs`, `run_post_repair_context_replay`, sandbox path validation |
-| `repair_executor.py` | `RepairExecutor`, `RepairExecutorResult`, and single-repair execution through adapter-supported actions |
-| `repair_orchestrator.py` | Iterative repair loop over `close_deltas`, stopping on recovered or exhausted candidates |
-| `repairs.py` | `TargetedRepairAction`, legacy repair mapping, repair comparison helpers |
-| `failure_memory.py` | `FailureMemoryStore`, upgraded composite retrieval key, recurrence comparison |
-| `cmd_audit/baselines/` | Comparator subpackage: evidence-recall heuristic, subagent judge, random label, llm_judge, memory-probe grid |
-| `retrieval_baselines.py` | BM25 deterministic retrieval, `RetrievalMetrics`, evidence boundary enforcement |
-| `scoring.py` | `answer_score`, `evidence_recall_from_text` (phrase-matching); preserved as default/fallback; superseded by `llm_scoring.py` (issue 0019, Decision A) |
-| `llm_client.py` | Provider-agnostic LLM API client (`generate(prompt, *, system=None) -> str`) |
-| `llm_scoring.py` | `SubagentScorer`, `EvidenceVerifier`, `AnswerVerifier`; binary atomic subagent scoring replacing phrase-matching in the LLM eval path |
-| `metrics.py` | `DiagnosisPrediction`, `DiagnosisMetrics`, `compute_diagnosis_metrics` (macro F1) |
-| `writers.py` | Shared CSV/text writers (`write_attribution_table`, `write_confusion_matrix_table`, etc.) |
-| `provenance.py` | `ProvenanceTracker`, `ProvenanceEdge`/`Citation` dataclasses, HMAC tamper detection, `get_graph_distractor_edges()` |
-| `surrogate_gap.py` | Surrogate-vs-gold recovery-gain measurement for gold-dependent labels |
-| `version_gates.py` | `GateResult`, `GateReview`, `check_v0_to_v1_gate`, `check_v1_to_v2_gate` (now with `letta_integrated` param) |
-| `cli.py` | `argparse` CLI (`cmd-audit run`) |
-| `__init__.py` | All public exports (~200 symbols) |
+| Subpackage / Module | Role |
+|---------------------|------|
+| `core/models.py` | `ProbeCase`, `MemoryItem`, `GoldEvidence`, `BaselineOutput` dataclasses |
+| `core/labels.py` | `PIPELINE_LABELS` (11), `ALL_LABELS`, `REPLAY_TO_LABEL`, `validate_label` / `validate_label_base` |
+| `core/llm_client.py` | Provider-agnostic LLM API client (`generate(prompt, *, system=None) -> str`) |
+| `data_io/` | `load_probe_cases`, `load_probe_cases_v1`, `load_all_real_cases`, `load_real_cases_by_source` |
+| `replays/` | 10 replay implementations + `run_v1_replay_portfolio`; `_scoring_bridge.py` private |
+| `attribution/` | `assign_attribution` — ranks replays by recovery gain, handles `has_ingestion_trace` split |
+| `scoring/phrase.py` | `answer_score`, `evidence_recall_from_text` (phrase-matching fallback) |
+| `scoring/llm.py` | `SubagentScorer`, `EvidenceVerifier`, `AnswerVerifier`; binary atomic subagent scoring |
+| `scoring/retrieval.py` | BM25 deterministic retrieval, `RetrievalMetrics`, evidence boundary enforcement |
+| `harness.py` | 3 public entry points: `run_case`, `run_cases`, `run_real_suite`; kwargs control hook/repair/post_repair |
+| `adapters/` | CMD-Skill Adapter package: `base.py`, `harness.py`, `mem0.py` (2 cut points), `letta.py` (3 cut points) |
+| `hook/` | Two-stage hook: `post_retrieve_hook.py`, `rpe_judge.py`, `constants.py` |
+| `repair/post_repair.py` | `ECSDraft`, `RepairedContext`, `PostRepairResult`; `draft_ecs`, `run_post_repair_context_replay` |
+| `repair/executor.py` | `RepairExecutor`, `RepairExecutorResult`; single-repair execution |
+| `repair/orchestrator.py` | Iterative repair loop over `close_deltas` |
+| `repair/actions.py` | `RepairAction`, `TargetedRepairAction`, action_type taxonomy, tool schema |
+| `repair/failure_memory.py` | `FailureMemoryStore`, composite retrieval key, recurrence comparison |
+| `baselines/` | Comparator subpackage: evidence-recall, subagent judge, random label, llm_judge, memory-probe grid |
+| `eval/metrics.py` | `DiagnosisPrediction`, `DiagnosisMetrics`, `compute_diagnosis_metrics` (macro F1) |
+| `eval/writers.py` | Shared CSV/text writers (`write_attribution_table`, `write_confusion_matrix_table`, etc.) |
+| `eval/provenance.py` | `ProvenanceTracker`, HMAC tamper detection, `get_graph_distractor_edges()` |
+| `eval/surrogate_gap.py` | Surrogate-vs-gold recovery-gain measurement for gold-dependent labels |
+| `eval/release_gates.py` | `GateResult`, `GateReview`, `check_v0_to_v1_gate`, `check_v1_to_v2_gate` |
+| `cli.py` | `argparse` CLI (`cmd-audit run`, `cmd-audit run-v1`) |
+| `__init__.py` | ~132 public exports (paper-facing surface) |
 
 ### Test Files
 

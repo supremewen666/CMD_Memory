@@ -8,7 +8,6 @@ import unittest
 from cmd_audit import (
     PIPELINE_LABELS_BASE,
     compute_diagnosis_metrics,
-    diagnosis_predictions,
     load_probe_cases,
     run_case,
 )
@@ -22,6 +21,7 @@ from cmd_audit.adapters import (
     run_mem0_replay_portfolio,
 )
 from cmd_audit.adapters.base import load_mem0_traces as _load_traces
+from cmd_audit.harness import diagnosis_predictions
 
 V0_SMOKE = Path("data/probe_cases/v0_issue3_cases.json")
 MEM0_TRACES = Path("data/probe_cases/mem0_v0_smoke_traces.json")

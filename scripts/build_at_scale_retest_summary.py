@@ -21,8 +21,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cmd_audit.core.labels import PIPELINE_LABEL_ORDER, REPLAY_TO_LABEL
-from cmd_audit.metrics import DiagnosisPrediction, compute_diagnosis_metrics
-from cmd_audit.core.models import ProbeCase, load_real_cases_by_source
+from cmd_audit.eval.metrics import DiagnosisPrediction, compute_diagnosis_metrics
+from cmd_audit.core.models import ProbeCase
+from cmd_audit.data_io import load_real_cases_by_source
 
 
 # DiagnosisPrediction still requires a numeric cost. This sentinel is only for

@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 
 from cmd_audit import (
-    FullAuditResult,
+    AuditResult,
     RepairClaimLedger,
     RepairComparisonRow,
     TargetedRepairAction,
@@ -14,12 +14,12 @@ from cmd_audit import (
     get_targeted_repair_action,
     load_probe_cases,
     make_repair_comparison,
-    run_cases_full,
-    write_repair_success_table_from_full,
+    run_cases,
     PIPELINE_LABELS_BASE_ORDER,
     PIPELINE_LABEL_ORDER,
 )
 from cmd_audit.core.labels import LabelValidationError
+from cmd_audit.harness import write_repair_success_table_from_full
 
 
 ISSUE_3_CASES = Path("data/probe_cases/v0_issue3_cases.json")
@@ -80,7 +80,7 @@ class RepairComparisonRowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.cases = load_probe_cases(ISSUE_3_CASES)
-        cls.full_results = run_cases_full(cls.cases)
+        cls.full_results = run_cases(cls.cases, post_repair=True)
         cls.rows = [make_repair_comparison(fr) for fr in cls.full_results]
 
     def test_one_row_per_case(self) -> None:
@@ -146,7 +146,7 @@ class RepairSuccessSummaryTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.cases = load_probe_cases(ISSUE_3_CASES)
-        cls.full_results = run_cases_full(cls.cases)
+        cls.full_results = run_cases(cls.cases, post_repair=True)
         cls.rows = [make_repair_comparison(fr) for fr in cls.full_results]
         cls.summaries = compute_repair_success_summary(cls.rows)
 
@@ -226,7 +226,7 @@ class ClaimLedgerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.cases = load_probe_cases(ISSUE_3_CASES)
-        cls.full_results = run_cases_full(cls.cases)
+        cls.full_results = run_cases(cls.cases, post_repair=True)
         cls.rows = [make_repair_comparison(fr) for fr in cls.full_results]
         cls.summaries = compute_repair_success_summary(cls.rows)
         cls.ledger = build_repair_claim_ledger(cls.summaries)
@@ -276,7 +276,7 @@ class RepairSuccessTableTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.cases = load_probe_cases(ISSUE_3_CASES)
-        cls.full_results = run_cases_full(cls.cases)
+        cls.full_results = run_cases(cls.cases, post_repair=True)
 
     def test_repair_success_table_writes_comparison_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -358,25 +358,25 @@ class FullPipelinePerLabelTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.cases = load_probe_cases(ISSUE_3_CASES)
-        cls.full_results = run_cases_full(cls.cases)
+        cls.full_results = run_cases(cls.cases, post_repair=True)
 
     def test_all_six_cases_produce_full_results(self) -> None:
         self.assertEqual(len(self.full_results), 6)
         for fr in self.full_results:
-            self.assertIsInstance(fr, FullAuditResult)
+            self.assertIsInstance(fr, AuditResult)
 
     def test_all_cases_have_valid_attribution(self) -> None:
         for fr in self.full_results:
-            with self.subTest(case_id=fr.audit.case_id):
+            with self.subTest(case_id=fr.case_id):
                 self.assertEqual(
-                    fr.audit.perturbation_label,
-                    fr.audit.attribution.predicted_label,
-                    f"{fr.audit.case_id}: attribution must match perturbation label",
+                    fr.perturbation_label,
+                    fr.attribution.predicted_label,
+                    f"{fr.case_id}: attribution must match perturbation label",
                 )
 
     def test_targeted_repair_differs_from_hard_case_baseline(self) -> None:
         for fr in self.full_results:
-            with self.subTest(case_id=fr.audit.case_id):
+            with self.subTest(case_id=fr.case_id):
                 ecs = fr.ecs_draft
                 ctx = fr.repaired_context
                 self.assertNotIn(
@@ -399,7 +399,7 @@ class FullPipelinePerLabelTest(unittest.TestCase):
 
     def test_hard_case_baseline_differs_from_targeted(self) -> None:
         for fr in self.full_results:
-            with self.subTest(case_id=fr.audit.case_id):
+            with self.subTest(case_id=fr.case_id):
                 hard = fr.hard_case_baseline
                 self.assertIn(
                     hard.repair_assessment, ("recovered", "partial", "failed")

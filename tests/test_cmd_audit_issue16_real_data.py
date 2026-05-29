@@ -10,9 +10,8 @@ from cmd_audit import (
     PIPELINE_LABELS,
     load_probe_cases,
     load_probe_cases_v1,
-    run_case_v1,
-    run_case_full_v1,
-    run_cases_v1,
+    run_case,
+    run_cases,
     validate_label_base,
     validate_label,
 )
@@ -25,7 +24,7 @@ from cmd_audit.baselines.memory_probe import (
     run_memory_probe_baselines,
     run_memory_probe_case,
 )
-from cmd_audit.metrics import DiagnosisPrediction, compute_diagnosis_metrics
+from cmd_audit.eval.metrics import DiagnosisPrediction, compute_diagnosis_metrics
 
 REAL_LONGMEMEVAL = Path("data/probe_cases/real_longmemeval_cases.json")
 REAL_MEMORYARENA = Path("data/probe_cases/real_memoryarena_cases.json")
@@ -138,19 +137,19 @@ class NullPerturbationLabelTest(unittest.TestCase):
 
     def test_null_label_case_runs_v1_pipeline(self) -> None:
         case = load_probe_cases_v1(NULL_LABEL_FIXTURE)[0]
-        result = run_case_v1(case)
+        result = run_case(case)
         self.assertIsNone(result.perturbation_label)
         self.assertIsNotNone(result.attribution)
         self.assertIsNotNone(result.attribution.predicted_label)
 
     def test_null_label_attribution_correct_is_none(self) -> None:
         case = load_probe_cases_v1(NULL_LABEL_FIXTURE)[0]
-        result = run_case_v1(case)
+        result = run_case(case)
         self.assertIsNone(result.attribution_correct)
 
     def test_null_label_case_runs_full_pipeline(self) -> None:
         case = load_probe_cases_v1(NULL_LABEL_FIXTURE)[0]
-        result = run_case_full_v1(case)
+        result = run_case(case, post_repair=True)
         self.assertIsNotNone(result.ecs_draft)
         self.assertIsNotNone(result.post_repair)
         self.assertIsNotNone(result.post_repair.repair_assessment)
@@ -198,7 +197,7 @@ class NullPerturbationLabelTest(unittest.TestCase):
         null_cases = load_probe_cases_v1(NULL_LABEL_FIXTURE)
         labeled_cases = load_probe_cases_v1(V0_SMOKE)
         mixed = null_cases + labeled_cases
-        results = run_cases_v1(mixed)
+        results = run_cases(mixed)
         self.assertEqual(len(results), len(mixed))
         null_results = [r for r in results if r.perturbation_label is None]
         labeled_results = [r for r in results if r.perturbation_label is not None]
@@ -211,7 +210,7 @@ class NullPerturbationLabelTest(unittest.TestCase):
 
     def test_diagnosis_predictions_passthrough_null_labels(self) -> None:
         null_case = load_probe_cases_v1(NULL_LABEL_FIXTURE)[0]
-        result = run_case_v1(null_case)
+        result = run_case(null_case)
         preds = diagnosis_predictions(result)
         for pred in preds:
             self.assertIsNone(pred.gold_label)
@@ -293,7 +292,7 @@ class ComparisonMetricsTest(unittest.TestCase):
 
     def test_metrics_table_includes_memory_probe_column(self) -> None:
         cases = load_probe_cases_v1(V0_SMOKE)
-        results = run_cases_v1(cases)
+        results = run_cases(cases)
         output = Path("artifacts/sandbox/test_issue16_metrics_mixed.csv")
         write_comparison_metrics_table(
             results, output, memory_probe_best_accuracy=0.420
@@ -307,7 +306,7 @@ class ComparisonMetricsTest(unittest.TestCase):
         null_cases = load_probe_cases_v1(NULL_LABEL_FIXTURE)
         labeled_cases = load_probe_cases_v1(V0_SMOKE)
         mixed = null_cases + labeled_cases
-        results = run_cases_v1(mixed)
+        results = run_cases(mixed)
         mp_result = run_memory_probe_baselines(mixed)
         output = Path("artifacts/sandbox/test_issue16_metrics_null_mixed.csv")
         write_comparison_metrics_table(
@@ -320,7 +319,7 @@ class ComparisonMetricsTest(unittest.TestCase):
 
     def test_metrics_table_without_memory_probe_omits_column(self) -> None:
         cases = load_probe_cases_v1(V0_SMOKE)
-        results = run_cases_v1(cases)
+        results = run_cases(cases)
         output = Path("artifacts/sandbox/test_issue16_metrics_no_mp.csv")
         write_comparison_metrics_table(results, output)
         content = output.read_text()
@@ -332,7 +331,7 @@ class ComparisonMetricsTest(unittest.TestCase):
             load_probe_cases_v1(REAL_LONGMEMEVAL)[:10]
             + load_probe_cases_v1(REAL_MEMORYARENA)[:10]
         )
-        results = run_cases_v1(cases)
+        results = run_cases(cases)
         mp_result = run_memory_probe_baselines(cases)
         output = Path("artifacts/sandbox/test_issue16_metrics_real.csv")
         write_comparison_metrics_table(

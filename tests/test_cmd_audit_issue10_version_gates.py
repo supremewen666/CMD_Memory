@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cmd_audit.version_gates import (
+from cmd_audit.eval.release_gates import (
     GateCriterion,
     GateResult,
     GateReview,

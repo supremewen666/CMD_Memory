@@ -1,6 +1,6 @@
 import unittest
 
-from cmd_audit.agreement import cohen_kappa
+from cmd_audit.eval.agreement import cohen_kappa
 
 
 class CohenKappaTest(unittest.TestCase):

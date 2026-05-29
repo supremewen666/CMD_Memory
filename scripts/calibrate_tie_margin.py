@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cmd_audit.core.labels import REPLAY_TO_LABEL
-from cmd_audit.core.models import load_real_cases_by_source
+from cmd_audit.data_io import load_real_cases_by_source
 
 
 @dataclass(frozen=True)

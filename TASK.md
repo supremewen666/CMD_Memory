@@ -4,9 +4,11 @@
 
 (CLAUDE.md covers remaining required reading.)
 
-## Current State (2026-05-24)
+## Current State (2026-05-29)
 
-**803 tests pass.** V0 complete and locked. V1 issues 0011-0021 complete. V0→V1 gate HITL approved and V1→V2 gate passes (mem0 + Letta) as mechanics validation. Decision 34 (2026-05-23/24, R1-R11) reframes the 596-case Macro F1 = 1.000 as a phrase-match shortcut artifact, not paper-grade evidence. Paper headline now binds to 130 researcher-adjudicated cases with LLM-A + blind spot-check; hook is supplementary; CMD vs Rewind head-to-head is dropped in favor of layered positioning. **Issue 0020 complete (Decision 32 post-gate pipeline): all 8 subtasks done, 91 new tests, 0 regressions.**
+**943 tests pass** (17 pre-existing failures unrelated to refactor). V0 complete and locked. V1 issues 0011-0021 complete. V0→V1 gate HITL approved and V1→V2 gate passes (mem0 + Letta) as mechanics validation. Decision 34 (2026-05-23/24, R1-R11) reframes the 596-case Macro F1 = 1.000 as a phrase-match shortcut artifact, not paper-grade evidence. Paper headline now binds to 130 researcher-adjudicated cases with LLM-A + blind spot-check; hook is supplementary; CMD vs Rewind head-to-head is dropped in favor of layered positioning. **Issue 0020 complete (Decision 32 post-gate pipeline): all 8 subtasks done, 91 new tests, 0 regressions.**
+
+**W1 Refactor (D35 Route E) complete (2026-05-29):** 10-subpackage layout, 3 entry points (`run_case`/`run_cases`/`run_real_suite`), all `_v1` suffixes dropped, `__init__.py` trimmed from 190 → 132 symbols, `ALL_LABELS` added, CLAUDE.md + current-memory.md updated.
 
 | Issue | Content | Tests | Status |
 |-------|---------|-------|--------|
@@ -38,7 +40,7 @@
 | 0020-A | RepairExecutor + RepairOrchestrator (iterative repair) | 15 | ✅ |
 | 0020-G | ECS iterative repair (draft_ecs_for_label) | 9 | ✅ |
 | 0020-F | PreCmdDecision signals → AuditResult | 6 | ✅ |
-| 0020-C | run_case_v1_with_hook + RepairOrchestrator integration | 6 | ✅ |
+| 0020-C | `run_case(repair=adapter)` + RepairOrchestrator integration | 6 | ✅ |
 | 0020-E | Self-supervision surrogate (surrogate vs gold gap) | 11 | ✅ |
 
 Detail maps: `cmd_innovation_core/issues/0003-*.md`, `0005-*.md`, `0006-*.md`, `0007-*.md`, `0008-*.md`, `0011-*.md`, `0012-*.md`, `0013-*.md`, `0014-*.md`, `0015-*.md`, `0017-*.md`, `0017-1-*.md`, `0019-phase-a-*.md`, `0019-phase-b-*.md`, `0018-pre-cmd-hook-design.md`, `0021-hook-redesign-three-stage-rpe-judge.md`, `0020-h-*.md`, `0020-b-*.md`, `0020-d-*.md`, `0020-a-*.md`, `0020-g-*.md`, `0020-f-*.md`, `0020-c-*.md`, `0020-e-*.md`.

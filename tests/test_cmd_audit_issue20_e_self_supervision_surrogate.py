@@ -4,7 +4,6 @@ from pathlib import Path
 import unittest
 
 from cmd_audit import (
-    GOLD_DEPENDENT_LABELS,
     SurrogateGapRow,
     SurrogateGapSummary,
     compute_surrogate_gap_summary,
@@ -12,6 +11,7 @@ from cmd_audit import (
     measure_surrogate_gap,
     measure_surrogate_gaps,
 )
+from cmd_audit.eval import GOLD_DEPENDENT_LABELS
 
 
 WRITE_FIXTURE = Path("data/probe_cases/v0_issue3_cases.json")

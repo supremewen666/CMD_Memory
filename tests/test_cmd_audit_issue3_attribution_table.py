@@ -81,7 +81,7 @@ class VerbatimEventOracleBoundaryTest(unittest.TestCase):
         for label, result in by_label.items():
             self.assertEqual(result.attribution.predicted_label, label)
             self.assertEqual(result.attribution.top_replay, expected_top_replays[label])
-            self.assertEqual(len(result.replays), len(PIPELINE_LABELS_BASE_ORDER))
+            self.assertEqual(len(result.replays), 10)
             self.assertTrue(result.attribution_correct)
 
     def test_confusion_matrix_contains_one_diagonal_count_per_v0_label(self) -> None:

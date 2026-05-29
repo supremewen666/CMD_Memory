@@ -6,8 +6,8 @@ import hashlib
 import hmac
 import time
 
-from .core.models import Citation, MemoryItem, ProbeCase, ProvenanceEdge
-from .replays import ReplayResult
+from cmd_audit.core.models import Citation, MemoryItem, ProbeCase, ProvenanceEdge
+from cmd_audit.replays import ReplayResult
 
 
 def _compute_hmac(content: str, session_key: str) -> str:

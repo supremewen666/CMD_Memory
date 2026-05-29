@@ -10,7 +10,7 @@ from cmd_audit.baselines.comparators import (
     validate_monitor_payload,
 )
 from cmd_audit.harness import diagnosis_predictions, write_comparison_metrics_table
-from cmd_audit.metrics import compute_diagnosis_metrics
+from cmd_audit.eval.metrics import compute_diagnosis_metrics
 
 
 FIXTURE = Path("data/probe_cases/v0_retrieval_error_case.json")

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .core.labels import PIPELINE_LABELS_BASE_ORDER
+from cmd_audit.core.labels import PIPELINE_LABELS_BASE_ORDER
 from .provenance import detect_tamper
 from .writers import write_text_artifact
 

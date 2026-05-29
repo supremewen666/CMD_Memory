@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cmd_audit.agreement import cohen_kappa
+from cmd_audit.eval.agreement import cohen_kappa
 
 
 @dataclass(frozen=True)

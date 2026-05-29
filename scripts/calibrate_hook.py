@@ -33,9 +33,9 @@ from cmd_audit.hook.rpe_judge import extract_features, score_replays
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.scoring import SubagentScorer
 from cmd_audit.core.models import ProbeCase, RetrievedItem
-from cmd_audit.replays import run_v1_replay_portfolio
+from cmd_audit.replays import run_replay_portfolio
 from cmd_audit.scoring import evidence_recall_from_text
-from cmd_audit.surrogate_gap import (
+from cmd_audit.eval.surrogate_gap import (
     compute_surrogate_gap_summary,
     measure_surrogate_gaps,
 )
@@ -107,7 +107,7 @@ def build_training_set(
 
     for case in cases:
         retrieved_items = retrieved_items_from(case)
-        replays = run_v1_replay_portfolio(case, scorer=scorer)
+        replays = run_replay_portfolio(case, scorer=scorer)
         gain_by_replay = {replay.replay_name: replay.recovery_gain for replay in replays}
         for replay_name in hook_constants.V1_REPLAY_NAME_ORDER:
             rows.append(extract_features(case.query, retrieved_items, replay_name))
@@ -276,7 +276,7 @@ def calibrate_thresholds(
     gold_by_case: dict[str, bool] = {}
     gain_by_case: dict[str, dict[str, float]] = {}
     for case in holdout_cases:
-        replays = run_v1_replay_portfolio(case)
+        replays = run_replay_portfolio(case)
         gains = {replay.replay_name: replay.recovery_gain for replay in replays}
         gain_by_case[case.case_id] = gains
         gold_by_case[case.case_id] = any(gain > 0.0 for gain in gains.values())

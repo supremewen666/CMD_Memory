@@ -6,10 +6,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .attribution import AttributionResult, assign_attribution, assign_attribution_v1
+from .attribution import AttributionResult, assign_attribution
 from cmd_audit.baselines.comparators import BaselineSuiteResult, run_baseline_suite
-from .metrics import DiagnosisPrediction, compute_diagnosis_metrics
-from .core.models import ProbeCase, RetrievedItem, load_all_real_cases
+from .eval import DiagnosisPrediction, compute_diagnosis_metrics
+from .core.models import ProbeCase, RetrievedItem
+from .data_io import load_all_real_cases
 from .repair import (
     ECSDraft,
     PostRepairResult,
@@ -19,7 +20,7 @@ from .repair import (
     run_hard_case_update_baseline,
     run_post_repair_context_replay,
 )
-from .provenance import (
+from .eval import (
     ProvenanceTracker,
     get_graph_distractor_edges,
 )
@@ -33,12 +34,11 @@ from .replays import (
     AgentGenerate,
     EvidenceScorer,
     ReplayResult,
-    run_v0_replay_portfolio,
-    run_v1_replay_portfolio,
-    run_v1_replay_portfolio_subset,
+    run_replay_portfolio,
+    run_replay_portfolio_subset,
 )
 from .scoring import answer_score, evidence_recall_from_text
-from .writers import (
+from .eval import (
     write_attribution_table,
     write_confusion_matrix_table,
     write_csv_table,
@@ -62,6 +62,16 @@ class AuditResult:
     hook_stage: str = ""  # 0020-F/0021: empty_ctx | rpe_top_k | rpe_below_threshold | ""
     selected_replays: tuple[str, ...] = ()  # 0020-F/0021: hook-selected top-k replays
     per_replay_scores: tuple = ()  # 0020-F/0021: ReplayScore per replay
+    # Day-6 unification: full ECS + post-repair pipeline fields (populated when
+    # ``run_case(post_repair=True)`` runs; otherwise None).
+    ecs_draft: ECSDraft | None = None
+    repaired_context: RepairedContext | None = None
+    post_repair: PostRepairResult | None = None
+    hard_case_baseline: PostRepairResult | None = None
+    # Day-6 unification: iterative-repair fields (populated when
+    # ``run_case(repair=adapter)`` runs).
+    orchestrator_result: Any = None
+    repaired: bool = False
 
     @property
     def attribution_correct(self) -> bool | None:
@@ -90,97 +100,99 @@ class AuditResult:
         raise KeyError(f"{self.case_id}: replay {replay_name!r} did not run")
 
 
-@dataclass(frozen=True)
-class FullAuditResult:
-    """Complete CMD-Audit pipeline result including Post-Repair Context Replay."""
-
-    audit: AuditResult
-    ecs_draft: ECSDraft
-    repaired_context: RepairedContext
-    post_repair: PostRepairResult
-    hard_case_baseline: PostRepairResult
-
-
-def run_case_full(case: ProbeCase) -> FullAuditResult:
-    """Run the complete V0 pipeline: attribution -> ECS -> repair -> post-repair replay."""
-    audit = run_case(case)
-    ecs_draft = draft_ecs(case, audit)
-    repaired_context = build_repaired_context(case, ecs_draft)
-    post_repair = run_post_repair_context_replay(case, repaired_context)
-    hard_case_baseline = run_hard_case_update_baseline(case)
-    return FullAuditResult(
-        audit=audit,
-        ecs_draft=ecs_draft,
-        repaired_context=repaired_context,
-        post_repair=post_repair,
-        hard_case_baseline=hard_case_baseline,
-    )
-
-
 def run_case(
     case: ProbeCase,
     *,
+    hook: bool | str | None = None,
+    repair: Any = None,
+    post_repair: bool = False,
     scorer: EvidenceScorer | None = None,
+    evidence_scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
     answer_verifier: Any = None,
     on_the_fly_baseline_rescore: bool = False,
+    top_k: int = 2,
+    tie_margin: float = 0.0,
+    partial_threshold: float = 0.5,
+    mode: str = "online",
+    fm_context: str = "",
+    close_deltas_threshold: float = 0.0,
+    repair_llm_client: Any = None,
+    require_llm_repair_action: bool = False,
 ) -> AuditResult:
-    baseline_suite = run_baseline_suite(case)
-    baseline = case.primary_baseline
-    baseline_evidence_score_llm, baseline_answer_score_llm = _score_baseline_with_agent(
+    """Run the CMD-Audit pipeline for a single case.
+
+    Produces a single :class:`AuditResult` over the 11 pipeline labels. Optional
+    stages are gated by keyword, all writing into the same result object:
+
+    * ``hook`` — run the two-stage Pre-CMD Hook before attribution. ``True`` uses
+      an empty adapter name; a ``str`` is taken as the adapter name. When the hook
+      skips, ``attribution`` is ``None`` and ``replays`` is empty.
+    * ``repair`` — a CMD-Skill adapter; runs the RepairOrchestrator after
+      attribution (implies ``hook``). Populates ``orchestrator_result`` / ``repaired``.
+    * ``post_repair`` — run the full ECS + Post-Repair Context Replay pipeline.
+      Populates ``ecs_draft`` / ``repaired_context`` / ``post_repair`` /
+      ``hard_case_baseline``. Mutually exclusive with ``repair``.
+    """
+    if post_repair and repair is not None:
+        raise ValueError("run_case: post_repair and repair are mutually exclusive")
+    if repair is not None and not hook:
+        hook = True  # the repair pipeline depends on the hook decision
+
+    if repair is not None:
+        return _run_repair(
+            case,
+            adapter=repair,
+            hook=hook,
+            fm_context=fm_context,
+            close_deltas_threshold=close_deltas_threshold,
+            scorer=scorer,
+            agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
+            on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
+            tie_margin=tie_margin,
+            mode=mode,
+            repair_llm_client=repair_llm_client,
+            require_llm_repair_action=require_llm_repair_action,
+        )
+    if hook:
+        adapter_name = hook if isinstance(hook, str) else ""
+        return _run_with_hook(
+            case,
+            adapter_name=adapter_name,
+            mode=mode,
+            tie_margin=tie_margin,
+            scorer=scorer,
+            agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
+            on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
+        )
+    if post_repair:
+        return _run_full(
+            case,
+            top_k=top_k,
+            tie_margin=tie_margin,
+            scorer=scorer,
+            evidence_scorer=evidence_scorer,
+            agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
+            partial_threshold=partial_threshold,
+            on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
+        )
+    return _run_attribution(
         case,
-        agent_generate=agent_generate,
-        scorer=scorer,
-        answer_verifier=answer_verifier,
-        enabled=on_the_fly_baseline_rescore,
-    )
-    replays = run_v0_replay_portfolio(
-        case,
+        top_k=top_k,
+        tie_margin=tie_margin,
         scorer=scorer,
         agent_generate=agent_generate,
         answer_verifier=answer_verifier,
-    )
-    replays = _apply_dual_axis_recovery_gain(
-        replays,
-        baseline_evidence_llm=(
-            baseline_evidence_score_llm
-            if baseline_evidence_score_llm is not None
-            else baseline.evidence_score
-        ),
-        baseline_answer_llm=(
-            baseline_answer_score_llm
-            if baseline_answer_score_llm is not None
-            else baseline.answer_score
-        ),
-    )
-    attribution = assign_attribution(
-        replays,
-        positive_gain_threshold=0.0,
-        use_extended_labels=False,
-        separate_reasoning_axis=False,
-    )
-    if attribution.attribution_failed:
-        attribution = None
-    return AuditResult(
-        case_id=case.case_id,
-        perturbation_label=case.perturbation_label,
-        baseline_name=baseline.baseline_name,
-        baseline_answer_score=baseline.answer_score,
-        baseline_evidence_score=baseline.evidence_score,
-        replays=replays,
-        attribution=attribution,
-        baseline_suite=baseline_suite,
-        baseline_evidence_score_llm=baseline_evidence_score_llm,
-        baseline_answer_score_llm=baseline_answer_score_llm,
+        on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
     )
 
 
 def run_cases(cases: list[ProbeCase], **kwargs) -> list[AuditResult]:
+    """Run :func:`run_case` over a list of cases with shared keyword arguments."""
     return [run_case(case, **kwargs) for case in cases]
-
-
-def run_cases_full(cases: list[ProbeCase]) -> list[FullAuditResult]:
-    return [run_case_full(case) for case in cases]
 
 
 def _score_baseline_with_agent(
@@ -308,7 +320,7 @@ def _with_llm_baseline_recovery_gain(
 
 
 def write_repair_success_table_from_full(
-    results: list[FullAuditResult],
+    results: list[AuditResult],
     output_path: str | Path,
     *,
     sandbox_root: str | Path | None = None,
@@ -415,10 +427,10 @@ def write_comparison_metrics_table(
     write_csv_table(output_path, fieldnames, rows)
 
 
-# ── V1 Pipeline ────────────────────────────────────────────────────────
+# ── Private pipeline helpers (Day-6 unified harness) ─────────────────────
 
 
-def run_case_v1(
+def _run_attribution(
     case: ProbeCase,
     *,
     top_k: int = 2,
@@ -428,7 +440,7 @@ def run_case_v1(
     answer_verifier: Any = None,
     on_the_fly_baseline_rescore: bool = False,
 ) -> AuditResult:
-    """Run the V1 pipeline: 10-replay portfolio + V1 attribution."""
+    """Run the 10-replay portfolio + 11-label attribution (no hook, no repair)."""
     baseline_suite = run_baseline_suite(case)
     baseline = case.primary_baseline
     tracker = ProvenanceTracker(case.case_id)
@@ -439,7 +451,7 @@ def run_case_v1(
         answer_verifier=answer_verifier,
         enabled=on_the_fly_baseline_rescore,
     )
-    replays = run_v1_replay_portfolio(
+    replays = run_replay_portfolio(
         case,
         tracker=tracker,
         scorer=scorer,
@@ -470,7 +482,7 @@ def run_case_v1(
         distractor_edges = get_graph_distractor_edges(case, graph_off_replay)
 
     gold_stores, queried_stores = _derive_store_sets(case)
-    attribution = assign_attribution_v1(
+    attribution = assign_attribution(
         replays,
         has_ingestion_trace=case.has_ingestion_trace,
         positive_gain_threshold=0.0,
@@ -480,6 +492,8 @@ def run_case_v1(
         gold_stores=gold_stores,
         queried_stores=queried_stores,
         default_store=case.default_store,
+        use_extended_labels=True,
+        separate_reasoning_axis=True,
     )
     if attribution.attribution_failed:
         attribution = None
@@ -497,11 +511,7 @@ def run_case_v1(
     )
 
 
-def run_cases_v1(cases: list[ProbeCase], *, top_k: int = 2, **kwargs) -> list[AuditResult]:
-    return [run_case_v1(case, top_k=top_k, **kwargs) for case in cases]
-
-
-def run_case_full_v1(
+def _run_full(
     case: ProbeCase,
     *,
     top_k: int = 2,
@@ -512,9 +522,9 @@ def run_case_full_v1(
     answer_verifier=None,
     partial_threshold: float = 0.5,
     on_the_fly_baseline_rescore: bool = False,
-) -> FullAuditResult:
-    """Run the complete V1 pipeline: attribution -> ECS -> repair -> post-repair replay."""
-    audit = run_case_v1(
+) -> AuditResult:
+    """Run attribution -> ECS -> repair -> post-repair replay, folded into one result."""
+    audit = _run_attribution(
         case,
         top_k=top_k,
         tie_margin=tie_margin,
@@ -541,8 +551,8 @@ def run_case_full_v1(
         answer_verifier=answer_verifier,
         partial_threshold=partial_threshold,
     )
-    return FullAuditResult(
-        audit=audit,
+    return replace(
+        audit,
         ecs_draft=ecs_draft,
         repaired_context=repaired_context,
         post_repair=post_repair,
@@ -550,20 +560,13 @@ def run_case_full_v1(
     )
 
 
-def run_cases_full_v1(
-    cases: list[ProbeCase], *, top_k: int = 2, **kwargs
-) -> list[FullAuditResult]:
-    return [run_case_full_v1(case, top_k=top_k, **kwargs) for case in cases]
-
-
 # ── V1 Hook Pipeline (issue 0021) ───────────────────────────────────────
 
 
-def run_case_v1_with_hook(
+def _run_with_hook(
     case: ProbeCase,
     *,
     adapter_name: str = "",
-    agent_confidence: float | None = None,
     mode: str = "online",
     tie_margin: float = 0.0,
     scorer: EvidenceScorer | None = None,
@@ -576,7 +579,6 @@ def run_case_v1_with_hook(
     When the hook skips, returns an AuditResult with ``attribution=None``.
     When it triggers, only ``decision.selected_replays`` are run.
     """
-    del agent_confidence
     baseline_suite = run_baseline_suite(case)
     baseline = case.primary_baseline
     baseline_evidence_score_llm, baseline_answer_score_llm = _score_baseline_with_agent(
@@ -621,7 +623,7 @@ def run_case_v1_with_hook(
         )
 
     tracker = ProvenanceTracker(case.case_id)
-    replays = run_v1_replay_portfolio_subset(
+    replays = run_replay_portfolio_subset(
         case,
         decision.selected_replays,
         tracker=tracker,
@@ -651,7 +653,7 @@ def run_case_v1_with_hook(
                 break
 
     gold_stores, queried_stores = _derive_store_sets(case)
-    attribution = assign_attribution_v1(
+    attribution = assign_attribution(
         replays,
         has_ingestion_trace=case.has_ingestion_trace,
         positive_gain_threshold=0.0,
@@ -661,6 +663,8 @@ def run_case_v1_with_hook(
         gold_stores=gold_stores,
         queried_stores=queried_stores,
         default_store=case.default_store,
+        use_extended_labels=True,
+        separate_reasoning_axis=True,
     )
     if attribution.attribution_failed:
         attribution = None
@@ -682,58 +686,49 @@ def run_case_v1_with_hook(
     )
 
 
-def run_cases_v1_with_hook(
-    cases: list[ProbeCase], **kwargs
-) -> list[AuditResult]:
-    """Batch wrapper for ``run_case_v1_with_hook``."""
-    return [run_case_v1_with_hook(case, **kwargs) for case in cases]
-
-
 # ── V1 Hook + Repair Integration (issue 0020-C) ─────────────────────────
 
 
-def run_case_v1_with_hook_and_repair(
+def _run_repair(
     case: ProbeCase,
     *,
     adapter,
+    hook: bool | str = True,
     fm_context: str = "",
     close_deltas_threshold: float = 0.0,
     scorer: EvidenceScorer | None = None,
     agent_generate: AgentGenerate | None = None,
+    answer_verifier: Any = None,
+    on_the_fly_baseline_rescore: bool = False,
+    tie_margin: float = 0.0,
+    mode: str = "online",
     repair_llm_client=None,
     require_llm_repair_action: bool = False,
-    **hook_kwargs,
-) -> dict:
-    """Run V1 pipeline with Pre-CMD Hook + RepairOrchestrator (online mode).
+) -> AuditResult:
+    """Run Pre-CMD Hook + attribution + RepairOrchestrator, folded into one result.
 
-    Integrates the full pipeline: hook → attribution → RepairOrchestrator →
-    iterative repair → result with all attempts.
-
-    Args:
-        case: The probe case.
-        adapter: CMD-Skill Adapter with supported_actions and apply_repair.
-        fm_context: Failure Memory diagnostic context.
-        close_deltas_threshold: Minimum gain for close_deltas inclusion.
-        **hook_kwargs: Passed to post_retrieve_hook.
-
-    Returns:
-        Dict with audit_result, orchestrator_result, and metadata.
+    Populates ``orchestrator_result`` and ``repaired`` on the returned
+    :class:`AuditResult`. When the hook skips or attribution fails, returns the
+    audit with ``orchestrator_result=None`` and ``repaired=False``.
     """
     from .repair import RepairOrchestrator
 
     # Step 1: Run hook + attribution
-    audit = run_case_v1_with_hook(
-        case, scorer=scorer, agent_generate=agent_generate, **hook_kwargs
+    adapter_name = hook if isinstance(hook, str) else ""
+    audit = _run_with_hook(
+        case,
+        adapter_name=adapter_name,
+        mode=mode,
+        tie_margin=tie_margin,
+        scorer=scorer,
+        agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
+        on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
     )
 
     # Step 2: If attribution failed or hook skipped, return early
     if audit.attribution is None:
-        return {
-            "case_id": case.case_id,
-            "audit": audit,
-            "orchestrator_result": None,
-            "repaired": False,
-        }
+        return audit
 
     # Step 3: Run RepairOrchestrator for iterative repair
     from .repair import RepairExecutor
@@ -753,18 +748,17 @@ def run_case_v1_with_hook_and_repair(
         close_deltas_threshold=close_deltas_threshold,
     )
 
-    return {
-        "case_id": case.case_id,
-        "audit": audit,
-        "orchestrator_result": orch_result,
-        "repaired": orch_result.recovered,
-    }
+    return replace(
+        audit,
+        orchestrator_result=orch_result,
+        repaired=orch_result.recovered,
+    )
 
 
 # ── Full Real-Data Suite (issue 0016) ─────────────────────────────────────
 
 
-def run_full_real_suite(
+def run_real_suite(
     *,
     out_dir: str | Path = "artifacts/sandbox",
     use_hook: bool = True,
@@ -775,9 +769,9 @@ def run_full_real_suite(
     tie_margin: float = 0.0,
     on_the_fly_baseline_rescore: bool = False,
 ) -> list[AuditResult]:
-    """Run V1 pipeline on all 601 real-data cases and produce artifacts.
+    """Run the pipeline on all 601 real-data cases and produce artifacts.
 
-    Loads the full 596+5 real probe case suite, runs the V1 pipeline
+    Loads the full 596+5 real probe case suite, runs the pipeline
     (with the Pre-CMD Hook by default), and writes attribution table, comparison
     metrics, and confusion matrix to *out_dir*.
     """
@@ -786,11 +780,12 @@ def run_full_real_suite(
 
     cases = load_all_real_cases()
     effective_scorer = evidence_scorer or scorer
-    full_results: list[FullAuditResult] | None = None
+    ran_full = not use_hook
 
     if use_hook:
-        results = run_cases_v1_with_hook(
+        results = run_cases(
             cases,
+            hook=True,
             scorer=effective_scorer,
             agent_generate=agent_generate,
             answer_verifier=answer_verifier,
@@ -798,8 +793,9 @@ def run_full_real_suite(
             on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
         )
     else:
-        full_results = run_cases_full_v1(
+        results = run_cases(
             cases,
+            post_repair=True,
             scorer=effective_scorer,
             evidence_scorer=effective_scorer,
             agent_generate=agent_generate,
@@ -807,7 +803,6 @@ def run_full_real_suite(
             tie_margin=tie_margin,
             on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
         )
-        results = [full.audit for full in full_results]
 
     att_path = dest / "attribution_table.csv"
     metrics_path = dest / "comparison_metrics.csv"
@@ -818,11 +813,11 @@ def run_full_real_suite(
     write_comparison_metrics_table(results, metrics_path)
     write_confusion_matrix_table(results, confusion_path)
     write_provenance_completeness_summary(results, provenance_path)
-    if full_results is not None:
-        write_post_repair_table(full_results, dest / "post_repair_table.csv")
+    if ran_full:
+        write_post_repair_table(results, dest / "post_repair_table.csv")
         try:
             write_repair_success_table_from_full(
-                full_results,
+                results,
                 dest / "repair_success_table.csv",
             )
         except (AttributeError, KeyError, ValueError):

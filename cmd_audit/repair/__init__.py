@@ -37,11 +37,9 @@ from .executor import RepairExecutor, RepairExecutorResult
 from .failure_memory import (
     FailureMemoryRecord,
     FailureMemoryStore,
-    FailureMemoryStoreV1,
     RecurrenceComparisonRow,
     RecurrenceSummary,
     build_failure_memory_context,
-    build_failure_memory_context_v1,
     build_repair_context,
     compute_memory_top_terms,
     compute_recurrence_summary,
@@ -98,9 +96,7 @@ __all__ = [
     # failure_memory
     "FailureMemoryRecord",
     "FailureMemoryStore",
-    "FailureMemoryStoreV1",
     "RecurrenceComparisonRow",
     "RecurrenceSummary",
     "build_failure_memory_context",
-    "build_failure_memory_context_v1",
 ]

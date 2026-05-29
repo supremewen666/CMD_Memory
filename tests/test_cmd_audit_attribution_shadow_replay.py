@@ -7,7 +7,7 @@ import unittest
 from cmd_audit.attribution import (
     AttributionResult,
     _disambiguate_route_retrieval_shadow,
-    assign_attribution_v1,
+    assign_attribution,
 )
 from cmd_audit.harness import _derive_store_sets
 from cmd_audit.core.models import (
@@ -170,7 +170,7 @@ class DisambiguateHelperTest(unittest.TestCase):
         self.assertIsNone(tag)
 
 
-# ── assign_attribution_v1 integration ──────────────────────────────────
+# ── assign_attribution integration ──────────────────────────────────
 
 
 def _full_replay_set(*, route_gain: float, retrieval_gain: float):
@@ -193,12 +193,12 @@ class AssignAttributionV1ShadowTest(unittest.TestCase):
     def test_default_store_attribution_flips_to_retrieval(self) -> None:
         replays = _full_replay_set(route_gain=0.7500071, retrieval_gain=0.7500063)
         # Without store info — rubric tail wins, route_error.
-        baseline = assign_attribution_v1(replays)
+        baseline = assign_attribution(replays)
         self.assertEqual(baseline.predicted_label, "route_error")
         self.assertIsNone(baseline.shadow_replay_resolution)
 
         # With store info — retrieval wins.
-        resolved = assign_attribution_v1(
+        resolved = assign_attribution(
             replays,
             gold_stores=frozenset({"episodic"}),
             queried_stores=frozenset({"episodic"}),
@@ -214,7 +214,7 @@ class AssignAttributionV1ShadowTest(unittest.TestCase):
         # retrieval slightly higher in rubric, but gold sits in non-default
         # non-queried store → route is the real intervention.
         replays = _full_replay_set(route_gain=0.74, retrieval_gain=0.7401)
-        resolved = assign_attribution_v1(
+        resolved = assign_attribution(
             replays,
             gold_stores=frozenset({"semantic"}),
             queried_stores=frozenset({"episodic"}),
@@ -227,7 +227,7 @@ class AssignAttributionV1ShadowTest(unittest.TestCase):
     def test_above_noise_band_no_disambiguation(self) -> None:
         # Real signal — route clearly wins, store-based rule should not flip.
         replays = _full_replay_set(route_gain=0.9, retrieval_gain=0.5)
-        resolved = assign_attribution_v1(
+        resolved = assign_attribution(
             replays,
             gold_stores=frozenset({"episodic"}),
             queried_stores=frozenset({"episodic"}),
@@ -238,7 +238,7 @@ class AssignAttributionV1ShadowTest(unittest.TestCase):
 
     def test_ambiguous_marker_preserves_rubric_top(self) -> None:
         replays = _full_replay_set(route_gain=0.6, retrieval_gain=0.59)
-        resolved = assign_attribution_v1(
+        resolved = assign_attribution(
             replays,
             gold_stores=frozenset({"semantic"}),
             queried_stores=frozenset({"episodic", "semantic"}),
@@ -249,7 +249,7 @@ class AssignAttributionV1ShadowTest(unittest.TestCase):
 
     def test_kwargs_default_to_legacy_behavior(self) -> None:
         replays = _full_replay_set(route_gain=0.7500071, retrieval_gain=0.7500063)
-        legacy = assign_attribution_v1(replays)
+        legacy = assign_attribution(replays)
         self.assertEqual(legacy.predicted_label, "route_error")
         self.assertIsNone(legacy.shadow_replay_resolution)
 

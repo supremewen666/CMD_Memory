@@ -14,7 +14,6 @@ from cmd_audit import (
     draft_ecs,
     load_probe_cases,
     run_case,
-    run_case_full,
     run_hard_case_update_baseline,
     run_post_repair_context_replay,
     validate_sandbox_path,
@@ -124,9 +123,9 @@ class PostRepairContextReplayTest(unittest.TestCase):
         )
 
     def test_full_pipeline_produces_complete_result(self) -> None:
-        result = run_case_full(self.retrieval_case)
+        result = run_case(self.retrieval_case, post_repair=True)
 
-        self.assertIsInstance(result.audit, AuditResult)
+        self.assertIsInstance(result, AuditResult)
         self.assertIsInstance(result.ecs_draft, ECSDraft)
         self.assertIsInstance(result.repaired_context, RepairedContext)
         self.assertIsInstance(result.post_repair, PostRepairResult)
@@ -279,7 +278,7 @@ class SandboxWriteBoundaryTest(unittest.TestCase):
 
     def test_write_post_repair_table_writes_to_sandbox(self) -> None:
         case = load_probe_cases(RETRIEVAL_FIXTURE)[0]
-        full = run_case_full(case)
+        full = run_case(case, post_repair=True)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             sandbox = Path(tmpdir) / "sandbox"
@@ -292,7 +291,7 @@ class SandboxWriteBoundaryTest(unittest.TestCase):
 
     def test_write_post_repair_table_rejects_outside_sandbox(self) -> None:
         case = load_probe_cases(RETRIEVAL_FIXTURE)[0]
-        full = run_case_full(case)
+        full = run_case(case, post_repair=True)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             sandbox = Path(tmpdir) / "sandbox"
@@ -311,7 +310,7 @@ class PostRepairTableShapeTest(unittest.TestCase):
 
     def test_table_has_required_columns(self) -> None:
         case = load_probe_cases(RETRIEVAL_FIXTURE)[0]
-        full = run_case_full(case)
+        full = run_case(case, post_repair=True)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             sandbox = Path(tmpdir) / "sandbox"

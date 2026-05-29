@@ -23,7 +23,7 @@ if str(ROOT) in sys.path:
     sys.path.remove(str(ROOT))
 sys.path.insert(0, str(ROOT))
 
-from cmd_audit.attribution import assign_attribution_v1
+from cmd_audit.attribution import assign_attribution
 from cmd_audit.harness import (
     AuditResult,
     _apply_dual_axis_recovery_gain,
@@ -40,9 +40,10 @@ from cmd_audit.scoring.llm import (
     SubagentScorer,
     _continuous_verify,
 )
-from cmd_audit.core.models import GoldEvidence, ProbeCase, load_real_cases_by_source
-from cmd_audit.provenance import ProvenanceTracker, get_graph_distractor_edges
-from cmd_audit.replays import ReplayResult, run_v1_replay_portfolio
+from cmd_audit.core.models import GoldEvidence, ProbeCase
+from cmd_audit.data_io import load_real_cases_by_source
+from cmd_audit.eval.provenance import ProvenanceTracker, get_graph_distractor_edges
+from cmd_audit.replays import ReplayResult, run_replay_portfolio
 from cmd_audit.baselines.comparators import run_baseline_suite
 from scripts.write_at_scale_retest_run_meta import build_run_meta, write_run_meta
 
@@ -229,7 +230,7 @@ def run_one_case(
         answer_verifier=answer_verifier,
         enabled=True,
     )
-    replays = run_v1_replay_portfolio(
+    replays = run_replay_portfolio(
         case,
         tracker=tracker,
         scorer=scorer,
@@ -258,7 +259,7 @@ def run_one_case(
     attribution = None
     failure_reason = ""
     try:
-        attribution = assign_attribution_v1(
+        attribution = assign_attribution(
             replays,
             has_ingestion_trace=case.has_ingestion_trace,
             positive_gain_threshold=positive_gain_threshold,

@@ -23,6 +23,10 @@ PIPELINE_LABEL_ORDER = (
 
 PIPELINE_LABELS = frozenset(PIPELINE_LABEL_ORDER)
 
+# W2 (Decision 35) will narrow PIPELINE_LABELS to 10 (drop reasoning_error).
+# ALL_LABELS will then be the 11-label superset. Pre-W2: both are identical.
+ALL_LABELS = PIPELINE_LABELS
+
 # Historical V0 boundary subset, retained for boundary-validation tests until
 # W2 finalization (Decision 35) collapses to PIPELINE_LABELS (10) + ALL_LABELS (11).
 PIPELINE_LABELS_BASE_ORDER = PIPELINE_LABEL_ORDER[:6]

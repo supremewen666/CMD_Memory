@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
-from .core.labels import validate_label
+from cmd_audit.core.labels import validate_label
 
 
 @dataclass(frozen=True)

@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 
-from cmd_audit.surrogate_gap import SurrogateGapRow
+from cmd_audit.eval.surrogate_gap import SurrogateGapRow
 from scripts.run_surrogate_gap_llm import load_holdout_case_ids, write_rows
 
 

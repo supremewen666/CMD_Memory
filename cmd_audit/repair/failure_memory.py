@@ -10,7 +10,7 @@ from ..core.labels import validate_label_base, validate_label
 from ..core.models import ProbeCase
 from .ecs import ECSDraft
 from ..scoring import evidence_recall_from_text
-from ..writers import write_csv_table, write_text_artifact
+from ..eval.writers import write_csv_table, write_text_artifact
 
 _STOP_WORDS = frozenset(
     {
@@ -112,15 +112,14 @@ class FailureMemoryRecord:
         )
 
 
-# V0 baseline — kept for paper comparison.
 @dataclass(frozen=True)
-class FailureMemoryStore:
-    """Immutable store of Failure Memory records with keyword-based retrieval."""
+class _FailureMemoryStoreV0:
+    """V0 keyword-only store — internal, used by recurrence comparison."""
 
     records: tuple[FailureMemoryRecord, ...] = ()
 
-    def add(self, record: FailureMemoryRecord) -> "FailureMemoryStore":
-        return FailureMemoryStore(records=self.records + (record,))
+    def add(self, record: FailureMemoryRecord) -> "_FailureMemoryStoreV0":
+        return _FailureMemoryStoreV0(records=self.records + (record,))
 
     def retrieve(self, query: str, top_k: int = 3) -> tuple[FailureMemoryRecord, ...]:
         query_keywords = set(_extract_keywords(query))
@@ -142,17 +141,11 @@ class FailureMemoryStore:
         return len(self.records) > 0
 
 
-def build_failure_memory_context(
+def _build_failure_memory_context_v0(
     records: tuple[FailureMemoryRecord, ...],
     mode: str,
 ) -> str:
-    """Build context text from retrieved Failure Memory records.
-
-    Modes:
-      - ``"none"``: empty context
-      - ``"full_trace"``: inject wrong_memory from past failures (anti-pattern)
-      - ``"corrected_guidance"``: inject corrected_memory + repair_guidance (CMD pattern)
-    """
+    """V0 three-mode context builder — internal, used by recurrence comparison."""
     if mode not in _CONTEXT_MODE_VALUES:
         raise ValueError(
             f"Unknown Failure Memory context mode: {mode!r}; "
@@ -167,7 +160,6 @@ def build_failure_memory_context(
             parts.append(f"[Past Failure Trace {i}]\n{r.wrong_memory}")
         return "\n\n".join(parts)
 
-    # corrected_guidance
     parts = []
     for i, r in enumerate(records, start=1):
         parts.append(
@@ -226,7 +218,7 @@ class RecurrenceComparisonRow:
 
 def run_recurrence_comparison(
     case: ProbeCase,
-    fm_store: FailureMemoryStore,
+    fm_store: _FailureMemoryStoreV0,
 ) -> RecurrenceComparisonRow:
     """Compare three Failure Memory context modes for a future similar task."""
     records = fm_store.retrieve(case.query)
@@ -235,12 +227,12 @@ def run_recurrence_comparison(
         case.gold_evidence, case.gold_answer, "", case.query
     )
 
-    full_trace_ctx = build_failure_memory_context(records, "full_trace")
+    full_trace_ctx = _build_failure_memory_context_v0(records, "full_trace")
     ft_ans, ft_ev, ft_cost = _score_context(
         case.gold_evidence, case.gold_answer, full_trace_ctx, case.query
     )
 
-    corrected_ctx = build_failure_memory_context(records, "corrected_guidance")
+    corrected_ctx = _build_failure_memory_context_v0(records, "corrected_guidance")
     cg_ans, cg_ev, cg_cost = _score_context(
         case.gold_evidence, case.gold_answer, corrected_ctx, case.query
     )
@@ -275,7 +267,7 @@ def run_recurrence_comparison(
 
 def run_recurrence_comparisons(
     cases: list[ProbeCase],
-    fm_store: FailureMemoryStore,
+    fm_store: _FailureMemoryStoreV0,
 ) -> list[RecurrenceComparisonRow]:
     return [run_recurrence_comparison(case, fm_store) for case in cases]
 
@@ -500,17 +492,17 @@ def _score_composite_key(
 
 
 @dataclass(frozen=True)
-class FailureMemoryStoreV1:
+class FailureMemoryStore:
     """Upgraded Failure Memory store with composite-key retrieval."""
 
     records: tuple[FailureMemoryRecord, ...] = ()
 
-    def add(self, record: FailureMemoryRecord) -> "FailureMemoryStoreV1":
-        return FailureMemoryStoreV1(records=self.records + (record,))
+    def add(self, record: FailureMemoryRecord) -> "FailureMemoryStore":
+        return FailureMemoryStore(records=self.records + (record,))
 
     def add_if_recovered(
         self, record: FailureMemoryRecord, assessment: str
-    ) -> "FailureMemoryStoreV1":
+    ) -> "FailureMemoryStore":
         """Store only recovered ECS records (Decision 32, Point 9).
 
         Partial and failed repairs are discarded. Per-agent persistence
@@ -549,7 +541,7 @@ _FM_CONTEXT_HEADER = (
 )
 
 
-def build_failure_memory_context_v1(
+def build_failure_memory_context(
     records: tuple[FailureMemoryRecord, ...],
 ) -> str:
     """Build fm_context = wrong_memory + original_evidence (diagnostic signal).

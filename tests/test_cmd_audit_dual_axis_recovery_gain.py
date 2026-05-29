@@ -1,6 +1,6 @@
 import unittest
 
-from cmd_audit.attribution import assign_attribution_v1
+from cmd_audit.attribution import assign_attribution
 from cmd_audit.harness import _apply_dual_axis_recovery_gain
 from cmd_audit.core.models import (
     BaselineOutput,
@@ -53,7 +53,7 @@ class DualAxisRecoveryGainTest(unittest.TestCase):
         self.assertAlmostEqual(updated[0].recovery_gain, 0.75)
 
     def test_attribution_fallback_triggers_when_only_reasoning_recovers(self) -> None:
-        attribution = assign_attribution_v1(
+        attribution = assign_attribution(
             (
                 _replay("oracle_retrieval", recovery_gain=0.0),
                 _replay("oracle_write", recovery_gain=-0.1),
@@ -67,7 +67,7 @@ class DualAxisRecoveryGainTest(unittest.TestCase):
         self.assertEqual(attribution.close_deltas, (("reasoning_error", 0.0),))
 
     def test_attribution_fallback_skipped_when_top_replay_is_positive(self) -> None:
-        attribution = assign_attribution_v1(
+        attribution = assign_attribution(
             (
                 _replay("oracle_retrieval", recovery_gain=0.2),
                 _replay("evidence_given_reasoning", recovery_gain=0.9),

@@ -8,7 +8,7 @@ from cmd_audit import (
     draft_ecs,
     draft_ecs_for_label,
     load_probe_cases,
-    run_case_v1,
+    run_case,
     PIPELINE_LABEL_ORDER,
 )
 from cmd_audit.core.labels import LabelValidationError
@@ -24,7 +24,7 @@ class DraftECSForLabelTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.case = load_probe_cases(RETRIEVAL_FIXTURE)[0]
-        cls.audit = run_case_v1(cls.case)
+        cls.audit = run_case(cls.case)
 
     def test_draft_for_predicted_label(self) -> None:
         label = self.audit.attribution.predicted_label
@@ -78,7 +78,7 @@ class DraftECSForLabelWithCloseDeltasTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.case = load_probe_cases(WRITE_FIXTURE)[0]
-        cls.audit = run_case_v1(cls.case)
+        cls.audit = run_case(cls.case)
 
     def test_close_deltas_labels_produce_valid_ecs(self) -> None:
         for label, delta in self.audit.attribution.close_deltas:
