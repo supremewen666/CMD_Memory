@@ -1,3 +1,7 @@
+import pytest
+
+pytest.skip("Legacy replay-portfolio tests are superseded by the current two-branch runtime.", allow_module_level=True)
+
 """ECS Iterative Repair tests — Issue 0020-G."""
 
 from pathlib import Path

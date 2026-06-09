@@ -10,7 +10,11 @@ from cmd_audit import (
     draft_ecs_for_label,
     load_probe_cases_v1,
 )
-from cmd_audit.repair.failure_memory import _score_composite_key, _FailureMemoryStoreV0
+from cmd_audit.repair.failure_memory import (
+    StepLevelRecord,
+    _score_composite_key,
+    _FailureMemoryStoreV0,
+)
 from cmd_audit.repair import FailureMemoryStore, build_failure_memory_context
 from cmd_audit.repair import build_repair_context
 
@@ -66,14 +70,14 @@ class FailureMemoryStoreV1Test(unittest.TestCase):
             memory_top_terms=("paris", "france"),
         )
         self.record_b = FailureMemoryRecord(
-            error_type="write_error",
+            error_type="item_wrong",
             wrong_memory="no memory about Berlin",
             original_evidence="Berlin is the capital of Germany",
-            cause="evidence never written",
+            cause="stored item contradicted the source evidence",
             corrected_memory="Berlin is the capital of Germany",
-            repair_action="oracle_write",
-            repair_guidance="ensure events are written",
-            trigger_signature="write_error berlin capital germany",
+            repair_action="replace",
+            repair_guidance="replace the incorrect item",
+            trigger_signature="item_wrong berlin capital germany",
             memory_top_terms=("berlin", "germany"),
         )
         self.record_c = FailureMemoryRecord(
@@ -119,38 +123,110 @@ class FailureMemoryStoreV1Test(unittest.TestCase):
         self.assertEqual(results[0].error_type, "retrieval_error")
         self.assertIn("paris", results[0].trigger_signature)
 
-    def test_record_accepts_v1_only_label(self) -> None:
+    def test_retrieve_second_positional_argument_is_label(self) -> None:
+        results = self.store.retrieve("What about Paris?", "retrieval_error", top_k=1)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].error_type, "retrieval_error")
+        self.assertIn("paris", results[0].trigger_signature)
+
+    def test_add_if_recovered_only_stores_recovered_records(self) -> None:
+        store = FailureMemoryStore()
+
+        self.assertIs(store.add_if_recovered(self.record_a, "partial"), store)
+        self.assertEqual(len(store), 0)
+
+        self.assertIs(store.add_if_recovered(self.record_a, "recovered"), store)
+        self.assertEqual(len(store), 1)
+
+    def test_record_accepts_absorbed_route_label(self) -> None:
         record = FailureMemoryRecord(
-            error_type="route_error",
+            error_type="retrieval_error",
             wrong_memory="semantic store was not queried",
             original_evidence="Correct evidence was in semantic memory",
             cause="route missed the semantic store",
             corrected_memory="Query semantic memory for this fact",
-            repair_action="oracle_route",
+            repair_action="update_routing",
             repair_guidance="update routing",
-            trigger_signature="route_error semantic memory",
+            trigger_signature="retrieval_error semantic memory",
             memory_top_terms=("semantic", "memory"),
         )
-        self.assertEqual(record.error_type, "route_error")
+        self.assertEqual(record.error_type, "retrieval_error")
 
     def test_from_ecs_draft_populates_memory_top_terms(self) -> None:
         case = load_probe_cases_v1(Path("data/probe_cases/v1_route_error_case.json"))[0]
-        ecs = draft_ecs_for_label(case, None, "route_error")
+        ecs = draft_ecs_for_label(case, None, "retrieval_error")
         record = FailureMemoryRecord.from_ecs_draft(ecs, case)
         self.assertTrue(record.memory_top_terms)
-        self.assertIn("route_error", record.trigger_signature)
+        self.assertIn("retrieval_error", record.trigger_signature)
 
     def test_empty_store_returns_empty(self) -> None:
         empty = FailureMemoryStore()
         results = empty.retrieve("test query")
-        self.assertEqual(results, ())
+        self.assertEqual(results, [])
 
-    def test_add_returns_new_instance(self) -> None:
+    def test_add_returns_self_for_chaining(self) -> None:
         store1 = FailureMemoryStore()
         store2 = store1.add(self.record_a)
-        self.assertIsNot(store1, store2)
-        self.assertEqual(len(store1), 0)
+        self.assertIs(store1, store2)
         self.assertEqual(len(store2), 1)
+
+    def test_mcts_action_priors_use_similar_successful_history(self) -> None:
+        store = FailureMemoryStore()
+        store.add(
+            StepLevelRecord.from_mcts_result(
+                query="What is the capital of France?",
+                hop_index=0,
+                label="injection_error",
+                cause="history",
+                corrected_memory="",
+                repair_guidance="fix injection first",
+                recovery_success=True,
+                recovery_gain=0.8,
+            )
+        )
+        store.add(
+            StepLevelRecord.from_mcts_result(
+                query="What is the capital of France?",
+                hop_index=0,
+                label="retrieval_error",
+                cause="history",
+                corrected_memory="",
+                repair_guidance="fix retrieval",
+                recovery_success=False,
+                recovery_gain=0.0,
+            )
+        )
+
+        priors = store.get_mcts_action_priors("France capital question")
+
+        self.assertGreater(priors["injection_error"], priors["retrieval_error"])
+
+    def test_hook_confidence_bonus_uses_recovered_similar_history(self) -> None:
+        store = FailureMemoryStore().add(self.record_a)
+
+        bonus = store.get_hook_confidence_bonus("What is the capital of France?")
+
+        self.assertGreater(bonus, 0.0)
+
+    def test_item_priority_scores_matching_item_record_higher(self) -> None:
+        from cmd_audit.core.models import MemoryItem
+
+        berlin = MemoryItem("m_berlin", "Berlin is the capital of Germany")
+        paris = MemoryItem("m_paris", "Paris is the capital of France")
+
+        self.assertGreater(
+            self.store.score_item_priority("Tell me about Berlin", berlin),
+            self.store.score_item_priority("Tell me about Berlin", paris),
+        )
+
+    def test_repair_guidance_reuses_matching_failure_memory_guidance(self) -> None:
+        guidance = self.store.get_repair_guidance(
+            "Tell me about Berlin",
+            "item_wrong",
+        )
+
+        self.assertEqual(guidance, "replace the incorrect item")
 
 
 # ── build_failure_memory_context ─────────────────────────────────────
@@ -179,14 +255,14 @@ class BuildFailureMemoryContextV1Test(unittest.TestCase):
 
     def test_contains_diagnostic_header(self) -> None:
         record = FailureMemoryRecord(
-            error_type="write_error",
+            error_type="item_wrong",
             wrong_memory="missing",
             original_evidence="evidence",
             cause="not written",
             corrected_memory="corrected",
-            repair_action="oracle_write",
+            repair_action="replace",
             repair_guidance="write it",
-            trigger_signature="write_error|test",
+            trigger_signature="item_wrong|test",
         )
         ctx = build_failure_memory_context((record,))
         self.assertIn("[Failure Memory Diagnostic Context]", ctx)
@@ -205,20 +281,20 @@ class BuildFailureMemoryContextV1Test(unittest.TestCase):
             trigger_signature="retrieval_error|test1",
         )
         r2 = FailureMemoryRecord(
-            error_type="compression_error",
+            error_type="item_compression_distorted",
             wrong_memory="w2",
             original_evidence="e2",
             cause="c2",
             corrected_memory="cm2",
             repair_action="ra2",
             repair_guidance="rg2",
-            trigger_signature="compression_error|test2",
+            trigger_signature="item_compression_distorted|test2",
         )
         ctx = build_failure_memory_context((r1, r2))
         self.assertIn("Past Error 1", ctx)
         self.assertIn("Past Error 2", ctx)
         self.assertIn("retrieval_error", ctx)
-        self.assertIn("compression_error", ctx)
+        self.assertIn("item_compression_distorted", ctx)
 
 
 # ── build_repair_context ────────────────────────────────────────────────
@@ -242,12 +318,12 @@ class BuildRepairContextTest(unittest.TestCase):
     def test_empty_fm_context_omits_it(self) -> None:
         ctx = build_repair_context(
             baseline_context="baseline",
-            label="write_error",
+            label="item_wrong",
             evidence_block="evidence",
             fm_context="",
         )
         self.assertIn("baseline", ctx)
-        self.assertIn("write_error", ctx)
+        self.assertIn("item_wrong", ctx)
         self.assertIn("evidence", ctx)
 
     def test_empty_label_omits_diagnosis(self) -> None:
@@ -286,14 +362,14 @@ class CompositeKeyScoringTest(unittest.TestCase):
 
     def test_no_match_returns_zero(self) -> None:
         record = FailureMemoryRecord(
-            error_type="write_error",
+            error_type="item_wrong",
             wrong_memory="w",
             original_evidence="e",
             cause="c",
             corrected_memory="cm",
             repair_action="ra",
             repair_guidance="rg",
-            trigger_signature="write_error|berlin germany",
+            trigger_signature="item_wrong|berlin germany",
         )
         score = _score_composite_key(
             record, query="about Tokyo", label="retrieval_error"
@@ -370,25 +446,25 @@ class CompositeRetrievalPrecisionTest(unittest.TestCase):
         """Without memory_top_terms, both records with 'capital' match equally.
         With memory_top_terms, the correct one wins."""
         record_a = FailureMemoryRecord(
-            error_type="write_error",
+            error_type="item_wrong",
             wrong_memory="missing Tokyo data",
             original_evidence="Tokyo is Japan capital",
             cause="not written",
             corrected_memory="Tokyo is Japan capital",
-            repair_action="oracle_write",
+            repair_action="replace",
             repair_guidance="write it",
-            trigger_signature="write_error tokyo japan capital",
+            trigger_signature="item_wrong tokyo japan capital",
             memory_top_terms=("tokyo", "japan"),
         )
         record_b = FailureMemoryRecord(
-            error_type="write_error",
+            error_type="item_wrong",
             wrong_memory="missing London data",
             original_evidence="London is UK capital",
             cause="not written",
             corrected_memory="London is UK capital",
-            repair_action="oracle_write",
+            repair_action="replace",
             repair_guidance="write it",
-            trigger_signature="write_error london uk capital",
+            trigger_signature="item_wrong london uk capital",
             memory_top_terms=("london",),
         )
         store = FailureMemoryStore().add(record_a).add(record_b)
@@ -396,7 +472,7 @@ class CompositeRetrievalPrecisionTest(unittest.TestCase):
         # Stored memory_top_terms are used automatically; callers do not pass them.
         results_with_mem = store.retrieve(
             query="Tell me about Tokyo",
-            label="write_error",
+            label="item_wrong",
             top_k=1,
         )
 

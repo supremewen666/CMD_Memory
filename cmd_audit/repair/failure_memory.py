@@ -6,7 +6,12 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..core.labels import validate_label_base, validate_label
+from ..core.labels import (
+    ITEM_LABELS,
+    PIPELINE_STEP_ACTIONS,
+    validate_diagnosis_label,
+    validate_label,
+)
 from ..core.models import ProbeCase
 from .ecs import ECSDraft
 from ..scoring import evidence_recall_from_text
@@ -94,7 +99,7 @@ class FailureMemoryRecord:
     memory_top_terms: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        validate_label(self.error_type)
+        validate_diagnosis_label(self.error_type)
 
     @classmethod
     def from_ecs_draft(cls, ecs: ECSDraft, case: ProbeCase) -> "FailureMemoryRecord":
@@ -400,7 +405,7 @@ def _write_recurrence_summary(
     summary = compute_recurrence_summary(rows)
 
     lines = [
-        "CMD V0 ECS Failure Memory Recurrence Summary — Issue 0007",
+        "CMD ECS Failure Memory Recurrence Summary",
         "=" * 60,
         "",
         f"Total future-task cases: {summary.total_cases}",
@@ -491,49 +496,6 @@ def _score_composite_key(
     return score
 
 
-@dataclass(frozen=True)
-class FailureMemoryStore:
-    """Upgraded Failure Memory store with composite-key retrieval."""
-
-    records: tuple[FailureMemoryRecord, ...] = ()
-
-    def add(self, record: FailureMemoryRecord) -> "FailureMemoryStore":
-        return FailureMemoryStore(records=self.records + (record,))
-
-    def add_if_recovered(
-        self, record: FailureMemoryRecord, assessment: str
-    ) -> "FailureMemoryStore":
-        """Store only recovered ECS records (Decision 32, Point 9).
-
-        Partial and failed repairs are discarded. Per-agent persistence
-        stores as FAILURE_MEMORY.md alongside agent's MEMORY.md.
-        """
-        if assessment == "recovered":
-            return self.add(record)
-        return self
-
-    def retrieve(
-        self,
-        query: str,
-        label: str = "",
-        top_k: int = 3,
-    ) -> tuple[FailureMemoryRecord, ...]:
-        """Composite-key retrieval: label + query_keywords + memory_top_terms."""
-        scored: list[tuple[int, FailureMemoryRecord]] = []
-        for record in self.records:
-            score = _score_composite_key(record, query, label)
-            if score > 0:
-                scored.append((score, record))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return tuple(record for _, record in scored[:top_k])
-
-    def __len__(self) -> int:
-        return len(self.records)
-
-    def __bool__(self) -> bool:
-        return len(self.records) > 0
-
-
 _FM_CONTEXT_HEADER = (
     "[Failure Memory Diagnostic Context]\n"
     "The following shows a past error pattern similar to the current situation.\n"
@@ -578,3 +540,715 @@ def build_repair_context(
     if fm_context:
         parts.append(fm_context)
     return "\n\n".join(parts)
+
+
+# ── Markdown Failure Memory skill contract ──────────────────────────────
+
+
+@dataclass(frozen=True)
+class FailureMemoryDiagnosis:
+    """Diagnosis fields needed to write a case record."""
+
+    query: str
+    label: str
+    cause: str
+    corrected_memory: str
+    repair_guidance: str
+    retrieved_items: tuple[str, ...] = ()
+    signature: str = ""
+    problem_item: str = ""
+    pattern: str = ""
+
+    def __post_init__(self) -> None:
+        validate_diagnosis_label(self.label)
+
+
+@dataclass(frozen=True)
+class FailureMemoryOutcome:
+    """Outcome fields recorded after repair validation."""
+
+    assessment: str
+    recovered: bool
+    recovery_gain: float = 0.0
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class PatternValidationResult:
+    """Self-check result for a pattern against its source cases."""
+
+    valid: bool
+    inconsistencies: tuple[str, ...] = ()
+    suggested_update: str = ""
+
+
+class FailureMemorySkill:
+    """Stateless methods for case-first Failure Memory reuse.
+
+    The skill does not own storage. Agents pass a markdown memory path and an
+    LLM client when they want online reuse or abstraction.
+    """
+
+    def hook(self, query: str, retrieved_items: tuple) -> object:
+        from ..core.models import RetrievedItem
+        from ..hook import post_retrieve_hook
+
+        normalized = tuple(
+            item
+            if isinstance(item, RetrievedItem)
+            else RetrievedItem(
+                memory_id=getattr(item, "memory_id", str(index)),
+                text=getattr(item, "text", str(item)),
+            )
+            for index, item in enumerate(retrieved_items)
+        )
+        return post_retrieve_hook(query, normalized)
+
+    def diagnose(
+        self,
+        context: str,
+        memory_path: str | Path | None = None,
+        *,
+        llm_client=None,
+    ):
+        prompt = self._diagnose_prompt(context, memory_path)
+        if llm_client is None:
+            return {"prompt": prompt, "requires_llm": True}
+        return llm_client.generate(prompt)
+
+    def repair(self, diagnosis: FailureMemoryDiagnosis | str, *, llm_client=None):
+        if isinstance(diagnosis, FailureMemoryDiagnosis):
+            return diagnosis.repair_guidance
+        if llm_client is None:
+            return {"diagnosis": diagnosis, "requires_llm": True}
+        return llm_client.generate(
+            "Given this CMD diagnosis, propose the repair action and guidance.\n\n"
+            f"{diagnosis}"
+        )
+
+    def format_case(
+        self,
+        diagnosis: FailureMemoryDiagnosis,
+        outcome: FailureMemoryOutcome,
+    ) -> str:
+        signature = diagnosis.signature or _build_trigger_signature(
+            diagnosis.query, diagnosis.label
+        )
+        retrieved = "\n".join(
+            f"- {item}" for item in diagnosis.retrieved_items
+        ) or "- None recorded"
+        pattern = diagnosis.pattern or "None"
+        return "\n".join(
+            [
+                f"# Case: {signature}",
+                "",
+                f"**Query**: {diagnosis.query}",
+                f"**Signature**: {signature}",
+                "",
+                "## Retrieved Items",
+                retrieved,
+                "",
+                "## Diagnosis",
+                f"- **Label**: {diagnosis.label}",
+                f"- **Problem Item**: {diagnosis.problem_item or 'Not specified'}",
+                f"- **Root Cause**: {diagnosis.cause}",
+                "",
+                "## Repair",
+                f"- **Guidance**: {diagnosis.repair_guidance}",
+                f"- **Corrected Memory**: {diagnosis.corrected_memory}",
+                "",
+                "## Outcome",
+                f"- **Assessment**: {outcome.assessment}",
+                f"- **Recovered**: {str(outcome.recovered).lower()}",
+                f"- **Recovery Gain**: {outcome.recovery_gain:.3f}",
+                f"- **Pattern**: {pattern}",
+                "",
+            ]
+        )
+
+    def format_pattern(self, cases: tuple[str, ...], *, llm_client=None) -> str:
+        if llm_client is not None:
+            return llm_client.generate(
+                "Abstract a reusable CMD Failure Memory pattern from these "
+                "source cases. Keep it medium-grained and cite source cases.\n\n"
+                + "\n\n---\n\n".join(cases)
+            )
+        labels = sorted(
+            {
+                match.group(1)
+                for case in cases
+                for match in [re.search(r"\*\*Label\*\*:\s*([a-z_]+)", case)]
+                if match
+            }
+        )
+        diagnosis = labels[0] if len(labels) == 1 else "review_required"
+        return "\n".join(
+            [
+                f"# Pattern: {diagnosis}",
+                "",
+                "**Trigger Conditions**:",
+                "- Cases share the same diagnosis label and repair shape.",
+                "",
+                f"**Diagnosis**: {diagnosis}",
+                "",
+                "**Repair Guide**:",
+                "- Reuse only after checking a concrete source case.",
+                "- If the current case contradicts the pattern, mark for review.",
+                "",
+                "**Source Cases**:",
+                *[f"- case_{i + 1}" for i in range(len(cases))],
+                "",
+                "**Validation Status**: review_required",
+                "",
+            ]
+        )
+
+    def validate_pattern(
+        self,
+        pattern: str,
+        cases: tuple[str, ...],
+        *,
+        llm_client=None,
+    ) -> PatternValidationResult:
+        if llm_client is not None:
+            response = llm_client.generate(
+                "Validate whether this Failure Memory pattern is consistent "
+                "with the concrete source cases. Return valid/invalid, "
+                "inconsistencies, and suggested update.\n\n"
+                f"PATTERN:\n{pattern}\n\nCASES:\n"
+                + "\n\n---\n\n".join(cases)
+            )
+            return PatternValidationResult(
+                valid="invalid" not in response.casefold(),
+                suggested_update=response,
+            )
+
+        pattern_label = _extract_pattern_label(pattern)
+        case_labels = tuple(
+            label
+            for case in cases
+            for label in [_extract_case_label(case)]
+            if label
+        )
+        inconsistencies = []
+        if pattern_label and case_labels:
+            mismatched = tuple(label for label in case_labels if label != pattern_label)
+            if mismatched:
+                inconsistencies.append(
+                    "pattern label does not match all source case labels"
+                )
+        if "Source Cases" not in pattern:
+            inconsistencies.append("pattern does not cite source cases")
+        return PatternValidationResult(
+            valid=not inconsistencies,
+            inconsistencies=tuple(inconsistencies),
+            suggested_update=(
+                "" if not inconsistencies else "Use the concrete case record as source of truth."
+            ),
+        )
+
+    def _diagnose_prompt(self, context: str, memory_path: str | Path | None) -> str:
+        memory_hint = (
+            f"Failure Memory path: {memory_path}" if memory_path else "No path provided"
+        )
+        return (
+            "Diagnose this CMD memory failure. First decide whether to inspect "
+            "Failure Memory. If you inspect it, read the index, then concrete "
+            "cases, then patterns; validate any pattern against its cases before "
+            "using it. Return label, cause, corrected_memory, and repair_guidance.\n\n"
+            f"{memory_hint}\n\nCONTEXT:\n{context}"
+        )
+
+
+class MarkdownFailureMemoryStore:
+    """Three-layer markdown storage for agent-owned Failure Memory."""
+
+    def __init__(self, root: str | Path) -> None:
+        self.root = Path(root)
+        self.index_path = self.root / "FAILURE_MEMORY.md"
+        self.cases_dir = self.root / "cases"
+        self.patterns_dir = self.root / "patterns"
+
+    def ensure(self) -> "MarkdownFailureMemoryStore":
+        self.cases_dir.mkdir(parents=True, exist_ok=True)
+        self.patterns_dir.mkdir(parents=True, exist_ok=True)
+        if not self.index_path.exists():
+            self.index_path.write_text(
+                "# Failure Memory\n\n## Cases\n\n## Patterns\n",
+                encoding="utf-8",
+            )
+        return self
+
+    def write_case(
+        self,
+        case_id: str,
+        markdown: str,
+        *,
+        summary: str,
+    ) -> Path:
+        self.ensure()
+        path = self.cases_dir / f"{case_id}.md"
+        path.write_text(markdown, encoding="utf-8")
+        self._upsert_index_line(
+            "## Cases",
+            f"- [{case_id}](cases/{case_id}.md) - {summary}",
+        )
+        return path
+
+    def write_pattern(
+        self,
+        pattern_id: str,
+        markdown: str,
+        *,
+        summary: str,
+    ) -> Path:
+        self.ensure()
+        path = self.patterns_dir / f"{pattern_id}.md"
+        path.write_text(markdown, encoding="utf-8")
+        self._upsert_index_line(
+            "## Patterns",
+            f"- [{pattern_id}](patterns/{pattern_id}.md) - {summary}",
+        )
+        return path
+
+    def read_index(self) -> str:
+        self.ensure()
+        return self.index_path.read_text(encoding="utf-8")
+
+    def read_case(self, case_id: str) -> str:
+        return (self.cases_dir / f"{case_id}.md").read_text(encoding="utf-8")
+
+    def read_pattern(self, pattern_id: str) -> str:
+        return (self.patterns_dir / f"{pattern_id}.md").read_text(encoding="utf-8")
+
+    def reuse_prompt(
+        self,
+        *,
+        query: str,
+        retrieved_items: tuple[str, ...],
+        failure_signal: str,
+    ) -> str:
+        index = self.read_index()
+        retrieved = "\n".join(f"- {item}" for item in retrieved_items)
+        return (
+            "Decide whether Failure Memory contains a relevant prior case. "
+            "Do not use patterns until you have selected and checked concrete "
+            "cases from the index. If a pattern contradicts its source case, "
+            "prefer the case.\n\n"
+            f"INDEX:\n{index}\n\n"
+            f"QUERY:\n{query}\n\nRETRIEVED ITEMS:\n{retrieved}\n\n"
+            f"FAILURE SIGNAL:\n{failure_signal}"
+        )
+
+    def _upsert_index_line(self, section: str, line: str) -> None:
+        text = self.read_index()
+        if line in text:
+            return
+        marker = f"{section}\n"
+        if marker not in text:
+            text = f"{text.rstrip()}\n\n{section}\n"
+            marker = f"{section}\n"
+        insert_at = text.index(marker) + len(marker)
+        text = f"{text[:insert_at]}{line}\n{text[insert_at:]}"
+        self.index_path.write_text(text, encoding="utf-8")
+
+
+def _extract_case_label(case_markdown: str) -> str:
+    match = re.search(r"\*\*Label\*\*:\s*([a-z_]+)", case_markdown)
+    return match.group(1) if match else ""
+
+
+def _extract_pattern_label(pattern_markdown: str) -> str:
+    match = re.search(r"\*\*Diagnosis\*\*:\s*([a-z_]+)", pattern_markdown)
+    return match.group(1) if match else ""
+
+
+# ── Step-Level Failure Memory (TASK.md #6) ─────────────────────────────────
+
+
+@dataclass(frozen=True)
+class StepLevelKey:
+    """Composite retrieval key for step-level transfer: (query_signature, hop_index, label)."""
+
+    query_signature: str
+    hop_index: int
+    label: str
+
+    def __post_init__(self) -> None:
+        validate_label(self.label)
+
+    @classmethod
+    def from_components(cls, query: str, hop_index: int, label: str) -> "StepLevelKey":
+        keywords = _extract_keywords(query)
+        signature = " ".join(keywords[:10])  # Cap at 10 keywords
+        return cls(query_signature=signature, hop_index=hop_index, label=label)
+
+    def similarity(self, other: "StepLevelKey") -> float:
+        """Compute similarity score between two keys."""
+        if self.label != other.label:
+            return 0.0
+
+        # Hop distance penalty
+        hop_penalty = 1.0 / (1.0 + abs(self.hop_index - other.hop_index))
+
+        # Keyword overlap
+        self_kw = set(self.query_signature.split())
+        other_kw = set(other.query_signature.split())
+        if not self_kw or not other_kw:
+            return 0.0
+        overlap = len(self_kw & other_kw) / max(len(self_kw), len(other_kw))
+
+        return overlap * hop_penalty
+
+
+@dataclass(frozen=True)
+class StepLevelRecord:
+    """Failure memory record with step-level key for MCTS experience transfer."""
+
+    key: StepLevelKey
+    error_type: str
+    cause: str
+    corrected_memory: str
+    repair_guidance: str
+    recovery_success: bool
+    recovery_gain: float
+
+    @classmethod
+    def from_mcts_result(
+        cls,
+        query: str,
+        hop_index: int,
+        label: str,
+        cause: str,
+        corrected_memory: str,
+        repair_guidance: str,
+        recovery_success: bool,
+        recovery_gain: float,
+    ) -> "StepLevelRecord":
+        key = StepLevelKey.from_components(query, hop_index, label)
+        return cls(
+            key=key,
+            error_type=label,
+            cause=cause,
+            corrected_memory=corrected_memory,
+            repair_guidance=repair_guidance,
+            recovery_success=recovery_success,
+            recovery_gain=recovery_gain,
+        )
+
+
+def step_level_record_from_mcts_result(
+    query: str,
+    mcts_result,
+    *,
+    recovery_success_threshold: float = 0.0,
+) -> StepLevelRecord | None:
+    """Convert an MCTS SearchResult into a step-level Failure Memory record."""
+    culprit = getattr(mcts_result, "main_culprit", None)
+    if culprit is None:
+        return None
+
+    hop_index, action, credit = culprit
+    label = action.value if hasattr(action, "value") else str(action)
+    if label == "identity":
+        return None
+    recovery_gain = float(credit)
+    return StepLevelRecord.from_mcts_result(
+        query=query,
+        hop_index=int(hop_index),
+        label=label,
+        cause=f"MCTS attributed recovery to {label} at generation point {hop_index}.",
+        corrected_memory="",
+        repair_guidance=(
+            f"Prioritize {label} repairs when a similar query reaches "
+            f"generation point {hop_index}."
+        ),
+        recovery_success=recovery_gain > recovery_success_threshold,
+        recovery_gain=recovery_gain,
+    )
+
+
+class FailureMemoryStore:
+    """Step-level failure memory store for experience reuse.
+
+    Retrieval key: (query_signature, hop_index, label)
+    Used by:
+    - Hook: similar signature history → adjust confidence
+    - MCTS: historical (signature → label) success rate → UCB prior bonus
+    - LOO: historical item label hints → priority ordering
+    """
+
+    def __init__(self) -> None:
+        self._records: list[StepLevelRecord | FailureMemoryRecord] = []
+        self._label_success_rates: dict[str, tuple[int, int]] = {}  # label -> (success, total)
+
+    def add(self, record: StepLevelRecord | FailureMemoryRecord) -> "FailureMemoryStore":
+        """Add a record and update success rate statistics."""
+        self._records.append(record)
+
+        label = record.error_type
+        if isinstance(record, StepLevelRecord):
+            success, total = self._label_success_rates.get(label, (0, 0))
+            if record.recovery_success:
+                success += 1
+            total += 1
+            self._label_success_rates[label] = (success, total)
+        return self
+
+    def add_if_recovered(
+        self,
+        record: StepLevelRecord | FailureMemoryRecord,
+        assessment: str,
+    ) -> "FailureMemoryStore":
+        """Store only records whose repair outcome recovered the task."""
+        if assessment == "recovered":
+            return self.add(record)
+        return self
+
+    def add_mcts_result(
+        self,
+        query: str,
+        mcts_result,
+        *,
+        recovery_success_threshold: float = 0.0,
+    ) -> StepLevelRecord | None:
+        """Persist MCTS attribution experience for future step-level reuse."""
+        record = step_level_record_from_mcts_result(
+            query,
+            mcts_result,
+            recovery_success_threshold=recovery_success_threshold,
+        )
+        if record is None:
+            return None
+        self.add(record)
+        return record
+
+    def retrieve(
+        self,
+        query: str,
+        hop_index: int | str | None = None,
+        label: str | None = None,
+        top_k: int = 3,
+    ) -> list[StepLevelRecord | FailureMemoryRecord]:
+        """Retrieve similar records by step-level key."""
+        if isinstance(hop_index, str) and label is None:
+            label = hop_index
+            hop_index = None
+
+        if hop_index is None:
+            scored: list[tuple[float, StepLevelRecord | FailureMemoryRecord]] = []
+            for record in self._records:
+                if isinstance(record, FailureMemoryRecord):
+                    score = float(_score_composite_key(record, query, label or ""))
+                else:
+                    probe_keywords = set(_extract_keywords(query)[:10])
+                    record_keywords = set(record.key.query_signature.split())
+                    score = (
+                        len(probe_keywords & record_keywords)
+                        / max(len(probe_keywords), len(record_keywords))
+                        if probe_keywords and record_keywords
+                        else 0.0
+                    )
+                    if label and record.error_type == label:
+                        score += 1.0
+                if score > 0:
+                    scored.append((score, record))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            return [record for _, record in scored[:top_k]]
+
+        if label:
+            probe_key = StepLevelKey.from_components(query, hop_index, label)
+            scored = [
+                (probe_key.similarity(r.key), r)
+                for r in self._records
+                if isinstance(r, StepLevelRecord) and r.key.label == label
+            ]
+        else:
+            # Match any label, use query similarity only
+            probe_keywords = set(_extract_keywords(query)[:10])
+            scored = []
+            for r in self._records:
+                if not isinstance(r, StepLevelRecord):
+                    continue
+                r_keywords = set(r.key.query_signature.split())
+                if probe_keywords and r_keywords:
+                    sim = len(probe_keywords & r_keywords) / max(len(probe_keywords), len(r_keywords))
+                    scored.append((sim, r))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [r for _, r in scored[:top_k] if _ > 0]
+
+    def get_label_prior(
+        self,
+        label: str,
+        *,
+        query: str | None = None,
+        hop_index: int | None = None,
+    ) -> float:
+        """Get historical success rate for a label.
+
+        With no query, this returns the global success rate used by older
+        callers. With a query/hop, it returns the similar-case weighted prior
+        used by online MCTS action ordering and UCB bonus.
+        """
+        if query is not None:
+            weighted_success = 0.0
+            total_weight = 0.0
+            for record in self._records:
+                if not isinstance(record, StepLevelRecord):
+                    continue
+                if record.error_type != label:
+                    continue
+                weight = _step_record_similarity(record, query, hop_index)
+                if weight <= 0.0:
+                    continue
+                weighted_success += weight * (1.0 if record.recovery_success else 0.0)
+                total_weight += weight
+            if total_weight > 0.0:
+                return weighted_success / total_weight
+
+        success, total = self._label_success_rates.get(label, (0, 0))
+        if total == 0:
+            return 0.5  # Neutral prior
+        return success / total
+
+    def get_label_priors(self) -> dict[str, float]:
+        """Get all label priors for MCTS."""
+        return {label: self.get_label_prior(label) for label in self._label_success_rates}
+
+    def get_mcts_action_priors(
+        self,
+        query: str,
+        *,
+        hop_index: int | None = None,
+        labels: tuple[str, ...] = PIPELINE_STEP_ACTIONS,
+    ) -> dict[str, float]:
+        """Return query-aware action priors for MCTS.
+
+        Priors are soft hints only: callers should use them for ordering/bonus,
+        never as hard pruning.
+        """
+        return {
+            label: self.get_label_prior(label, query=query, hop_index=hop_index)
+            for label in labels
+        }
+
+    def get_hook_confidence_bonus(
+        self,
+        query: str,
+        *,
+        max_bonus: float = 0.15,
+    ) -> float:
+        """Return a small confidence bonus from similar recovered diagnoses."""
+        records = self.retrieve(query=query, top_k=5)
+        if not records:
+            return 0.0
+
+        weighted_success = 0.0
+        total_weight = 0.0
+        for record in records:
+            weight = _diagnosis_record_similarity(record, query)
+            if weight <= 0.0:
+                continue
+            if isinstance(record, StepLevelRecord):
+                success = 1.0 if record.recovery_success else 0.0
+            else:
+                # FailureMemoryRecord is only added to the online store after a
+                # repair path has been accepted by the caller.
+                success = 1.0
+            weighted_success += weight * success
+            total_weight += weight
+
+        if total_weight <= 0.0:
+            return 0.0
+        return max(0.0, min(max_bonus, max_bonus * (weighted_success / total_weight)))
+
+    def score_item_priority(self, query: str, item) -> float:
+        """Score a recalled item for item-gate/LOO priority from past item records."""
+        item_keywords = set(_extract_keywords(getattr(item, "text", str(item))))
+        if not item_keywords:
+            return 0.0
+
+        best_score = 0.0
+        for record in self._records:
+            if record.error_type not in ITEM_LABELS:
+                continue
+            query_score = _diagnosis_record_similarity(record, query)
+            memory_terms = set(getattr(record, "memory_top_terms", ()) or ())
+            if not memory_terms and isinstance(record, FailureMemoryRecord):
+                memory_terms = set(_extract_keywords(record.wrong_memory))
+            if not memory_terms:
+                continue
+            item_score = len(item_keywords & memory_terms) / max(
+                len(item_keywords), len(memory_terms)
+            )
+            best_score = max(best_score, query_score + item_score)
+        return best_score
+
+    def get_repair_guidance(
+        self,
+        query: str,
+        label: str,
+        *,
+        hop_index: int | None = None,
+    ) -> str:
+        """Retrieve reusable repair guidance for ECS-S assembly."""
+        records = self.retrieve(query=query, hop_index=hop_index, label=label, top_k=5)
+        best_guidance = ""
+        best_score = 0.0
+        for record in records:
+            if record.error_type != label:
+                continue
+            guidance = getattr(record, "repair_guidance", "")
+            if not guidance:
+                continue
+            if isinstance(record, StepLevelRecord):
+                score = _step_record_similarity(record, query, hop_index)
+                if record.recovery_success:
+                    score += 1.0
+            else:
+                score = _diagnosis_record_similarity(record, query) + 1.0
+            if score > best_score:
+                best_score = score
+                best_guidance = guidance
+        return best_guidance
+
+    def __len__(self) -> int:
+        return len(self._records)
+
+    def __bool__(self) -> bool:
+        return len(self._records) > 0
+
+
+def _query_signature_similarity(left: str, right: str) -> float:
+    left_kw = set(left.split())
+    right_kw = set(right.split())
+    if not left_kw or not right_kw:
+        return 0.0
+    return len(left_kw & right_kw) / max(len(left_kw), len(right_kw))
+
+
+def _step_record_similarity(
+    record: StepLevelRecord,
+    query: str,
+    hop_index: int | None = None,
+) -> float:
+    query_signature = " ".join(_extract_keywords(query)[:10])
+    query_score = _query_signature_similarity(record.key.query_signature, query_signature)
+    if hop_index is None:
+        return query_score
+    hop_score = 1.0 / (1.0 + abs(record.key.hop_index - hop_index))
+    return query_score * hop_score
+
+
+def _diagnosis_record_similarity(
+    record: StepLevelRecord | FailureMemoryRecord,
+    query: str,
+) -> float:
+    if isinstance(record, StepLevelRecord):
+        return _step_record_similarity(record, query)
+    query_keywords = set(_extract_keywords(query))
+    sig_keywords = set(record.trigger_signature.casefold().split())
+    if not query_keywords or not sig_keywords:
+        return 0.0
+    return len(query_keywords & sig_keywords) / max(len(query_keywords), len(sig_keywords))

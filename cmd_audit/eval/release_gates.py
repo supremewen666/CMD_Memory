@@ -1,4 +1,4 @@
-"""Evidence-driven version gates — Issue 0010."""
+"""Evidence-driven release gates."""
 
 from __future__ import annotations
 
@@ -8,20 +8,27 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cmd_audit.core.labels import PIPELINE_LABELS_BASE_ORDER
+from cmd_audit.core.labels import PIPELINE_LABEL_ORDER
 from .provenance import detect_tamper
 from .writers import write_text_artifact
 
 _GATE_DECISION_VALUES = ("approved", "deferred", "rejected")
 
-V0V1_CRITERION_IDS = (
+ATTRIBUTION_RELEASE_CRITERION_IDS = (
     "macro_f1_exceeds_baselines",
     "confusion_diagonal_dominance",
     "accuracy_top2_exceeds_baselines",
     "repair_assessment_distribution",
+    "step_level_attribution_metrics",
 )
 
 DECISION34_LEGACY_ARTIFACTS_DIR = Path("artifacts/legacy_phrase_match_2026_05_22")
+STEP_LEVEL_METRIC_THRESHOLDS = {
+    "step_attribution_coverage": 0.8,
+    "identity_baseline_coverage": 1.0,
+    "positive_credit_rate": 0.5,
+    "primary_label_correctness": 0.5,
+}
 
 
 # ── Data types ──────────────────────────────────────────────────────────
@@ -29,7 +36,7 @@ DECISION34_LEGACY_ARTIFACTS_DIR = Path("artifacts/legacy_phrase_match_2026_05_22
 
 @dataclass(frozen=True)
 class GateCriterion:
-    """Single criterion within a version gate check."""
+    """Single criterion within a release gate check."""
 
     criterion_id: str
     description: str
@@ -42,7 +49,7 @@ class GateCriterion:
 
 @dataclass(frozen=True)
 class GateResult:
-    """Result of checking all criteria for a version gate."""
+    """Result of checking all criteria for a release gate."""
 
     gate_id: str
     criteria: tuple[GateCriterion, ...]
@@ -52,7 +59,7 @@ class GateResult:
 
 @dataclass(frozen=True)
 class GateReview:
-    """HITL review decision for a version gate."""
+    """HITL review decision for a release gate."""
 
     gate_id: str
     reviewer: str
@@ -69,19 +76,19 @@ class GateReview:
             )
 
 
-# ── V0→V1 gate check ───────────────────────────────────────────────────
+# ── Attribution evidence gate check ─────────────────────────────────────
 
 
-def check_v0_to_v1_gate(
+def check_attribution_release_gate(
     artifacts_dir: Path | None = None,
     sandbox_dir: Path | None = None,
 ) -> GateResult:
-    """Check all four V0→V1 evidence gate criteria.
+    """Check the attribution and repair evidence release criteria.
 
     Returns a GateResult with pass/fail per criterion. The final decision is HITL.
     """
     if artifacts_dir is None and sandbox_dir is None:
-        artifacts_dir, sandbox_dir = _default_v0v1_artifact_dirs()
+        artifacts_dir, sandbox_dir = _default_attribution_artifact_dirs()
     else:
         if artifacts_dir is None:
             artifacts_dir = Path("artifacts")
@@ -104,18 +111,21 @@ def check_v0_to_v1_gate(
     # Criterion 4: Repair assessment distribution
     criteria.append(_check_repair_distribution(sandbox_dir / "post_repair_table.csv"))
 
+    # Criterion 5: Step-level MCTS attribution metrics
+    criteria.append(_check_step_level_metrics(artifacts_dir / "step_level_metrics.csv"))
+
     all_passed = all(c.passed for c in criteria)
     checked_at = datetime.now(timezone.utc).isoformat()
 
     return GateResult(
-        gate_id="V0→V1",
+        gate_id="attribution_evidence",
         criteria=tuple(criteria),
         all_passed=all_passed,
         checked_at=checked_at,
     )
 
 
-def _default_v0v1_artifact_dirs() -> tuple[Path, Path]:
+def _default_attribution_artifact_dirs() -> tuple[Path, Path]:
     current = Path("artifacts")
     current_sandbox = current / "sandbox"
     if (current / "comparison_metrics.csv").exists():
@@ -128,16 +138,16 @@ def _default_v0v1_artifact_dirs() -> tuple[Path, Path]:
     return current, current_sandbox
 
 
-# ── V1→V2 gate check ───────────────────────────────────────────────────
+# ── Runtime integration gate check ──────────────────────────────────────
 
 
-def check_v1_to_v2_gate(
+def check_runtime_integration_gate(
     *,
     mem0_integrated: bool = False,
     letta_integrated: bool = False,
     audit_results: tuple = (),
 ) -> GateResult:
-    """Check V1→V2 gate: at least two distinct memory agents integrated.
+    """Check runtime integration evidence for distinct memory agents.
 
     Set *mem0_integrated* to ``True`` after Issue 0014 is complete.
     Set *letta_integrated* to ``True`` after Issue 0015 is complete.
@@ -162,10 +172,10 @@ def check_v1_to_v2_gate(
         )
         missing = "Integrate second adapter target (Letta if mem0 done)."
     else:
-        evidence = "0 adapter integrations; V0 operates as standalone harness."
+        evidence = "0 adapter integrations; current harness operates standalone."
         missing = (
-            "No Adapter Interface integrations exist. V1 must integrate "
-            "at least two distinct memory agents before V1→V2 gate review."
+            "No Adapter Interface integrations exist. The runtime must integrate "
+            "at least two distinct memory agents before release review."
         )
     adapter_criterion = GateCriterion(
         criterion_id="adapter_integration_count",
@@ -182,7 +192,7 @@ def check_v1_to_v2_gate(
     tamper_criterion = _check_provenance_tamper(audit_results)
     criteria = (adapter_criterion, tamper_criterion)
     return GateResult(
-        gate_id="V1→V2",
+        gate_id="runtime_integration",
         criteria=criteria,
         all_passed=all(criterion.passed for criterion in criteria),
         checked_at=checked_at,
@@ -348,6 +358,34 @@ def _read_repair_csv(path: Path) -> list[str]:
     return assessments
 
 
+def _read_step_level_metrics_csv(path: Path) -> dict[str, float]:
+    """Read step-level MCTS metrics from a narrow or single-row wide CSV."""
+    if not path.exists():
+        raise FileNotFoundError(f"Required artifact not found: {path}")
+    with open(path, newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames:
+            return {}
+        rows = list(reader)
+    if not rows:
+        return {}
+
+    fieldnames = set(reader.fieldnames or ())
+    if {"metric_name", "value"}.issubset(fieldnames):
+        return {
+            row["metric_name"]: float(row["value"])
+            for row in rows
+            if row.get("metric_name") and row.get("value") not in (None, "")
+        }
+
+    first = rows[0]
+    return {
+        key: float(value)
+        for key, value in first.items()
+        if value not in (None, "") and key != "case_id"
+    }
+
+
 def _check_macro_f1(comparison_path: Path) -> GateCriterion:
     description = "CMD macro F1 exceeds all comparator baselines"
     threshold = (
@@ -392,15 +430,15 @@ def _check_macro_f1(comparison_path: Path) -> GateCriterion:
 
 
 def _check_confusion_diagonal(confusion_path: Path) -> GateCriterion:
-    description = "Confusion matrix diagonal dominance for all six V0 labels"
-    threshold = "For each V0 label row: diagonal > sum of off-diagonal entries"
+    description = "Confusion matrix diagonal dominance for all pipeline step actions"
+    threshold = "For each step-action row: diagonal > sum of off-diagonal entries"
 
     try:
         data = _read_confusion_csv(confusion_path)
-        v0_labels = list(PIPELINE_LABELS_BASE_ORDER)
+        step_labels = list(PIPELINE_LABEL_ORDER)
         violations: list[str] = []
 
-        for label in v0_labels:
+        for label in step_labels:
             if label not in data:
                 violations.append(f"{label}: missing from confusion matrix")
                 continue
@@ -415,7 +453,7 @@ def _check_confusion_diagonal(confusion_path: Path) -> GateCriterion:
         passed = len(violations) == 0
         if passed:
             evidence = (
-                f"All {len(v0_labels)} V0 labels have diagonal > off-diagonal sum"
+                f"All {len(step_labels)} step actions have diagonal > off-diagonal sum"
             )
         else:
             evidence = "; ".join(violations)
@@ -542,6 +580,56 @@ def _check_repair_distribution(repair_path: Path) -> GateCriterion:
         criterion_id="repair_assessment_distribution",
         description=description,
         artifact_path=str(repair_path),
+        threshold=threshold,
+        passed=passed,
+        evidence=evidence,
+        missing=missing,
+    )
+
+
+def _check_step_level_metrics(metrics_path: Path) -> GateCriterion:
+    description = "Step-level MCTS attribution metrics support generation-point diagnosis"
+    threshold = " AND ".join(
+        f"{metric} >= {required:g}"
+        for metric, required in STEP_LEVEL_METRIC_THRESHOLDS.items()
+    )
+
+    try:
+        metrics = _read_step_level_metrics_csv(metrics_path)
+        missing_metrics = tuple(
+            metric
+            for metric in STEP_LEVEL_METRIC_THRESHOLDS
+            if metric not in metrics
+        )
+        violations = tuple(
+            f"{metric}={metrics[metric]:.3f} < {required:.3f}"
+            for metric, required in STEP_LEVEL_METRIC_THRESHOLDS.items()
+            if metric in metrics and metrics[metric] < required
+        )
+        passed = not missing_metrics and not violations
+        evidence = "; ".join(
+            f"{metric}={metrics[metric]:.3f}"
+            for metric in STEP_LEVEL_METRIC_THRESHOLDS
+            if metric in metrics
+        )
+        if not evidence:
+            evidence = "No step-level metrics found"
+        missing_parts = []
+        if missing_metrics:
+            missing_parts.append(
+                "missing metric(s): " + ", ".join(missing_metrics)
+            )
+        missing_parts.extend(violations)
+        missing = "; ".join(missing_parts)
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        passed = False
+        evidence = f"Could not evaluate: {exc}"
+        missing = str(exc)
+
+    return GateCriterion(
+        criterion_id="step_level_attribution_metrics",
+        description=description,
+        artifact_path=str(metrics_path),
         threshold=threshold,
         passed=passed,
         evidence=evidence,

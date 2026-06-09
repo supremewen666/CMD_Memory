@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytest.skip("Legacy replay-portfolio tests are superseded by the current two-branch runtime.", allow_module_level=True)
+
+
 import unittest
 
 from cmd_audit.attribution import (

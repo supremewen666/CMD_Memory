@@ -12,6 +12,7 @@ from cmd_audit import (
     classify_repair_assessment,
     build_repaired_context,
     draft_ecs,
+    draft_ecs_for_label,
     load_probe_cases,
     run_case,
     run_hard_case_update_baseline,
@@ -68,6 +69,16 @@ class PostRepairContextReplayTest(unittest.TestCase):
         self.assertTrue(ecs.corrected_memory)
         self.assertTrue(ecs.repair_guidance)
         self.assertTrue(ecs.repaired_evidence_block)
+
+    def test_draft_ecs_can_reuse_repair_guidance(self) -> None:
+        ecs = draft_ecs_for_label(
+            self.retrieval_case,
+            self.audit,
+            "retrieval_error",
+            repair_guidance="reuse this historical repair guide",
+        )
+
+        self.assertEqual(ecs.repair_guidance, "reuse this historical repair guide")
 
     def test_build_repaired_context_includes_all_components(self) -> None:
         ecs = draft_ecs(self.retrieval_case, self.audit)

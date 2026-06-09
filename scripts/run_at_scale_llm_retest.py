@@ -23,7 +23,7 @@ if str(ROOT) in sys.path:
     sys.path.remove(str(ROOT))
 sys.path.insert(0, str(ROOT))
 
-from cmd_audit.attribution import assign_attribution
+from cmd_audit.attribution import assign_replay_baseline_attribution
 from cmd_audit.harness import (
     AuditResult,
     _apply_dual_axis_recovery_gain,
@@ -31,9 +31,11 @@ from cmd_audit.harness import (
     write_attribution_table,
     write_comparison_metrics_table,
     write_confusion_matrix_table,
+    write_step_level_metrics_table,
 )
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.scoring.llm import (
+    AnswerRubricScorer,
     AnswerVerifier,
     RUBRIC_MAX_SCORE,
     RubricScorer,
@@ -117,6 +119,8 @@ def build_answer_verifier(
         return _build_rubric_answer_callable(_build_strict_g_eval_scorer(client))
     if answer_mode == "binary":
         return AnswerVerifier(client, max_retries=max_retries)
+    if answer_mode in {"answer-rubric", "rubric-continuous"}:
+        return AnswerRubricScorer(client, max_retries=max_retries)
     rubric = RubricScorer(
         client,
         max_workers=max_workers,
@@ -124,7 +128,7 @@ def build_answer_verifier(
     )
     if answer_mode == "rubric":
         return _build_rubric_answer_callable(rubric)
-    if answer_mode in {"g-eval", "g-eval-hybrid", "rubric-continuous"}:
+    if answer_mode in {"g-eval", "g-eval-hybrid"}:
         return _build_rubric_answer_callable(rubric.score_continuous)
     raise ValueError(f"unknown answer mode: {answer_mode}")
 
@@ -259,14 +263,16 @@ def run_one_case(
     attribution = None
     failure_reason = ""
     try:
-        attribution = assign_attribution(
+        attribution = assign_replay_baseline_attribution(
             replays,
-            has_ingestion_trace=case.has_ingestion_trace,
             positive_gain_threshold=positive_gain_threshold,
             tie_margin=tie_margin,
             top_k=top_k,
             distractor_edges=distractor_edges,
         )
+        if attribution.attribution_failed:
+            failure_reason = attribution.failure_reason or "attribution_failed"
+            attribution = None
     except ValueError:
         top_gain = max((replay.recovery_gain for replay in replays), default=0.0)
         failure_reason = "zero_gain" if top_gain == 0.0 else "negative_gain"
@@ -282,6 +288,7 @@ def run_one_case(
         baseline_suite=baseline_suite,
         baseline_evidence_score_llm=baseline_evidence_score_llm,
         baseline_answer_score_llm=baseline_answer_score_llm,
+        runtime_branch="offline_replay",
     )
     return RetestCaseResult(
         source=source,
@@ -532,6 +539,7 @@ def main(argv: list[str] | None = None) -> int:
     write_attribution_table(audits, out_dir / "attribution_table.csv")
     write_comparison_metrics_table(audits, out_dir / "comparison_metrics.csv")
     write_confusion_matrix_table(audits, out_dir / "attribution_confusion_matrix.csv")
+    write_step_level_metrics_table(audits, out_dir / "step_level_metrics.csv")
     write_run_meta(
         args.run_meta,
         build_run_meta(

@@ -15,12 +15,12 @@ from .provenance import (
     record_provenance_edge,
 )
 from .release_gates import (
+    ATTRIBUTION_RELEASE_CRITERION_IDS,
     GateCriterion,
     GateResult,
     GateReview,
-    V0V1_CRITERION_IDS,
-    check_v0_to_v1_gate,
-    check_v1_to_v2_gate,
+    check_attribution_release_gate,
+    check_runtime_integration_gate,
     write_gate_review,
     write_gate_status,
 )
@@ -41,6 +41,7 @@ from .writers import (
     write_provenance_completeness_summary,
     write_retrieval_metrics_table,
     write_retrieval_trace_table,
+    write_step_level_metrics_table,
     write_text_artifact,
 )
 
@@ -55,10 +56,10 @@ __all__ = [
     "REPLAY_TABLE_ORDER",
     "SurrogateGapRow",
     "SurrogateGapSummary",
-    "V0V1_CRITERION_IDS",
+    "ATTRIBUTION_RELEASE_CRITERION_IDS",
     "bootstrap_metric",
-    "check_v0_to_v1_gate",
-    "check_v1_to_v2_gate",
+    "check_attribution_release_gate",
+    "check_runtime_integration_gate",
     "cohen_kappa",
     "compute_diagnosis_metrics",
     "compute_provenance_completeness",
@@ -77,5 +78,6 @@ __all__ = [
     "write_provenance_completeness_summary",
     "write_retrieval_metrics_table",
     "write_retrieval_trace_table",
+    "write_step_level_metrics_table",
     "write_text_artifact",
 ]

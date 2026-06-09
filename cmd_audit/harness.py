@@ -1,4 +1,4 @@
-"""Public CMD-Audit V0 harness entry points."""
+"""Public CMD-Audit harness entry points."""
 
 from __future__ import annotations
 
@@ -6,13 +6,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .attribution import AttributionResult, assign_attribution
+from .attribution import AttributionResult, assign_replay_baseline_attribution
 from cmd_audit.baselines.comparators import BaselineSuiteResult, run_baseline_suite
 from .eval import DiagnosisPrediction, compute_diagnosis_metrics
-from .core.models import ProbeCase, RetrievedItem
+from .core.models import ProbeCase, RetrievedItem, MemoryItem
 from .data_io import load_all_real_cases
 from .repair import (
     ECSDraft,
+    FailureMemoryStore,
     PostRepairResult,
     RepairedContext,
     build_repaired_context,
@@ -24,7 +25,8 @@ from .eval import (
     ProvenanceTracker,
     get_graph_distractor_edges,
 )
-from .hook import PreCmdDecision, post_retrieve_hook
+from .hook import HookDecision, post_retrieve_hook
+from .hook import post_retrieve_hook as post_retrieve_hook
 from .repair import (
     RepairComparisonRow,
     make_repair_comparison,
@@ -44,7 +46,11 @@ from .eval import (
     write_csv_table,
     write_post_repair_table,
     write_provenance_completeness_summary,
+    write_step_level_metrics_table,
 )
+
+from .item_gate import ItemGateResult, ItemGateStatus, run_item_gate_for_recall_set
+from .mcts import PipelineAction, SearchResult, run_mcts_attribution
 
 
 @dataclass(frozen=True)
@@ -59,19 +65,25 @@ class AuditResult:
     baseline_suite: BaselineSuiteResult
     baseline_evidence_score_llm: float | None = None
     baseline_answer_score_llm: float | None = None
-    hook_stage: str = ""  # 0020-F/0021: empty_ctx | rpe_top_k | rpe_below_threshold | ""
-    selected_replays: tuple[str, ...] = ()  # 0020-F/0021: hook-selected top-k replays
-    per_replay_scores: tuple = ()  # 0020-F/0021: ReplayScore per replay
-    # Day-6 unification: full ECS + post-repair pipeline fields (populated when
+    hook_stage: str = ""
+    selected_replays: tuple[str, ...] = ()
+    per_replay_scores: tuple = ()
+    # Full ECS + post-repair pipeline fields (populated when
     # ``run_case(post_repair=True)`` runs; otherwise None).
     ecs_draft: ECSDraft | None = None
     repaired_context: RepairedContext | None = None
     post_repair: PostRepairResult | None = None
     hard_case_baseline: PostRepairResult | None = None
-    # Day-6 unification: iterative-repair fields (populated when
+    # Iterative-repair fields (populated when
     # ``run_case(repair=adapter)`` runs).
     orchestrator_result: Any = None
     repaired: bool = False
+
+    # Two-branch runtime fields.
+    hook_decision: HookDecision | None = None  # Two-branch gate result (fill/fix)
+    item_gate_result: ItemGateResult | None = None  # Tier 2 item gate result
+    mcts_result: SearchResult | None = None  # Tier 3 MCTS search result
+    runtime_branch: str = ""  # "fill" | "fix" | "offline_replay"
 
     @property
     def attribution_correct(self) -> bool | None:
@@ -119,15 +131,15 @@ def run_case(
     close_deltas_threshold: float = 0.0,
     repair_llm_client: Any = None,
     require_llm_repair_action: bool = False,
+    failure_memory_store: FailureMemoryStore | None = None,
 ) -> AuditResult:
     """Run the CMD-Audit pipeline for a single case.
 
-    Produces a single :class:`AuditResult` over the 11 pipeline labels. Optional
-    stages are gated by keyword, all writing into the same result object:
+    Produces a single :class:`AuditResult` over the current two-branch runtime.
+    Optional stages are gated by keyword, all writing into the same result object:
 
-    * ``hook`` — run the two-stage Pre-CMD Hook before attribution. ``True`` uses
-      an empty adapter name; a ``str`` is taken as the adapter name. When the hook
-      skips, ``attribution`` is ``None`` and ``replays`` is empty.
+    * ``hook`` — run the retrieval confidence gate before attribution. Fill
+      returns without diagnosis; Fix enters item gate and MCTS.
     * ``repair`` — a CMD-Skill adapter; runs the RepairOrchestrator after
       attribution (implies ``hook``). Populates ``orchestrator_result`` / ``repaired``.
     * ``post_repair`` — run the full ECS + Post-Repair Context Replay pipeline.
@@ -138,6 +150,11 @@ def run_case(
         raise ValueError("run_case: post_repair and repair are mutually exclusive")
     if repair is not None and not hook:
         hook = True  # the repair pipeline depends on the hook decision
+    if hook is False:
+        raise ValueError(
+            "run_case(hook=False) is not a live runtime path. "
+            "Use run_replay_baseline_case() for offline replay-baseline attribution."
+        )
 
     if repair is not None:
         return _run_repair(
@@ -154,18 +171,7 @@ def run_case(
             mode=mode,
             repair_llm_client=repair_llm_client,
             require_llm_repair_action=require_llm_repair_action,
-        )
-    if hook:
-        adapter_name = hook if isinstance(hook, str) else ""
-        return _run_with_hook(
-            case,
-            adapter_name=adapter_name,
-            mode=mode,
-            tie_margin=tie_margin,
-            scorer=scorer,
-            agent_generate=agent_generate,
-            answer_verifier=answer_verifier,
-            on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
+            failure_memory_store=failure_memory_store,
         )
     if post_repair:
         return _run_full(
@@ -178,8 +184,55 @@ def run_case(
             answer_verifier=answer_verifier,
             partial_threshold=partial_threshold,
             on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
+            failure_memory_store=failure_memory_store,
         )
-    return _run_attribution(
+    if hook:
+        adapter_name = hook if isinstance(hook, str) else ""
+        return _run_with_hook(
+            case,
+            adapter_name=adapter_name,
+            mode=mode,
+            tie_margin=tie_margin,
+            scorer=scorer,
+            agent_generate=agent_generate,
+            answer_verifier=answer_verifier,
+            on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
+            failure_memory_store=failure_memory_store,
+        )
+    return _run_with_hook(
+        case,
+        adapter_name="",
+        mode=mode,
+        tie_margin=tie_margin,
+        scorer=scorer,
+        agent_generate=agent_generate,
+        answer_verifier=answer_verifier,
+        on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
+        failure_memory_store=failure_memory_store,
+    )
+
+
+def run_cases(cases: list[ProbeCase], **kwargs) -> list[AuditResult]:
+    """Run :func:`run_case` over a list of cases with shared keyword arguments."""
+    return [run_case(case, **kwargs) for case in cases]
+
+
+def run_replay_baseline_case(
+    case: ProbeCase,
+    *,
+    top_k: int = 2,
+    tie_margin: float = 0.0,
+    scorer: EvidenceScorer | None = None,
+    agent_generate: AgentGenerate | None = None,
+    answer_verifier: Any = None,
+    on_the_fly_baseline_rescore: bool = False,
+) -> AuditResult:
+    """Run the offline replay-baseline attribution path.
+
+    This is not the live CMD runtime. It exists for baseline experiments that
+    still compare replay-portfolio deltas against the current 5 step actions.
+    """
+    return _run_replay_baseline(
         case,
         top_k=top_k,
         tie_margin=tie_margin,
@@ -188,11 +241,6 @@ def run_case(
         answer_verifier=answer_verifier,
         on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
     )
-
-
-def run_cases(cases: list[ProbeCase], **kwargs) -> list[AuditResult]:
-    """Run :func:`run_case` over a list of cases with shared keyword arguments."""
-    return [run_case(case, **kwargs) for case in cases]
 
 
 def _score_baseline_with_agent(
@@ -353,7 +401,7 @@ def diagnosis_predictions(result: AuditResult) -> tuple[DiagnosisPrediction, ...
                 system_name=comparator.comparator_name,
                 case_id=result.case_id,
                 gold_label=result.perturbation_label,
-                predicted_label=comparator.predicted_label,
+                predicted_label=comparator.predicted_label or None,
                 top2_labels=comparator.top2_labels,
                 cost_per_diagnosis=comparator.cost_per_diagnosis,
             )
@@ -427,10 +475,10 @@ def write_comparison_metrics_table(
     write_csv_table(output_path, fieldnames, rows)
 
 
-# ── Private pipeline helpers (Day-6 unified harness) ─────────────────────
+# ── Private pipeline helpers ────────────────────────────────────────────
 
 
-def _run_attribution(
+def _run_replay_baseline(
     case: ProbeCase,
     *,
     top_k: int = 2,
@@ -440,7 +488,7 @@ def _run_attribution(
     answer_verifier: Any = None,
     on_the_fly_baseline_rescore: bool = False,
 ) -> AuditResult:
-    """Run the 10-replay portfolio + 11-label attribution (no hook, no repair)."""
+    """Run the offline replay portfolio baseline (no live hook/runtime)."""
     baseline_suite = run_baseline_suite(case)
     baseline = case.primary_baseline
     tracker = ProvenanceTracker(case.case_id)
@@ -481,19 +529,12 @@ def _run_attribution(
     if graph_off_replay is not None:
         distractor_edges = get_graph_distractor_edges(case, graph_off_replay)
 
-    gold_stores, queried_stores = _derive_store_sets(case)
-    attribution = assign_attribution(
+    attribution = assign_replay_baseline_attribution(
         replays,
-        has_ingestion_trace=case.has_ingestion_trace,
         positive_gain_threshold=0.0,
         tie_margin=tie_margin,
         top_k=top_k,
         distractor_edges=distractor_edges,
-        gold_stores=gold_stores,
-        queried_stores=queried_stores,
-        default_store=case.default_store,
-        use_extended_labels=True,
-        separate_reasoning_axis=True,
     )
     if attribution.attribution_failed:
         attribution = None
@@ -508,6 +549,7 @@ def _run_attribution(
         baseline_suite=baseline_suite,
         baseline_evidence_score_llm=baseline_evidence_score_llm,
         baseline_answer_score_llm=baseline_answer_score_llm,
+        runtime_branch="offline_replay",
     )
 
 
@@ -522,18 +564,33 @@ def _run_full(
     answer_verifier=None,
     partial_threshold: float = 0.5,
     on_the_fly_baseline_rescore: bool = False,
+    failure_memory_store: FailureMemoryStore | None = None,
 ) -> AuditResult:
-    """Run attribution -> ECS -> repair -> post-repair replay, folded into one result."""
-    audit = _run_attribution(
+    """Run live runtime attribution -> ECS -> post-repair replay."""
+    del top_k
+    audit = _run_with_hook(
         case,
-        top_k=top_k,
         tie_margin=tie_margin,
         scorer=scorer,
         agent_generate=agent_generate,
         answer_verifier=answer_verifier,
         on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
+        failure_memory_store=failure_memory_store,
     )
-    ecs_draft = draft_ecs(case, audit)
+    if audit.attribution is None:
+        return audit
+    ecs_repair_guidance = (
+        failure_memory_store.get_repair_guidance(
+            case.query, audit.attribution.predicted_label
+        )
+        if failure_memory_store is not None
+        else ""
+    )
+    ecs_draft = draft_ecs(
+        case,
+        audit,
+        repair_guidance=ecs_repair_guidance or None,
+    )
     repaired_context = build_repaired_context(case, ecs_draft)
     post_repair_scorer = evidence_scorer or scorer
     post_repair = run_post_repair_context_replay(
@@ -560,7 +617,7 @@ def _run_full(
     )
 
 
-# ── V1 Hook Pipeline (issue 0021) ───────────────────────────────────────
+# ── Two-Branch Runtime ──────────────────────────────────────────────────
 
 
 def _run_with_hook(
@@ -573,12 +630,9 @@ def _run_with_hook(
     agent_generate: AgentGenerate | None = None,
     answer_verifier: Any = None,
     on_the_fly_baseline_rescore: bool = False,
+    failure_memory_store: FailureMemoryStore | None = None,
 ) -> AuditResult:
-    """Run V1 pipeline with the issue 0021 two-stage Pre-CMD Hook.
-
-    When the hook skips, returns an AuditResult with ``attribution=None``.
-    When it triggers, only ``decision.selected_replays`` are run.
-    """
+    """Run hook → Fill/Fix → item gate → MCTS for one case."""
     baseline_suite = run_baseline_suite(case)
     baseline = case.primary_baseline
     baseline_evidence_score_llm, baseline_answer_score_llm = _score_baseline_with_agent(
@@ -589,23 +643,15 @@ def _run_with_hook(
         enabled=on_the_fly_baseline_rescore,
     )
 
-    # Build RetrievedItem bridge
-    memory_by_id = {item.memory_id: item for item in case.extracted_memory}
-    retrieved_items = tuple(
-        RetrievedItem(memory_id=mid, text=memory_by_id[mid].text)
-        for mid in baseline.retrieved_memory_ids
-        if mid in memory_by_id
-    )
-
-    # Pre-CMD Hook: zero-gold gating decision
+    recall_set = _retrieved_memory_items(case)
+    retrieved_items = _as_retrieved_items(recall_set)
     decision = post_retrieve_hook(
         case.query,
         retrieved_items,
-        adapter_name=adapter_name,
-        mode=mode,
+        failure_memory_store=failure_memory_store,
     )
 
-    if not decision.trigger_cmd:
+    if decision.branch == "fill":
         return AuditResult(
             case_id=case.case_id,
             perturbation_label=case.perturbation_label,
@@ -617,57 +663,53 @@ def _run_with_hook(
             baseline_suite=baseline_suite,
             baseline_evidence_score_llm=baseline_evidence_score_llm,
             baseline_answer_score_llm=baseline_answer_score_llm,
-            hook_stage=decision.stage,
-            selected_replays=decision.selected_replays,
-            per_replay_scores=decision.per_replay_scores,
+            hook_stage="fill",
+            hook_decision=decision,
+            runtime_branch="fill",
         )
 
-    tracker = ProvenanceTracker(case.case_id)
-    replays = run_replay_portfolio_subset(
-        case,
-        decision.selected_replays,
-        tracker=tracker,
-        scorer=scorer,
-        agent_generate=agent_generate,
-        answer_verifier=answer_verifier,
-    )
-    replays = _apply_dual_axis_recovery_gain(
-        replays,
-        baseline_evidence_llm=(
-            baseline_evidence_score_llm
-            if baseline_evidence_score_llm is not None
-            else baseline.evidence_score
-        ),
-        baseline_answer_llm=(
-            baseline_answer_score_llm
-            if baseline_answer_score_llm is not None
-            else baseline.answer_score
-        ),
-    )
+    item_gate_result = None
+    attribution = None
+    mcts_client = _agent_generate_client(case.query, agent_generate)
+    if recall_set and mcts_client is not None:
+        item_gate_result = run_item_gate_for_recall_set(
+            mcts_client,
+            recall_set,
+            case.query,
+            failure_memory_store=failure_memory_store,
+        )
+        attribution = _attribution_from_item_gate(item_gate_result)
 
-    distractor_edges = ()
-    if "graph_off" in decision.selected_replays:
-        for r in replays:
-            if r.replay_name == "graph_off":
-                distractor_edges = get_graph_distractor_edges(case, r)
-                break
-
-    gold_stores, queried_stores = _derive_store_sets(case)
-    attribution = assign_attribution(
-        replays,
-        has_ingestion_trace=case.has_ingestion_trace,
-        positive_gain_threshold=0.0,
-        tie_margin=tie_margin,
-        top_k=2,
-        distractor_edges=distractor_edges,
-        gold_stores=gold_stores,
-        queried_stores=queried_stores,
-        default_store=case.default_store,
-        use_extended_labels=True,
-        separate_reasoning_axis=True,
-    )
-    if attribution.attribution_failed:
-        attribution = None
+    mcts_result = None
+    if attribution is None and (
+        item_gate_result is None or item_gate_result.status == ItemGateStatus.PASS
+    ):
+        mcts_result = run_mcts_attribution(
+            mcts_client,
+            _initial_mcts_context(case, recall_set),
+            recall_set,
+            case.gold_evidence,
+            case.gold_answer,
+            max_iterations=10,
+            max_depth=max(1, min(3, len(recall_set) or 1)),
+            answer_verifier=answer_verifier,
+            baseline_answer_score=(
+                baseline_answer_score_llm
+                if baseline_answer_score_llm is not None
+                else baseline.answer_score
+            ),
+            intervention_config={"candidate_items": case.extracted_memory},
+            action_priors=(
+                failure_memory_store.get_mcts_action_priors(case.query)
+                if failure_memory_store is not None
+                else None
+            ),
+        )
+        if failure_memory_store is not None:
+            failure_memory_store.add_mcts_result(case.query, mcts_result)
+        attribution = _attribution_from_mcts(mcts_result)
+        if attribution is None:
+            attribution = _attribution_from_structural_gap(case)
 
     return AuditResult(
         case_id=case.case_id,
@@ -675,18 +717,157 @@ def _run_with_hook(
         baseline_name=baseline.baseline_name,
         baseline_answer_score=baseline.answer_score,
         baseline_evidence_score=baseline.evidence_score,
-        replays=replays,
+        replays=(),
         attribution=attribution,
         baseline_suite=baseline_suite,
         baseline_evidence_score_llm=baseline_evidence_score_llm,
         baseline_answer_score_llm=baseline_answer_score_llm,
-        hook_stage=decision.stage,
-        selected_replays=decision.selected_replays,
-        per_replay_scores=decision.per_replay_scores,
+        hook_stage="fix",
+        hook_decision=decision,
+        item_gate_result=item_gate_result,
+        mcts_result=mcts_result,
+        runtime_branch="fix",
     )
 
 
-# ── V1 Hook + Repair Integration (issue 0020-C) ─────────────────────────
+def _retrieved_memory_items(case: ProbeCase) -> tuple[MemoryItem, ...]:
+    memory_by_id = {item.memory_id: item for item in case.extracted_memory}
+    return tuple(
+        memory_by_id[mid]
+        for mid in case.primary_baseline.retrieved_memory_ids
+        if mid in memory_by_id
+    )
+
+
+def _as_retrieved_items(items: tuple[MemoryItem, ...]) -> tuple[RetrievedItem, ...]:
+    return tuple(
+        RetrievedItem(memory_id=item.memory_id, text=item.text) for item in items
+    )
+
+
+def _initial_mcts_context(case: ProbeCase, recall_set: tuple[MemoryItem, ...]) -> str:
+    context = case.primary_baseline.injected_context
+    if not context:
+        context = "\n".join(item.text for item in recall_set)
+    return f"Query: {case.query}\n\nRetrieved Memory:\n{context}"
+
+
+class _AgentGenerateClient:
+    def __init__(self, query: str, agent_generate: AgentGenerate) -> None:
+        self._query = query
+        self._agent_generate = agent_generate
+
+    def generate(self, prompt: str, *, system: str | None = None) -> str:
+        context = prompt if system is None else f"{system}\n\n{prompt}"
+        return self._agent_generate(self._query, context)
+
+
+def _agent_generate_client(
+    query: str, agent_generate: AgentGenerate | None
+) -> _AgentGenerateClient | None:
+    if agent_generate is None:
+        return None
+    return _AgentGenerateClient(query, agent_generate)
+
+
+def _attribution_from_item_gate(
+    item_gate_result: ItemGateResult | None,
+) -> AttributionResult | None:
+    if item_gate_result is None:
+        return None
+    label_by_status = {
+        ItemGateStatus.ITEM_STALE: "item_stale",
+        ItemGateStatus.ITEM_CONFLICT: "item_conflict",
+        ItemGateStatus.ITEM_WRONG: "item_wrong",
+        ItemGateStatus.ITEM_COMPRESSION_DISTORTED: "item_compression_distorted",
+        ItemGateStatus.ITEM_POISONED: "item_poisoned",
+    }
+    label = label_by_status.get(item_gate_result.status)
+    if label is None:
+        return None
+    return AttributionResult(
+        predicted_label=label,
+        top_replay="item_gate",
+        recovery_gain=1.0,
+        top2_labels=(label,),
+        is_ambiguous=False,
+        top_k_labels=(label,),
+        close_deltas=((label, 0.0),),
+    )
+
+
+def _attribution_from_mcts(mcts_result: SearchResult | None) -> AttributionResult | None:
+    if mcts_result is None or mcts_result.primary_attribution_label is None:
+        return None
+
+    credits: list[tuple[str, float]] = []
+    for action_credits in mcts_result.action_credits.values():
+        for action, credit in action_credits.items():
+            if action == PipelineAction.IDENTITY:
+                continue
+            credits.append((action.value, credit))
+    credits.sort(key=lambda item: item[1], reverse=True)
+    if not credits or credits[0][1] <= 0.0:
+        return None
+
+    label = credits[0][0]
+    top2 = tuple(item[0] for item in credits[:2])
+    return AttributionResult(
+        predicted_label=label,
+        top_replay=label,
+        recovery_gain=credits[0][1],
+        top2_labels=top2,
+        is_ambiguous=len(credits) > 1 and credits[1][1] == credits[0][1],
+        top_k_labels=tuple(item[0] for item in credits[:3]),
+        close_deltas=tuple((item[0], credits[0][1] - item[1]) for item in credits),
+    )
+
+
+def _attribution_from_structural_gap(case: ProbeCase) -> AttributionResult | None:
+    """Fallback attribution for deterministic evidence-boundary gaps.
+
+    MCTS needs a generator/verifier pair to score terminal recovery. In unit and
+    trace-only runs, we can still attribute clear retrieval/injection boundary
+    failures without falling back to the legacy replay portfolio.
+    """
+    baseline = case.primary_baseline
+    retrieved_ids = frozenset(baseline.retrieved_memory_ids)
+    gold_source_ids = frozenset(
+        evidence.source_memory_id
+        for evidence in case.gold_evidence
+        if evidence.source_memory_id
+    )
+
+    label = None
+    if gold_source_ids and not gold_source_ids.issubset(retrieved_ids):
+        label = "retrieval_error"
+    elif gold_source_ids:
+        memory_by_id = {item.memory_id: item for item in case.extracted_memory}
+        retrieved_gold_text = "\n".join(
+            memory_by_id[mid].text for mid in gold_source_ids if mid in memory_by_id
+        )
+        source_score = evidence_recall_from_text(case.gold_evidence, retrieved_gold_text)
+        injected_score = evidence_recall_from_text(
+            case.gold_evidence, baseline.injected_context
+        )
+        if source_score > injected_score:
+            label = "injection_error"
+
+    if label is None:
+        return None
+
+    return AttributionResult(
+        predicted_label=label,
+        top_replay=label,
+        recovery_gain=max(0.0, 1.0 - baseline.evidence_score),
+        top2_labels=(label,),
+        is_ambiguous=False,
+        top_k_labels=(label,),
+        close_deltas=((label, 0.0),),
+    )
+
+
+# ── Hook + Repair Integration ──────────────────────────────────────────
 
 
 def _run_repair(
@@ -704,6 +885,7 @@ def _run_repair(
     mode: str = "online",
     repair_llm_client=None,
     require_llm_repair_action: bool = False,
+    failure_memory_store: FailureMemoryStore | None = None,
 ) -> AuditResult:
     """Run Pre-CMD Hook + attribution + RepairOrchestrator, folded into one result.
 
@@ -724,6 +906,7 @@ def _run_repair(
         agent_generate=agent_generate,
         answer_verifier=answer_verifier,
         on_the_fly_baseline_rescore=on_the_fly_baseline_rescore,
+        failure_memory_store=failure_memory_store,
     )
 
     # Step 2: If attribution failed or hook skipped, return early
@@ -737,7 +920,8 @@ def _run_repair(
         executor=RepairExecutor(
             llm_client=repair_llm_client,
             require_llm_action=require_llm_repair_action,
-        )
+        ),
+        fm_store=failure_memory_store,
     )
     orch_result = orchestrator.run(
         attribution=audit.attribution,
@@ -812,6 +996,7 @@ def run_real_suite(
     write_attribution_table(results, att_path)
     write_comparison_metrics_table(results, metrics_path)
     write_confusion_matrix_table(results, confusion_path)
+    write_step_level_metrics_table(results, dest / "step_level_metrics.csv")
     write_provenance_completeness_summary(results, provenance_path)
     if ran_full:
         write_post_repair_table(results, dest / "post_repair_table.csv")
@@ -821,7 +1006,7 @@ def run_real_suite(
                 dest / "repair_success_table.csv",
             )
         except (AttributeError, KeyError, ValueError):
-            # V1 labels without legacy repair-comparison rows still get the
+            # Labels without repair-comparison rows still get the
             # post-repair table, which is the Decision 34 required artifact.
             pass
 

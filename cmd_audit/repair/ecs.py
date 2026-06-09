@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from ..core.labels import OUT_OF_SCOPE_ITEM_LABELS, validate_label
+from ..core.labels import ITEM_LABELS, validate_diagnosis_label, validate_item_label
 
 
 # Natural-language phrases that re-declare forbidden item labels.
@@ -29,7 +29,7 @@ def _validate_ecs_cause(cause: str) -> str:
     """Reject ECS cause text that uses forbidden item label names or NL equivalents."""
     lowered = cause.casefold()
     # Pipeline label terms are allowed here; only out-of-scope item labels leak scope.
-    for label in OUT_OF_SCOPE_ITEM_LABELS:
+    for label in ITEM_LABELS:
         if label in lowered:
             raise ECSCauseValidationError(
                 f"ECS cause must not use forbidden item label {label!r}; "
@@ -42,6 +42,13 @@ def _validate_ecs_cause(cause: str) -> str:
                 "item label; use descriptive state language instead"
             )
     return cause
+
+
+def _validate_stream_cause(label: str, cause: str) -> str:
+    if label in ITEM_LABELS:
+        validate_item_label(label)
+        return cause
+    return _validate_ecs_cause(cause)
 
 
 @dataclass(frozen=True)
@@ -57,5 +64,5 @@ class ECSDraft:
     cascade_candidates: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        validate_label(self.predicted_label)
-        _validate_ecs_cause(self.cause)
+        validate_diagnosis_label(self.predicted_label)
+        _validate_stream_cause(self.predicted_label, self.cause)

@@ -20,7 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cmd_audit.hook import V1_REPLAY_NAME_ORDER, post_retrieve_hook
+from cmd_audit.core.labels import PIPELINE_LABEL_ORDER, REPLAY_TO_LABEL
+from cmd_audit.hook import post_retrieve_hook
 from cmd_audit.core.models import ProbeCase, RetrievedItem
 from cmd_audit.data_io import load_real_cases_by_source
 
@@ -70,7 +71,7 @@ def build_hook_efficacy_rows(
     decide = decision_fn or _selected_replays_from_hook
     rows: list[HookEfficacyRow] = []
     missing: list[str] = []
-    total_replays = len(V1_REPLAY_NAME_ORDER)
+    total_replays = len(PIPELINE_LABEL_ORDER)
     for case_id, retest_rows in sorted(retest_by_case.items()):
         case_entry = case_index.get(case_id)
         if case_entry is None:
@@ -82,6 +83,7 @@ def build_hook_efficacy_rows(
         ]
         retrieved_items = _retrieved_items(case)
         selected = decide(case.query, retrieved_items)
+        top_label = REPLAY_TO_LABEL.get(top_replay, top_replay)
         cost_reduction = 1.0 - (len(selected) / total_replays)
         rows.append(
             HookEfficacyRow(
@@ -89,7 +91,7 @@ def build_hook_efficacy_rows(
                 source=source,
                 top_replay=top_replay,
                 selected_replays=selected,
-                recall_hit=top_replay in selected,
+                recall_hit=top_label in selected,
                 cost_reduction=cost_reduction,
             )
         )
@@ -156,7 +158,8 @@ def _selected_replays_from_hook(
     query: str,
     retrieved_items: tuple[RetrievedItem, ...],
 ) -> tuple[str, ...]:
-    return post_retrieve_hook(query, retrieved_items).selected_replays
+    decision = post_retrieve_hook(query, retrieved_items)
+    return PIPELINE_LABEL_ORDER if decision.trigger_diagnosis else ()
 
 
 def _retrieved_items(case: ProbeCase) -> tuple[RetrievedItem, ...]:

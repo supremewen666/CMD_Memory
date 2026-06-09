@@ -109,7 +109,17 @@ class RepairOrchestrator:
 
         for label in labels_to_try:
             try:
-                ecs_draft = draft_ecs_for_label(case, audit_result, label)
+                repair_guidance = (
+                    self._fm_store.get_repair_guidance(case.query, label)
+                    if self._fm_store is not None
+                    else ""
+                )
+                ecs_draft = draft_ecs_for_label(
+                    case,
+                    audit_result,
+                    label,
+                    repair_guidance=repair_guidance or None,
+                )
             except LabelValidationError as exc:
                 labels_skipped.append((label, str(exc)))
                 continue

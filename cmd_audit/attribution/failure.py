@@ -8,6 +8,7 @@ from dataclasses import dataclass
 # Failure reason enum for principled abstention (Decision 35 R1).
 FAILURE_REASON_ZERO_GAIN = "zero_gain"
 FAILURE_REASON_NEGATIVE_GAIN = "negative_gain"
+FAILURE_REASON_OUT_OF_SCOPE_REPLAY = "out_of_scope_replay"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ def build_abstain_result(
     top_recovery_gain: float,
     *,
     distractor_edges: tuple = (),
+    failure_reason: str | None = None,
 ) -> AttributionResult:
     """Construct a principled-abstention AttributionResult.
 
@@ -39,11 +41,12 @@ def build_abstain_result(
     instead of raising. Downstream callers check the flag and decide whether
     to skip post-repair / log abstention coverage.
     """
-    failure_reason = (
-        FAILURE_REASON_NEGATIVE_GAIN
-        if top_recovery_gain < 0.0
-        else FAILURE_REASON_ZERO_GAIN
-    )
+    if failure_reason is None:
+        failure_reason = (
+            FAILURE_REASON_NEGATIVE_GAIN
+            if top_recovery_gain < 0.0
+            else FAILURE_REASON_ZERO_GAIN
+        )
     return AttributionResult(
         predicted_label="",
         top_replay="",

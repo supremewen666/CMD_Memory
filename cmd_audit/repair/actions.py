@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from ..core.labels import PIPELINE_LABEL_ORDER, validate_label_base, validate_label
+from ..core.labels import ITEM_LABELS, PIPELINE_LABEL_ORDER, validate_diagnosis_label
 from .post_repair import PostRepairResult
 from ..eval.writers import write_csv_table, write_text_artifact
 
@@ -21,39 +21,10 @@ class TargetedRepairAction:
     repair_guidance: str = ""
 
     def __post_init__(self) -> None:
-        validate_label(self.label)
+        validate_diagnosis_label(self.label)
 
 
 REPAIR_ACTION_BY_LABEL: dict[str, TargetedRepairAction] = {
-    "write_error": TargetedRepairAction(
-        label="write_error",
-        action_name="Oracle Write Repair",
-        description="Inject gold evidence directly into memory as a newly written item.",
-        intervention_summary="Replay with Oracle Write recovers evidence that was never written.",
-        cause="no recoverable evidence found in extracted memory; the failure "
-        "may originate at or before the write step",
-        repair_guidance="ensure events are written to memory and evidence is preserved "
-        "through the pipeline",
-    ),
-    "compression_error": TargetedRepairAction(
-        label="compression_error",
-        action_name="Oracle Compression Repair",
-        description="Replace lossy-compressed memory with an evidence-preserving representation.",
-        intervention_summary="Replay with Oracle Compression recovers evidence lost during compression.",
-        cause="lossy compression removed key evidence that was present in the "
-        "original memory item",
-        repair_guidance="reduce compression aggressiveness or preserve key evidence "
-        "phrases during compression",
-    ),
-    "premature_extraction_error": TargetedRepairAction(
-        label="premature_extraction_error",
-        action_name="Verbatim Event Repair",
-        description="Extract raw event evidence into a new memory item before it is abstracted away.",
-        intervention_summary="Replay with Verbatim Event Oracle recovers evidence lost during extraction.",
-        cause="key evidence was present in raw events but was not preserved "
-        "in any extracted memory item",
-        repair_guidance="improve extraction to preserve evidence from raw events into memory items",
-    ),
     "retrieval_error": TargetedRepairAction(
         label="retrieval_error",
         action_name="Oracle Retrieval Repair",
@@ -73,82 +44,87 @@ REPAIR_ACTION_BY_LABEL: dict[str, TargetedRepairAction] = {
         repair_guidance="fix injection formatting so retrieved evidence is presented "
         "as a clean evidence block",
     ),
-    "reasoning_error": TargetedRepairAction(
-        label="reasoning_error",
-        action_name="Evidence-Given Reasoning Repair",
-        description="Present evidence in a structured block with explicit reasoning guidance.",
-        intervention_summary="Replay with Evidence-Given Reasoning recovers correct answer from available evidence.",
-        cause="the injected context contained the required evidence, but the "
-        "final answer did not match the gold answer",
-        repair_guidance="review reasoning step over provided evidence; the evidence was "
-        "sufficient but the conclusion was wrong",
+    "granularity_error": TargetedRepairAction(
+        label="granularity_error",
+        action_name="Oracle Granularity Repair",
+        description="Re-express memory at a finer or coarser granularity to preserve evidence.",
+        intervention_summary="Oracle Granularity recovers evidence lost at the original granularity level.",
+        cause="memory was expressed at a granularity level that lost key evidence; "
+        "a different granularity preserves the evidence",
+        repair_guidance="adjust memory expression granularity to preserve evidence; "
+        "consider the level that best balances detail and conciseness",
+    ),
+    "graph_error": TargetedRepairAction(
+        label="graph_error",
+        action_name="Graph-Off Repair",
+        description="Disable graph expansion to avoid distractor items masking correct evidence.",
+        intervention_summary="Graph-Off recovers evidence when graph expansion introduced distractors.",
+        cause="graph expansion introduced distractor items that masked correct evidence "
+        "present in directly-matched memory items",
+        repair_guidance="constrain or re-rank graph expansion results to prevent "
+        "distractors from overriding directly-matched evidence",
+    ),
+    "safety_error": TargetedRepairAction(
+        label="safety_error",
+        action_name="Safety-Off Repair",
+        description="Bypass safety filter to allow valid blocked evidence through.",
+        intervention_summary="Safety-Off recovers evidence blocked by an over-aggressive safety filter.",
+        cause="safety filter blocked valid evidence that was necessary for a correct answer",
+        repair_guidance="review safety filter rules to reduce false positives; "
+        "consider evidence-level allow-listing for known-safe content",
+    ),
+    "item_wrong": TargetedRepairAction(
+        label="item_wrong",
+        action_name="Item Correction Repair",
+        description="Replace incorrect memory content with corrected memory.",
+        intervention_summary="Item gate found the recalled memory content wrong.",
+        cause="item_wrong",
+        repair_guidance="replace the incorrect item with corrected memory before retrying",
+    ),
+    "item_stale": TargetedRepairAction(
+        label="item_stale",
+        action_name="Stale Item Update",
+        description="Update stale memory with the newer conflicting item.",
+        intervention_summary="Recall-set collision found a newer item that supersedes the old one.",
+        cause="item_stale",
+        repair_guidance="prefer the newer conflicting item and retire or update the stale one",
+    ),
+    "item_conflict": TargetedRepairAction(
+        label="item_conflict",
+        action_name="Conflict Clarification",
+        description="Surface conflicting memory items for arbitration instead of choosing one silently.",
+        intervention_summary="Recall-set collision found same-period contradictory items.",
+        cause="item_conflict",
+        repair_guidance="present the conflict and ask for clarification or apply a domain rule",
+    ),
+    "item_poisoned": TargetedRepairAction(
+        label="item_poisoned",
+        action_name="Poisoned Item Quarantine",
+        description="Quarantine suspicious memory content for human review.",
+        intervention_summary="Item gate reached the source-free poisoned-item floor.",
+        cause="item_poisoned",
+        repair_guidance="quarantine the suspicious item and require human review before reuse",
+    ),
+    "item_compression_distorted": TargetedRepairAction(
+        label="item_compression_distorted",
+        action_name="Compression Distortion Repair",
+        description="Replace over-compressed memory with a more faithful representation.",
+        intervention_summary="LOO contrast found distortion caused by compression.",
+        cause="item_compression_distorted",
+        repair_guidance="restore the missing details from reconstruction or source context",
     ),
 }
 
 
-REPAIR_ACTION_BY_LABEL.update(
-    {
-        "ingestion_error": TargetedRepairAction(
-            label="ingestion_error",
-            action_name="Oracle Write Repair",
-            description="Inject gold evidence directly into memory; ingestion pipeline missed it.",
-            intervention_summary="Oracle Write recovers evidence the agent never received.",
-            cause="gold evidence never reached the agent through the ingestion pipeline; "
-            "the write step could not store what it never received",
-            repair_guidance="verify ingestion pipeline is receiving and forwarding all "
-            "relevant evidence to the write step",
-        ),
-        "route_error": TargetedRepairAction(
-            label="route_error",
-            action_name="Oracle Route Repair",
-            description="Route evidence through the correct store/tier for retrieval.",
-            intervention_summary="Oracle Route recovers evidence stored in the wrong store/tier.",
-            cause="evidence was stored in a store that the baseline retrieval did not query",
-            repair_guidance="update routing logic to store evidence in the correct store "
-            "or expand retrieval to query all relevant stores",
-        ),
-        "granularity_error": TargetedRepairAction(
-            label="granularity_error",
-            action_name="Oracle Granularity Repair",
-            description="Re-express memory at a finer or coarser granularity to preserve evidence.",
-            intervention_summary="Oracle Granularity recovers evidence lost at the original granularity level.",
-            cause="memory was expressed at a granularity level that lost key evidence; "
-            "a different granularity preserves the evidence",
-            repair_guidance="adjust memory expression granularity to preserve evidence; "
-            "consider the level that best balances detail and conciseness",
-        ),
-        "graph_error": TargetedRepairAction(
-            label="graph_error",
-            action_name="Graph-Off Repair",
-            description="Disable graph expansion to avoid distractor items masking correct evidence.",
-            intervention_summary="Graph-Off recovers evidence when graph expansion introduced distractors.",
-            cause="graph expansion introduced distractor items that masked correct evidence "
-            "present in directly-matched memory items",
-            repair_guidance="constrain or re-rank graph expansion results to prevent "
-            "distractors from overriding directly-matched evidence",
-        ),
-        "safety_error": TargetedRepairAction(
-            label="safety_error",
-            action_name="Safety-Off Repair",
-            description="Bypass safety filter to allow valid blocked evidence through.",
-            intervention_summary="Safety-Off recovers evidence blocked by an over-aggressive safety filter.",
-            cause="safety filter blocked valid evidence that was necessary for a correct answer",
-            repair_guidance="review safety filter rules to reduce false positives; "
-            "consider evidence-level allow-listing for known-safe content",
-        ),
-    }
-)
-
-
 def get_targeted_repair_action(label: str) -> TargetedRepairAction:
-    """Return the targeted repair action for a V0 attribution label."""
-    validate_label_base(label)
+    """Return the targeted repair action for a live diagnosis label."""
+    validate_diagnosis_label(label)
     return REPAIR_ACTION_BY_LABEL[label]
 
 
 def get_targeted_repair_action_v1(label: str) -> TargetedRepairAction:
-    """Return the targeted repair action for a V1 attribution label."""
-    validate_label(label)
+    """Return the targeted repair action for a live diagnosis label."""
+    validate_diagnosis_label(label)
     return REPAIR_ACTION_BY_LABEL[label]
 
 
@@ -248,14 +224,16 @@ def compute_repair_success_summary(
     rows: list[RepairComparisonRow],
 ) -> dict[str, RepairSuccessLabelSummary]:
     """Aggregate repair outcomes per attribution label."""
+    diagnosis_order = (*PIPELINE_LABEL_ORDER, *tuple(sorted(ITEM_LABELS)))
     by_label: dict[str, list[RepairComparisonRow]] = {
-        label: [] for label in PIPELINE_LABEL_ORDER
+        label: [] for label in diagnosis_order
     }
     for row in rows:
-        by_label[row.perturbation_label].append(row)
+        if row.perturbation_label in by_label:
+            by_label[row.perturbation_label].append(row)
 
     summaries: dict[str, RepairSuccessLabelSummary] = {}
-    for label in PIPELINE_LABEL_ORDER:
+    for label in diagnosis_order:
         label_rows = by_label[label]
         total = len(label_rows)
         if total == 0:
@@ -581,7 +559,8 @@ class RepairAction:
 
     def __post_init__(self) -> None:
         validate_repair_action_type(self.action_type)
-        validate_label(self.label)
+        # Skip label validation here - it's handled at the caller level
+        # based on whether V0 or V1 labels are being used
         if not self.target_store:
             raise RepairActionTypeError("RepairAction target_store must be non-empty")
         if not self.content:
@@ -650,7 +629,7 @@ def build_repair_action_prompt(
     repair_guidance: str,
 ) -> str:
     """Build the JSON-only RepairAction subagent prompt."""
-    validate_label(label)
+    validate_diagnosis_label(label)
     return "\n\n".join(
         (
             "CMD ATTRIBUTION LABEL:\n" + label,

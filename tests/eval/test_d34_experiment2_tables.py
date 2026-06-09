@@ -69,7 +69,7 @@ class Experiment2TablesTest(unittest.TestCase):
                 gold_label="retrieval_error",
                 confidence="high",
                 predicted_label="retrieval_error",
-                top2_labels=("retrieval_error", "write_error"),
+                top2_labels=("retrieval_error", "injection_error"),
                 attribution_failed=False,
                 failure_reason="",
                 top_replay="oracle_retrieval",
@@ -79,10 +79,10 @@ class Experiment2TablesTest(unittest.TestCase):
             exp2.CmdPrediction(
                 case_id="c2",
                 source="unit",
-                gold_label="write_error",
+                gold_label="injection_error",
                 confidence="low",
                 predicted_label=None,
-                top2_labels=("write_error", "retrieval_error"),
+                top2_labels=("injection_error", "retrieval_error"),
                 attribution_failed=True,
                 failure_reason="zero_gain",
                 top_replay="oracle_write",
@@ -125,8 +125,8 @@ class Experiment2TablesTest(unittest.TestCase):
                 system_name="random_label",
                 case_id="c1",
                 gold_label="retrieval_error",
-                predicted_label="write_error",
-                top2_labels=("write_error",),
+                predicted_label="injection_error",
+                top2_labels=("injection_error",),
                 cost_per_diagnosis=0.01,
             )
         ]

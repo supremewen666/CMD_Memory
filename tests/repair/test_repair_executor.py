@@ -114,29 +114,33 @@ class RepairExecutorActionTypeTest(unittest.TestCase):
 
     def test_select_action_type_maps_labels(self) -> None:
         self.assertEqual(
-            RepairExecutor._select_action_type("write_error", ("append", "replace")),
-            "append",
-        )
-        self.assertEqual(
             RepairExecutor._select_action_type("retrieval_error", ("update_routing", "append")),
             "update_routing",
         )
         self.assertEqual(
-            RepairExecutor._select_action_type("compression_error", ("replace", "append")),
+            RepairExecutor._select_action_type("granularity_error", ("replace", "append")),
             "replace",
+        )
+        self.assertEqual(
+            RepairExecutor._select_action_type("item_conflict", ("append", "replace")),
+            "append",
         )
 
     def test_select_action_type_fallback(self) -> None:
         # When preferred action not supported, fallback to first supported
         self.assertEqual(
-            RepairExecutor._select_action_type("write_error", ("replace",)),
+            RepairExecutor._select_action_type("item_stale", ("append",)),
+            "append",
+        )
+        self.assertEqual(
+            RepairExecutor._select_action_type("retrieval_error", ("replace",)),
             "replace",
         )
 
     def test_select_action_type_empty_fallback(self) -> None:
         # Empty supported_actions falls back to append
         self.assertEqual(
-            RepairExecutor._select_action_type("write_error", ()),
+            RepairExecutor._select_action_type("item_wrong", ()),
             "append",
         )
 

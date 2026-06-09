@@ -132,6 +132,7 @@ class Mem0Adapter(AdapterRepairMixin):
                             source_event_ids=item.source_event_ids,
                             store=item.store,
                             is_graph_expanded=item.is_graph_expanded,
+                            passed_safety_filter=item.passed_safety_filter,
                             provenance=item.provenance,
                         )
                     )

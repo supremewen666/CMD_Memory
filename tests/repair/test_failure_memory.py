@@ -13,13 +13,17 @@ from cmd_audit import (
     run_case,
     run_recurrence_comparisons,
     write_recurrence_comparison_table,
-    PIPELINE_LABELS_BASE_ORDER,
+    PIPELINE_LABEL_ORDER,
 )
 from cmd_audit.core.labels import LabelValidationError
 from cmd_audit.repair.failure_memory import _FailureMemoryStoreV0, _build_failure_memory_context_v0
 
 ISSUE_3_CASES = Path("data/probe_cases/v0_issue3_cases.json")
 ISSUE_7_CASES = Path("data/probe_cases/v0_issue7_future_cases.json")
+
+
+def _live_cases(path: Path):
+    return [case for case in load_probe_cases(path) if case.perturbation_label is not None]
 
 
 # ── FailureMemoryRecord creation ────────────────────────────────────────
@@ -30,7 +34,7 @@ class FailureMemoryRecordCreationTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.cases = load_probe_cases(ISSUE_3_CASES)
+        cls.cases = _live_cases(ISSUE_3_CASES)
 
     def test_record_from_ecs_has_all_required_fields(self) -> None:
         for case in self.cases:
@@ -40,7 +44,7 @@ class FailureMemoryRecordCreationTest(unittest.TestCase):
 
             with self.subTest(case_id=case.case_id):
                 self.assertIsInstance(record.error_type, str)
-                self.assertIn(record.error_type, PIPELINE_LABELS_BASE_ORDER)
+                self.assertIn(record.error_type, PIPELINE_LABEL_ORDER)
                 self.assertIsInstance(record.wrong_memory, str)
                 self.assertIsInstance(record.original_evidence, str)
                 self.assertIsInstance(record.cause, str)
@@ -66,7 +70,7 @@ class FailureMemoryRecordCreationTest(unittest.TestCase):
 
         with self.assertRaises((LabelValidationError, ValueError)):
             FailureMemoryRecord(
-                error_type="item_wrong",
+                error_type="write_error",
                 wrong_memory="",
                 original_evidence="",
                 cause="valid cause text",
@@ -90,10 +94,6 @@ class FailureMemoryRecordCreationTest(unittest.TestCase):
         )
 
     def test_wrong_memory_reflects_baseline_context(self) -> None:
-        # wrong_memory comes from baseline injected_context, which for
-        # reasoning_error cases may contain the gold evidence (but the
-        # baseline still answered wrong). For other labels the baseline
-        # context typically lacks the evidence.
         for case in self.cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
@@ -115,15 +115,15 @@ class FailureMemoryStoreRetrieveTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.cases = load_probe_cases(ISSUE_3_CASES)
+        cls.cases = _live_cases(ISSUE_3_CASES)
         cls.store = _FailureMemoryStoreV0()
         for case in cls.cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
             cls.store = cls.store.add(FailureMemoryRecord.from_ecs_draft(ecs, case))
 
-    def test_store_contains_all_six_records(self) -> None:
-        self.assertEqual(len(self.store), 6)
+    def test_store_contains_live_records(self) -> None:
+        self.assertEqual(len(self.store), len(self.cases))
 
     def test_retrieve_by_matching_query_returns_records(self) -> None:
         results = self.store.retrieve("Which city did Mira choose for the Q3 offsite?")
@@ -167,7 +167,7 @@ class BuildFailureMemoryContextTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.cases = load_probe_cases(ISSUE_3_CASES)
+        cls.cases = _live_cases(ISSUE_3_CASES)
         cls.store = _FailureMemoryStoreV0()
         for case in cls.cases:
             audit = run_case(case)
@@ -231,7 +231,7 @@ class RecurrenceComparisonRowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # Build Failure Memory from original cases
-        cls.original_cases = load_probe_cases(ISSUE_3_CASES)
+        cls.original_cases = _live_cases(ISSUE_3_CASES)
         cls.store = _FailureMemoryStoreV0()
         for case in cls.original_cases:
             audit = run_case(case)
@@ -239,11 +239,11 @@ class RecurrenceComparisonRowTest(unittest.TestCase):
             cls.store = cls.store.add(FailureMemoryRecord.from_ecs_draft(ecs, case))
 
         # Future task cases
-        cls.future_cases = load_probe_cases(ISSUE_7_CASES)
+        cls.future_cases = _live_cases(ISSUE_7_CASES)
         cls.rows = run_recurrence_comparisons(cls.future_cases, cls.store)
 
     def test_one_row_per_future_case(self) -> None:
-        self.assertEqual(len(self.rows), 3)
+        self.assertEqual(len(self.rows), len(self.future_cases))
 
     def test_rows_have_all_required_fields(self) -> None:
         for row in self.rows:
@@ -321,19 +321,19 @@ class RecurrenceSummaryTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.original_cases = load_probe_cases(ISSUE_3_CASES)
+        cls.original_cases = _live_cases(ISSUE_3_CASES)
         cls.store = _FailureMemoryStoreV0()
         for case in cls.original_cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
             cls.store = cls.store.add(FailureMemoryRecord.from_ecs_draft(ecs, case))
-        cls.future_cases = load_probe_cases(ISSUE_7_CASES)
+        cls.future_cases = _live_cases(ISSUE_7_CASES)
         cls.rows = run_recurrence_comparisons(cls.future_cases, cls.store)
         cls.summary = compute_recurrence_summary(cls.rows)
 
     def test_summary_has_all_fields(self) -> None:
         self.assertIsInstance(self.summary, RecurrenceSummary)
-        self.assertEqual(self.summary.total_cases, 3)
+        self.assertEqual(self.summary.total_cases, len(self.future_cases))
         self.assertIsInstance(self.summary.failure_memory_worth_keeping, bool)
 
     def test_summary_rates_in_range(self) -> None:
@@ -362,13 +362,13 @@ class RecurrenceTableOutputTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.original_cases = load_probe_cases(ISSUE_3_CASES)
+        cls.original_cases = _live_cases(ISSUE_3_CASES)
         cls.store = _FailureMemoryStoreV0()
         for case in cls.original_cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
             cls.store = cls.store.add(FailureMemoryRecord.from_ecs_draft(ecs, case))
-        cls.future_cases = load_probe_cases(ISSUE_7_CASES)
+        cls.future_cases = _live_cases(ISSUE_7_CASES)
         cls.rows = run_recurrence_comparisons(cls.future_cases, cls.store)
 
     def test_table_writes_csv_with_required_columns(self) -> None:
@@ -406,7 +406,7 @@ class RecurrenceTableOutputTest(unittest.TestCase):
             summary_path = sandbox / "recurrence_summary.txt"
             self.assertTrue(summary_path.exists())
             text = summary_path.read_text(encoding="utf-8")
-            self.assertIn("CMD V0 ECS Failure Memory Recurrence Summary", text)
+            self.assertIn("CMD ECS Failure Memory Recurrence Summary", text)
             self.assertIn("Failure Memory worth keeping", text)
 
     def test_table_rejects_outside_sandbox(self) -> None:
@@ -429,8 +429,8 @@ class FullPipelineRecurrenceTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.original_cases = load_probe_cases(ISSUE_3_CASES)
-        cls.future_cases = load_probe_cases(ISSUE_7_CASES)
+        cls.original_cases = _live_cases(ISSUE_3_CASES)
+        cls.future_cases = _live_cases(ISSUE_7_CASES)
 
         # Run full CMD pipeline on original cases
         cls.full_results = [run_case(c, post_repair=True) for c in cls.original_cases]
@@ -452,10 +452,10 @@ class FullPipelineRecurrenceTest(unittest.TestCase):
         cls.rows = run_recurrence_comparisons(cls.future_cases, cls.store)
 
     def test_full_pipeline_produces_valid_rows(self) -> None:
-        self.assertEqual(len(self.rows), 3)
+        self.assertEqual(len(self.rows), len(self.future_cases))
         for row in self.rows:
             with self.subTest(case_id=row.case_id):
-                self.assertIn(row.perturbation_label, PIPELINE_LABELS_BASE_ORDER)
+                self.assertIn(row.perturbation_label, PIPELINE_LABEL_ORDER)
 
     def test_corrected_guidance_outperforms_full_trace(self) -> None:
         better_count = sum(
@@ -468,7 +468,7 @@ class FullPipelineRecurrenceTest(unittest.TestCase):
         )
 
     def test_all_original_cases_in_failure_memory(self) -> None:
-        self.assertEqual(len(self.store), 6)
+        self.assertEqual(len(self.store), len(self.original_cases))
 
     def test_similar_future_case_retrieves_original_record(self) -> None:
         retrieval_case = [
@@ -493,7 +493,7 @@ class FailureMemoryECSCauseValidationTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.cases = load_probe_cases(ISSUE_3_CASES)
+        cls.cases = _live_cases(ISSUE_3_CASES)
 
     def test_fm_record_cause_does_not_contain_forbidden_labels(self) -> None:
         forbidden = {
@@ -526,32 +526,20 @@ class FailureMemoryNoGoldLeakageTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.cases = load_probe_cases(ISSUE_3_CASES)
+        cls.cases = _live_cases(ISSUE_3_CASES)
 
     def test_fm_record_preserves_ecs_boundaries(self) -> None:
-        # FM corrected_memory comes from CMD replay evidence_block.
-        # For non-reasoning errors, corrected_memory should differ from
-        # wrong_memory. For reasoning_error, both may use the same
-        # evidence (retrieved correctly but reasoned over wrongly).
         for case in self.cases:
             audit = run_case(case)
             ecs = draft_ecs(case, audit)
             record = FailureMemoryRecord.from_ecs_draft(ecs, case)
 
             with self.subTest(case_id=case.case_id):
-                if case.perturbation_label == "reasoning_error":
-                    self.assertEqual(
-                        record.corrected_memory,
-                        record.wrong_memory,
-                        f"{case.case_id}: reasoning_error: evidence was correct, "
-                        f"repair adds reasoning guidance not new memory",
-                    )
-                else:
-                    self.assertNotEqual(
-                        record.corrected_memory,
-                        record.wrong_memory,
-                        f"{case.case_id}: corrected_memory must differ from wrong_memory",
-                    )
+                self.assertNotEqual(
+                    record.corrected_memory,
+                    record.wrong_memory,
+                    f"{case.case_id}: corrected_memory must differ from wrong_memory",
+                )
 
 
 if __name__ == "__main__":

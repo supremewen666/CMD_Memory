@@ -2,161 +2,142 @@
 
 ## Read First
 
-(CLAUDE.md covers remaining required reading.)
+1. `CONTEXT.md` — final design: domain language, two-branch runtime, label taxonomy, boundaries
+2. `DISCUSSION.md` — converged decisions (G-Eval dual-axis, step-level MCTS A–F, item gate, hook reshape #2–#5)
+3. `CLAUDE.md` — coding boundaries
 
-## Current State (2026-05-29)
+CONTEXT.md is the authority on the target design. The code below predates it; the tasks bring code in line with CONTEXT.md.
 
-**943 tests pass** (17 pre-existing failures unrelated to refactor). V0 complete and locked. V1 issues 0011-0021 complete. V0→V1 gate HITL approved and V1→V2 gate passes (mem0 + Letta) as mechanics validation. Decision 34 (2026-05-23/24, R1-R11) reframes the 596-case Macro F1 = 1.000 as a phrase-match shortcut artifact, not paper-grade evidence. Paper headline now binds to 130 researcher-adjudicated cases with LLM-A + blind spot-check; hook is supplementary; CMD vs Rewind head-to-head is dropped in favor of layered positioning. **Issue 0020 complete (Decision 32 post-gate pipeline): all 8 subtasks done, 91 new tests, 0 regressions.**
+## Code State (starting point)
 
-**W1 Refactor (D35 Route E) complete (2026-05-29):** 10-subpackage layout, 3 entry points (`run_case`/`run_cases`/`run_real_suite`), all `_v1` suffixes dropped, `__init__.py` trimmed from 190 → 132 symbols, `ALL_LABELS` added, CLAUDE.md + current-memory.md updated.
+The harness runs a flat portfolio of counterfactual replays scored by an LLM subagent stack, with attribution by recovery-gain ranking, ECS drafting, iterative repair, and a Post-Repair Context Replay quality gate. mem0 and Letta recorded-trace adapters exist. A confidence hook and provenance DAG are wired.
 
-| Issue | Content | Tests | Status |
-|-------|---------|-------|--------|
-| 0001 | Probe dataset + Oracle Retrieval | — | ✅ |
-| 0002 | Baselines + comparators + leak-safe monitor | — | ✅ |
-| 0003 | 6-replay V0 attribution table | — | ✅ |
-| 0004 | Taxonomy boundary review | — | ✅ |
-| 0005 | Post-Repair Context Replay | — | ✅ |
-| 0006 | Targeted memory fixes (6 per-label actions) | 26 | ✅ |
-| 0007 | ECS Failure Memory recurrence | 44 | ✅ |
-| 0008 | BM25 retrieval baseline strengthening | 35 | ✅ |
-| 0009 | Subagent Judge Monitor contract hardening | 15 | ✅ |
-| 0010 | Evidence-driven version gates | 48 | ✅ |
-| 0011 | `ingestion_error` + `route_error` labels | 44 | ✅ |
-| 0012 | `granularity_error` + `graph_error` + `safety_error` | 81 | ✅ |
-| 0013 | Coupled-failure recalibration + memory-probe baseline | 42 | ✅ |
-| 0014 | mem0 adapter (two-cut-point, recorded-trace) | 30 | ✅ |
-| 0015 | Letta adapter (three-cut-point, tripartite) + V1→V2 gate | 44 | ✅ |
-| 0016 | Real data integration (601 cases, unified loader, CLI) | 38 | ✅ |
-| 0017 | Provenance tracking (Execution Lineage DAG) | 78 | ✅ |
-| 0017-1 | RPE prefilter + PrefixGuard (refactored zero-gold) | — | refactored in 0018 |
-| 0019 Phase A | LLM-as-Judge baseline (4th comparator) | 32 | ✅ |
-| 0019 Phase B | SubagentScorer replacing phrase-matching | 39 | ✅ |
-| 0018 | Pre-CMD Hook — zero-gold online gate | 88 | ✅ |
-| 0021 | Hook redesign: 2-stage + RPE judge + hook/ package | 34 | ✅ |
-| 0020-H | V2 cascade pre-burial (ECSDraft.cascade_candidates) | 7 | ✅ |
-| 0020-B | RepairAction + adapter.apply_repair (5 action_types) | 19 | ✅ |
-| 0020-D | Failure Memory upgrade (composite key + fm_context) | 18 | ✅ |
-| 0020-A | RepairExecutor + RepairOrchestrator (iterative repair) | 15 | ✅ |
-| 0020-G | ECS iterative repair (draft_ecs_for_label) | 9 | ✅ |
-| 0020-F | PreCmdDecision signals → AuditResult | 6 | ✅ |
-| 0020-C | `run_case(repair=adapter)` + RepairOrchestrator integration | 6 | ✅ |
-| 0020-E | Self-supervision surrogate (surrogate vs gold gap) | 11 | ✅ |
+Three things are now stale relative to CONTEXT.md and are the subject of the tasks below:
 
-Detail maps: `cmd_innovation_core/issues/0003-*.md`, `0005-*.md`, `0006-*.md`, `0007-*.md`, `0008-*.md`, `0011-*.md`, `0012-*.md`, `0013-*.md`, `0014-*.md`, `0015-*.md`, `0017-*.md`, `0017-1-*.md`, `0019-phase-a-*.md`, `0019-phase-b-*.md`, `0018-pre-cmd-hook-design.md`, `0021-hook-redesign-three-stage-rpe-judge.md`, `0020-h-*.md`, `0020-b-*.md`, `0020-d-*.md`, `0020-a-*.md`, `0020-g-*.md`, `0020-f-*.md`, `0020-c-*.md`, `0020-e-*.md`.
+1. **Label taxonomy** — code carries 11 pipeline labels including `reasoning_error`, `route_error`, and 4 formation labels (`write_error`, `compression_error`, `premature_extraction_error`, `ingestion_error`). The final design keeps **5 live pipeline step actions** + **5 item labels**; formation/reasoning/route are removed from the live surface.
+2. **Flat replay portfolio** — the 10-replay flat portfolio is replaced by a step-level MCTS over generation points (5 step actions) plus a Tier 2 item gate (5 item labels). Formation oracle replays are deleted — evidence-missing is absorbed by the Fill branch, not diagnosed.
+3. **Hook** — currently a multi-feature gate that predicts replays; reshaped to a pure two-branch confidence gate (Fill vs Fix) that does not classify.
 
-## Label Taxonomy
+## Label Taxonomy (target)
 
-**V0 (locked, 6 labels):** `write_error`, `compression_error`, `premature_extraction_error`, `retrieval_error`, `injection_error`, `reasoning_error`.
+**Pipeline step actions (5, Tier 3 MCTS generation-point actions):** `retrieval_error`, `injection_error`, `granularity_error`, `graph_error`, `safety_error`. First three always legal; `graph_error` gated on `is_graph_expanded`, `safety_error` gated on `passed_safety_filter`.
 
-**V1 (active, +5 labels):** `ingestion_error`, `route_error`, `granularity_error`, `graph_error`, `safety_error`. All 11 pipeline labels active.
+**Item labels (5, Tier 2 item gate):** `item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`.
 
-**Still excluded:** Bad memory item labels (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) — deferred to V2.
+**Removed from live surface:**
+- Formation failures (`write_error`, `compression_error`, `premature_extraction_error`, `ingestion_error`) — not labels; evidence-missing routes to Fill branch with no sub-typing (information-theoretic floor).
+- `reasoning_error` — not a label; non-memory reasoning faults emerge through back-prop (no intervention recovers → Δ≈0 → UCT abandons).
+- `route_error` — absorbed into `retrieval_error` (cross-tier misfetch, no separate label).
 
-V1 pipeline (10 replays) = V0 6 replays + `oracle_route` + 3 V1 passthrough (`graph_off`, `safety_off`, `oracle_granularity`). V1 functions accept V0+V1 labels; V0 functions reject V1 labels.
+## Two-Branch Runtime (target)
 
-## Boundary Acceptance Conditions
+```
+retrieval recall → hook (6 factors → evidence present in recall?)
+  ├─ NO  (evidence missing) → FILL: first send to API generate (answer this turn)
+  │         → async re-extract / ask / HITL.  No diagnosis, no label.
+  └─ YES (evidence present) → FIX: hook lightweight correction (de-conflict / re-rank)
+            → send to API generate
+            → subagent loop: Tier 2 item gate → Tier 3 pipeline MCTS
+```
 
-- **CMD-Audit** (research harness) and **CMD-Skill Adapter** (deployment layer) are separate. Audit writes to `artifacts/sandbox/` only. Adapter applies validated repairs to production state.
-- **Subagent Judge Monitor**: enum-locked `anomaly_reason`, opaque evidence IDs. No labels, ECS, writes, gold answers, or full traces.
-- **Post-Repair Context Replay**: rerun original query with repaired context, no gold injection, three-value `repair_assessment` (`recovered`/`partial`/`failed`).
-- **ECS `cause`**: must not use forbidden item label names (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) or their natural-language equivalents.
-- **Verbatim Event Oracle boundary**: `evidence_recall_from_text(gold_evidence, memory_item.text)` is the hard gate. Evidence absent from text → `premature_extraction_error`, never `retrieval_error`.
-- **V0/V1 stream separation**: V1 functions accept V0+V1 labels; V0 functions reject V1 labels. Never cross the streams.
-- **Adapter sandbox**: SHA-256 checksum verification over store state before/after replay. Any mutation is `SandboxViolationError`.
+Hook is a pure confidence gate: it answers "do we diagnose?" not "what's wrong?". All diagnosis lives in Tier 2 / Tier 3.
 
-## ⚠️ Accelerated Timeline — Target: 2026-06-10 V1.0 Arxiv Preprint, V1.1 Venue Submission Post-Corpus
+## Tasks (dependency order)
 
-Decision 30 (2026-05-20): counterfactual replay commoditizing. Timeline accelerated to **2026-06-10**. Decision 34 (2026-05-23/24): CMD vs Rewind head-to-head dropped. Paper headline binds to 130 researcher-adjudicated cases (LLM-A + spot-check assisted). V1.0/V1.1 dual-release: V1.0 ships as arxiv preprint on 06-10 with 596-derived numbers; V1.1 venue submission re-runs on full corpus post-issue-0035.
+### 1. AnswerRubricScorer
 
-| Date | Milestone | Deliverable |
-|------|-----------|-------------|
-| ✅ 05-15~18 | V1 label expansion | Issues 0011-0012 |
-| ✅ 05-19 | Coupled-failure + mem0 + Letta | Issues 0013-0015 |
-| ✅ 05-20 | Decision 30 | Accelerate, Rewind 5-dim diff, repair depth metric |
-| ✅ 05-21 | Issue 0019 Phase A + Issue 0018 design | llm_judge comparator, Pre-CMD Hook design |
-| ✅ 05-22 | Real data + Gate at scale | Issues 0016-0018 (under phrase-match shortcut, see Decision 34 R1) |
-| ✅ 05-23 | Decision 33 hook redesign + Decision 34 grilling start | issue 0021 implemented; REPAIR.md captures Q1-Q10 → R1-R7 |
-| ✅ 05-24 | Decision 34 grilling close | Q11-Q23 → R8-R11; issues 0022-0034 written; REPAIR.md §15-§19 |
-| 05-25~28 | LLM eval infra wiring (issue 0022, R1+R2+R5 + Gap 3/4) | `agent_generate` + independent scorer + Post-Repair AnswerVerifier + label-strip + on-the-fly baseline rescore + bootstrap CI helper + V1 `tie_margin=0.0` defaults |
-| ✅ 05-25 | deepseek labeling provenance recovery (issue 0033) | Reconstructed `scripts/annotate_perturbation_labels.py` + cleaning_report annotated; full DeepSeek API rerun pending credentials |
-| 05-25 | Test suite migration (issue 0032) | conftest, label-leak invariant rewrite, adapter-parity-at-LLM-stack tests |
-| 05-25 | Artifact archive (issue 0031) | move pre-D34 artifacts to `legacy_phrase_match_2026_05_22/` + MANIFEST |
-| 05-28~30 | At-scale LLM re-test V1.0 (issue 0023) | 596 cases × 10 replays + post-repair under LLM stack — feeds 0026/0028/0029/0036 |
-| 05-30 | Free hook calibration V1.0 (issue 0028) | LR fit on re-test outputs (~half-day) |
-| 05-30~01 | Researcher 130-case adjudication V1.0 (issue 0024) | LLM-A (llama-3.3-70b-instruct) + 20-case blind spot-check + κ vs deepseek (~5 hr) |
-| 06-01~03 | Researcher 80-ECS inspection V1.0 (issue 0025) | Manually corrected ECS for Experiment 1 (~5 hr) |
-| 06-03 | Experiment 2 V1.0 headline (issue 0026) | CMD attribution Macro F1 + bootstrap CI on 130 adjudicated cases vs LLM-as-judge + evidence-recall + random; cost/latency column; per-source heatmap with CIs |
-| 06-04 | Hook efficacy supplementary table (issue 0028) | recall + cost reduction |
-| 06-04 | Surrogate-gap LLM rerun supplementary (issue 0036) | retention% on 4 gold-dependent labels, 50-case hold-out |
-| 06-06 | Experiment 1 V1.0 + coupled-failure subset report | 5-mode (none/full_trace/corrected_only/corrected_only_padded/contrastive) on 80 cases; coupled-failure post-hoc on 30-50 near-tie cases (issue 0029) |
-| 06-07 | Layered positioning + Decision 30 addendum (issue 0030) | ~2 hr writing, no code |
-| 06-08~10 | V1.0 arxiv preprint draft | Headline 130-case + Experiment 1 + layered positioning + supplementary scale check + supplementary hook + supplementary coupled-failure + supplementary surrogate-gap. Cross-dataset claim = coverage only (V1.0 N too small for generalization) |
-| post-corpus | Issue 0035 corpus migration cutover | V1.1 trigger: re-run 0023/0024/0026/0027/0028/0029/0031/0036 on full corpus |
-| post-V1.1 | V1.1 venue submission | Same headline structure with full-corpus N; cross-dataset generalization claim now defensible |
+Continuous answer-axis G-Eval, prerequisite for the MCTS value function and leaf Δ.
 
-**Critical path V1.0**: LLM eval infra → re-test → adjudication → Experiment 2 → arxiv preprint. Hook calibration off critical path. Rewind benchmark off critical path.
+- `scoring/llm.py`: add `_continuous_verify_answer(client, answer, gold_answer)` (logprob G-Eval over the answer rubric, returns `E[score] ∈ [0,4]`); add `AnswerRubricScorer` class whose `verify` returns `float ∈ [0,1]`. `_ANSWER_RUBRIC_SYSTEM_PROMPT` already exists.
+- Fallback chain: logprobs unavailable → discrete rubric parse → return 0 (conservative tie-break, matches evidence axis).
+- `scoring/__init__.py`: export `AnswerRubricScorer`.
+- `build_answer_verifier`: add `"answer-rubric"` mode returning `AnswerRubricScorer` directly (retire the rubric-answer hack path; keep old modes for back-compat).
+- Tests under `tests/scoring/`.
 
-**Critical path V1.1**: issue 0035 corpus availability → all V1.0 issues re-run → venue submission.
+### 2. Label taxonomy cleanup
 
-## Next Steps (ordered by dependency)
+Bring `core/labels.py` to the target taxonomy.
 
-Per Decision 34 (2026-05-23/24 grilling). All historical V0/V1 issue items remain ✅. This list is forward-only and tracks both V1.0 (06-10 arxiv) and V1.1 (post-corpus venue) milestones. Each issue 0022-0036 has individual detail map under `cmd_innovation_core/issues/`.
+- `PIPELINE_LABEL_ORDER` → the 5 step actions only (`retrieval_error`, `injection_error`, `granularity_error`, `graph_error`, `safety_error`).
+- Drop `reasoning_error` and `route_error` everywhere. Remove `evidence_given_reasoning` and `oracle_route` from `REPLAY_TO_LABEL`.
+- Remove the 4 formation labels from the live pipeline set. Keep their names only where boundary/limitation docs reference the information-theoretic floor.
+- Promote the 5 item labels from `OUT_OF_SCOPE_ITEM_LABELS` to a live `ITEM_LABELS` set used by Tier 2.
+- Update `validate_label` to accept 5 step actions; item labels validated through a separate item-label validator (streams stay separate).
+- Update all callers and tests that assume the 11-label set.
 
-1. **issue 0033 — deepseek labeling provenance recovery** (R4-prov) — provenance recovered 05-25; full 596-case DeepSeek API rerun pending credentials before citing scale sanity agreement.
-2. **issue 0022 — LLM eval infrastructure wiring** (R1+R2+R5 + Gap 3/4, target 05-25~28). Wiring edits (replays.py shortcut gate + label-strip; post_repair.py AnswerVerifier wiring; harness.py pass-through + on-the-fly baseline rescore; PhraseMatchShortcutWarning category; conftest filter; bootstrap CI helper; V1 entry-point `tie_margin=0.0` defaults; new tests).
-3. **issue 0032 — Test suite migration** (target 05-25~28). conftest filter, label-leak invariant rewrite, adapter-parity-at-LLM-stack tests.
-4. **issue 0031 — Artifact archive + manifests** (R9, target 05-25). Pre-D34 artifacts → `legacy_phrase_match_2026_05_22/` with MANIFEST.txt.
-5. **issue 0023 — At-scale LLM re-test V1.0** (R1+R3, target 05-28~30). 596 × 10 replays under LLM stack → `at_scale_llm_retest.csv`. Feeds 0026 / 0028 / 0029 / 0036.
-6. **issue 0028 — Hook calibration V1.0** (R5 supplementary, target 05-30). Refactor `calibrate_hook.py` to consume 0023 outputs. Half-day. Off critical path.
-7. **issue 0024 — Researcher 130-case adjudication V1.0** (R4+R11, target 05-30~01). LLM-A + 20-case blind spot-check. ~5 hours.
-8. **issue 0025 — Researcher 80-ECS inspection V1.0** (R7, target 06-01~03). ~5 hours.
-9. **issue 0026 — Experiment 2 V1.0 headline run** (R8, target 06-03). 130 adjudicated cases + 4 baselines + cost/latency + bootstrap CIs + per-source heatmap.
-10. **issue 0036 — Surrogate-gap LLM-stack rerun** (R10/Q18, target 06-04). 50-case hold-out, 4 gold-dependent labels, retention%.
-11. **issue 0029 — Coupled-failure subset post-hoc** (R3, target 06-04). 30-50 near-tie cases, manual inspection, calibrated tie_margin.
-12. **issue 0027 — Experiment 1 V1.0 hardened** (R7, target 06-06). 80 cases × 5 modes, McNemar's tests Δ_1 + Δ_2.
-13. **issue 0030 — Layered positioning + Decision 30 addendum** (R6, target 06-07). ~2 hr writing.
-14. **V1.0 arxiv preprint** (target 06-08~10). Cross-dataset claim = coverage only.
-15. **issue 0035 — Corpus migration cutover** (R10, post-V1.0). Full-corpus rebuild + re-annotation; triggers V1.1 reruns of 0023/0024/0026/0027/0028/0029/0031/0036.
-16. **V1.1 venue submission** (post-0035). Cross-dataset claim = explicit generalization (post-corpus N supports it).
+### 3. Hook two-branch refactor
 
-Post-paper V2: cascade repair via LLM self-modification on provenance DAG, multi-agent CMD, runtime repair loop, real-time live mem0/Letta integration.
+Reshape the hook to emit a branch decision, not a replay prediction.
 
-## V1 Key Decisions (reference)
+- `hook/post_retrieve_hook.py`: compute the 6 confidence factors (`retrieval_score_max`, `retrieval_score_entropy`, `evidence_coverage`, `memory_recency_min`, `memory_recency_spread`, `conflict_signal`) → single scalar → branch.
+  - Fill: return a generate-first signal; no diagnostic cascade.
+  - Fix: perform lightweight correction (de-conflict / re-rank), then signal entry into the subagent loop.
+- Remove the `empty_ctx` gate (subsumed by Fill).
+- Remove RPE per-replay ranking from the hook (diagnosis moves to Tier 2/3).
+- `hook/constants.py`: 6-factor schema.
+- Tests under `tests/hook/`.
 
-Recorded in `cmd_innovation_core/plans/cmd_open_decisions.md` (Decisions 13-34):
+### 4. Tier 2 item gate
 
-- V0+V1+V2 = single paper (D15)
-- First adapter: mem0. Second: Letta. (D14)
-- RPE prefilter (D27): 2-tier architecture (PrefixGuard Tier-1 + RPE Tier-2) — superseded by D33 for hook internals
-- Provenance (D28): Execution Lineage DAG + trace-mem Citation
-- Gold evidence limitation (D29): 4/11 gold-dependent, self-supervision mitigation
-- Rewind 5-dim differentiation (D30): granularity, diagnosis, repair, validation, learning
-- Pre-CMD Hook (D31): single `post_retrieve_hook`, zero-gold online, offline calibration — superseded by D33
-- Post-Gate Pipeline (D32): repair layering (4-tier), iterative repair, self-supervision surrogate (→0021 Step 2), FM lifecycle
-- Hook Redesign (D33): two-stage sequential (empty_ctx + RPE Judge 16-feature per-replay ranking), 0021
-- Paper Claim Integrity (D34): 130-case adjudicated headline, 596-case scale sanity, hook supplementary, Rewind benchmark dropped
+New `cmd_audit/item_gate/` subpackage implementing reference-contrast divergence over the recall set.
 
-## Non-Code Skeleton Sync
+- `divergence.py`: directed entailment divergence via the `_continuous_verify` logprob path. Two-direction read → wrong (forward) vs compression (reverse) typing.
+- `collision.py`: recall-set pairwise contrast (≤ C(5,2)), 0 generation. Large directed divergence + reliable newer timestamp → `item_stale`; large divergence + same-period/no-timestamp → `item_conflict`; small divergence → pass.
+- `loo.py`: LOO reconstruction of `m̂_i` from store∖{m_i}, 1 generation + contrast → `item_wrong` / `item_compression_distorted`.
+- `gate.py`: cost-ladder orchestration ①timestamp (direction signal only) → ②collision → ③LOO → HITL terminal (threshold-edge divergence + `item_poisoned`, source-free floor). Item-wrong → item treatment, skip Tier 3; item-correct → enter Tier 3.
+- Scope: collision/divergence operate only on this retrieval's recall set (~5 items), per-task scoping.
+- Tests under `tests/item_gate/`.
 
-When updating planning files, order is: PRD → issues → prototypes → TDD → gates → knowledge → reference_notes → plans → experiments → hypotheses → CLAUDE.md + TASK.md → config → logs.
+### 5. Tier 3 step-level MCTS
+
+New `cmd_audit/mcts/` subpackage. Single-player MCTS + UCT over generation points; replaces the flat portfolio for pipeline attribution. Tool calls / pure-reasoning hops / context accumulation = pass-through (no branching). Depth = generation-point count.
+
+- `actions.py`: the 5-action table; legality (`is_graph_expanded` gates `graph_error`, `passed_safety_filter` gates `safety_error`); identity (no-op) action for clean re-run.
+- `value.py`: nested value, no free weight —
+  `k = #{atom_i : rubric_B(ctx_h, atom_i) ≥ τ}`, `ceiling = k/N`, `V_scalar = ceiling · (E[score_answer]/4)`; `V_vector = (E[score_answer], [rubric_B raw scores × N])` stored per node.
+- `tree.py`: node state (memory + system prompt + question at root; child = parent prefix + one hop under a label intervention, inheriting the parent's intervention consequences). UCT selection `argmax_c [Qmax(c) + C·√(ln N(parent)/n(c))]`; expansion initializes new-node `Qmax = V_scalar` (soft prune); max-backup `Qmax(a) ← max(Qmax(a), Δ)` along the path.
+- `rollout.py`: set remaining hops to identity, full re-run to terminal, leaf `Δ = AnswerVerifier(leaf_answer, gold_answer)` (or surrogate-of-gold when y unavailable).
+- `search.py`: MCTS loop with shallowest-recovery-depth stop (depth-1 single-point intervention recovers → that hop is main culprit, stop). Credit `credit(h) = Qmax(prefix<h + h:best_label) − Qmax(prefix<h + h:identity)`; primary label = argmax credit; close_deltas = top-k for repair.
+- Online mode: budget-capped shallow tree / UCT rollouts.
+- Delete the flat formation oracle replays (`oracle_write`, `oracle_compression`, `verbatim_event_oracle`) and `evidence_given_reasoning` / `oracle_route` from the live attribution path.
+- Tests under `tests/mcts/`.
+
+### 6. Failure Memory step-level key
+
+- `repair/failure_memory.py`: extend the composite retrieval key to `(query_signature, hop_index, label)` for step-level transfer. Keep the flat key path back-compatible.
+
+### 7. Harness integration
+
+- `harness.py`: wire the two-branch runtime into `run_case`. Hook → Fill (early return, generate-first flag) or Fix (lightweight correction → generate → Tier 2 → Tier 3 → ECS → repair → Post-Repair Context Replay). Replace the flat portfolio call with the MCTS path.
+- `eval/release_gates.py`: extend the step-level gate with step-level attribution metrics (per-hop credit, primary-label correctness).
+- Update integration tests.
+
+## Boundaries (constrain implementation)
+
+- **CMD-Audit** (research harness) writes only to `artifacts/sandbox/`. **CMD-Skill Adapter** (deployment layer) applies validated repairs to production state. Keep separate.
+- **Adapter sandbox**: SHA-256 checksum over store state before/after replay; any mutation is `SandboxViolationError`.
+- **Leak-safe monitor**: enum-locked `anomaly_reason`, opaque evidence IDs; no labels, ECS, writes, gold answers, or full traces.
+- **Post-Repair Context Replay**: rerun original query with repaired context, no gold injection, three-value `repair_assessment` (`recovered` / `partial` / `failed`).
+- **ECS cause streams stay separate**: a step-action ECS names a step action; an item ECS names an item label. The pipeline stream never borrows item-fault vocabulary in free text.
+- **Evidence-missing → Fill**: when recalled text lacks evidence, the failure is upstream formation; route to Fill, do not sub-type, do not assign `retrieval_error`.
+- **Reference hierarchy law**: never descend a reference tier when a stronger reference is available; reconstruction is last resort.
+- **Directed entailment divergence** is NOT KL divergence — it is a G-Eval expectation over an entailment score token (asymmetric, d(x,x)=0, no triangle inequality).
 
 ## Evidence Gates
 
-Do not make paper claims until the corresponding artifact exists:
+Do not claim a result until its artifact exists:
 
-- Attribution: `attribution_table.csv` + confusion matrix ✅
-- Comparator: `comparison_metrics.csv` ✅
-- Repair: Post-Repair Context Replay table ✅
-- Recurrence: Failure Memory recurrence comparison ✅
-- Version gates: V0→V1 ✅ / V1→V2 ✅ as mechanics validation; paper-grade attribution awaits Decision 34 LLM re-test + 130-case adjudication
+- Attribution: per-case predicted label + per-hop credit table + confusion matrix.
+- Comparator: CMD vs baselines metrics.
+- Repair: Post-Repair Context Replay assessment distribution.
+- Recurrence: Failure Memory recurrence comparison.
 
-Paper claims focus: (1) automated counterfactual attribution at operation-level granularity, (2) Post-Repair Context Replay as automated semantic quality gate, (3) full detection→diagnosis→repair→validate→store loop.
+Paper claims focus: (1) automated counterfactual attribution at step-level granularity, (2) Post-Repair Context Replay as automated semantic quality gate, (3) full detect → diagnose → repair → validate → store loop.
 
 ## Non-Goals
 
 - Do not build a production memory agent — CMD-Audit is a research harness, CMD-Skill Adapter is a deployment layer.
 - Do not add UI or dashboard work.
-- Do not train a learned attribution classifier — rule-based replay deltas are the evidence foundation.
-- Do not expand labels beyond the 11 active pipeline labels without updating the issue plan first.
-- Do not claim gold evidence is available online — 4/11 labels need it offline (information-theoretic bound).
+- Do not train a learned attribution classifier — replay/MCTS deltas are the evidence foundation. (MCTS-trajectory distillation into a no-search policy is out of current scope.)
+- Do not reintroduce formation, reasoning, or route as live labels.
+- Do not claim gold evidence is available online — formation sub-typing needs it offline (information-theoretic bound).

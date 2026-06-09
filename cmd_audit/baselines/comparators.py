@@ -19,7 +19,6 @@ from typing import Any
 import logging
 
 from cmd_audit.core.labels import (
-    PIPELINE_LABELS_BASE_ORDER,
     PIPELINE_LABEL_ORDER,
     validate_monitor_anomaly_reason,
     validate_label,
@@ -133,9 +132,11 @@ class ComparatorResult:
     uses_counterfactual_replay: bool = False
 
     def __post_init__(self) -> None:
-        validate_label(self.predicted_label)
+        if self.predicted_label:
+            validate_label(self.predicted_label)
         for label in self.top2_labels:
-            validate_label(label)
+            if label:
+                validate_label(label)
 
 
 @dataclass(frozen=True)
@@ -189,23 +190,10 @@ class BaselineSuiteResult:
 # ---------------------------------------------------------------------------
 
 _LABEL_DESCRIPTIONS: dict[str, str] = {
-    "write_error": "The agent failed to write correct memory items from raw events — "
-    "evidence never entered the memory store.",
-    "compression_error": "The agent summarized or compressed memory and lost key evidence "
-    "that was present in the original memory items.",
-    "premature_extraction_error": "The agent extracted memory too early, before all "
-    "relevant raw events had been processed — evidence existed in raw events but was "
-    "never moved into extracted memory.",
     "retrieval_error": "The correct evidence exists in the memory store, but the agent "
     "failed to retrieve it when answering the query.",
     "injection_error": "The correct evidence was retrieved but not properly injected "
     "into the agent's reasoning context.",
-    "reasoning_error": "The correct evidence was present in the agent's context, but "
-    "the agent still produced a wrong answer — a reasoning failure.",
-    "ingestion_error": "The upstream ingestion path failed to pass required evidence "
-    "into the memory pipeline.",
-    "route_error": "The evidence exists, but it was stored or routed through a tier "
-    "the baseline retrieval path did not query.",
     "granularity_error": "The memory was represented at a granularity that dropped "
     "or obscured required evidence.",
     "graph_error": "Graph expansion introduced distractors that masked directly "
@@ -403,7 +391,7 @@ def run_evidence_recall_heuristic(
     return ComparatorResult(
         comparator_name="evidence_recall",
         predicted_label=predicted_label,
-        top2_labels=(predicted_label,),
+        top2_labels=(predicted_label,) if predicted_label else (),
         explanation=rationale,
         cost_per_diagnosis=0.05,
         uses_counterfactual_replay=False,
@@ -435,14 +423,15 @@ def run_subagent_judge_baseline(
 
 
 def run_random_label_baseline(case: ProbeCase) -> ComparatorResult:
+    from ..core.labels import PIPELINE_STEP_ACTIONS
     digest = hashlib.sha256(case.case_id.encode("utf-8")).digest()
-    first_index = digest[0] % len(PIPELINE_LABELS_BASE_ORDER)
+    first_index = digest[0] % len(PIPELINE_STEP_ACTIONS)
     second_index = (
-        first_index + 1 + digest[1] % (len(PIPELINE_LABELS_BASE_ORDER) - 1)
-    ) % len(PIPELINE_LABELS_BASE_ORDER)
+        first_index + 1 + digest[1] % (len(PIPELINE_STEP_ACTIONS) - 1)
+    ) % len(PIPELINE_STEP_ACTIONS)
     labels = (
-        PIPELINE_LABELS_BASE_ORDER[first_index],
-        PIPELINE_LABELS_BASE_ORDER[second_index],
+        PIPELINE_STEP_ACTIONS[first_index],
+        PIPELINE_STEP_ACTIONS[second_index],
     )
     return ComparatorResult(
         comparator_name="random_label",
@@ -608,8 +597,8 @@ def _observational_label(case: ProbeCase, baseline: BaselineOutput) -> tuple[str
         )
     if context_recall >= 1.0 and baseline.answer_score < 1.0:
         return (
-            "reasoning_error",
-            "baseline context recalled the evidence, but the answer still failed scoring",
+            "",
+            "baseline context recalled the evidence, but no live memory-pipeline label is assigned",
         )
     if extracted_recall >= 1.0 and retrieved_recall < 1.0:
         return (
@@ -617,16 +606,11 @@ def _observational_label(case: ProbeCase, baseline: BaselineOutput) -> tuple[str
             "gold evidence exists in extracted memory, but the baseline did not retrieve it",
         )
     if raw_event_recall >= 1.0 and extracted_recall < 1.0:
-        if has_gold_memory_pointer:
-            return (
-                "compression_error",
-                "raw events contain the evidence, but extracted memory no longer recalls it",
-            )
         return (
-            "premature_extraction_error",
-            "raw events contain the evidence, but no recoverable extracted memory points to it",
+            "",
+            "evidence is missing from extracted memory; runtime routes this to Fill with no live label",
         )
     return (
-        "write_error",
-        "the failed trace does not expose recoverable evidence in extracted memory",
+        "",
+        "the failed trace does not expose a recoverable live pipeline diagnosis",
     )

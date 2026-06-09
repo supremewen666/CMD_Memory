@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..core.models import GoldEvidence, ProbeCase
-from ..scoring import evidence_recall_from_text
+from ..scoring import evidence_recall_from_text, score_answer_with_verifier
 from ..core import PhraseMatchShortcutWarning
 from .ecs import ECSDraft
 
@@ -65,17 +65,27 @@ class PostRepairResult:
 # ── Pipeline steps ────────────────────────────────────────────────────
 
 
-def draft_ecs(case: ProbeCase, audit_result) -> ECSDraft:
+def draft_ecs(
+    case: ProbeCase,
+    audit_result,
+    *,
+    repair_guidance: str | None = None,
+) -> ECSDraft:
     """Draft an ECS record from CMD-Audit attribution results.
 
     This is a V0 rule-based draft: the predicted label and top replay drive
     cause text, corrected memory, and repair guidance selection.
     """
     attribution = audit_result.attribution
-    replay = audit_result.replay
+    if attribution is None:
+        raise ValueError(f"{case.case_id}: no attribution is available")
+    replay = _replay_for_label(case, audit_result, attribution.predicted_label)
 
     cause, corrected_memory, repair_guidance = _ecs_for_label(
-        case, attribution.predicted_label, replay
+        case,
+        attribution.predicted_label,
+        replay,
+        repair_guidance_override=repair_guidance,
     )
 
     return ECSDraft(
@@ -92,6 +102,8 @@ def draft_ecs_for_label(
     case: ProbeCase,
     audit_result,
     label: str,
+    *,
+    repair_guidance: str | None = None,
 ) -> ECSDraft:
     """Draft an ECS record for a specific label (iterative repair).
 
@@ -109,19 +121,38 @@ def draft_ecs_for_label(
     Raises:
         ValueError: If the label is not supported or no replay maps to it.
     """
-    from ..core.labels import REPLAY_TO_LABEL, validate_label
-    from ..replays import ReplayResult
+    from ..core.labels import validate_diagnosis_label
 
-    validate_label(label)
+    validate_diagnosis_label(label)
+    replay = _replay_for_label(case, audit_result, label)
+
+    cause, corrected_memory, repair_guidance = _ecs_for_label(
+        case,
+        label,
+        replay,
+        repair_guidance_override=repair_guidance,
+    )
+
+    return ECSDraft(
+        case_id=case.case_id,
+        predicted_label=label,
+        cause=cause,
+        corrected_memory=corrected_memory,
+        repair_guidance=repair_guidance,
+        repaired_evidence_block=replay.evidence_block,
+    )
+
+
+def _replay_for_label(case: ProbeCase, audit_result, label: str):
+    """Return replay evidence for a label, or a minimal runtime evidence block."""
+    from ..core.labels import REPLAY_TO_LABEL
+    from ..replays import ReplayResult
 
     # Find the replay that maps to this label
     replay: ReplayResult | None = None
     if audit_result is not None:
         for r in audit_result.replays:
-            # Map replay name to label (handle ingestion/write split)
             replay_label = REPLAY_TO_LABEL.get(r.replay_name, r.replay_name)
-            if r.replay_name == "oracle_write" and not case.has_ingestion_trace:
-                replay_label = "ingestion_error"
             if replay_label == label:
                 replay = r
                 break
@@ -143,19 +174,7 @@ def draft_ecs_for_label(
             evidence_block=evidence_block,
             cost_units=0.0,
         )
-
-    cause, corrected_memory, repair_guidance = _ecs_for_label(
-        case, label, replay
-    )
-
-    return ECSDraft(
-        case_id=case.case_id,
-        predicted_label=label,
-        cause=cause,
-        corrected_memory=corrected_memory,
-        repair_guidance=repair_guidance,
-        repaired_evidence_block=replay.evidence_block,
-    )
+    return replay
 
 
 def build_repaired_context(
@@ -194,8 +213,9 @@ def run_post_repair_context_replay(
         else:
             evidence_score = evidence_recall_from_text(case.gold_evidence, answer)
         if answer_verifier is not None:
-            verdict = _verify_answer(answer_verifier, answer, case.gold_answer)
-            post_answer_score = 1.0 if verdict == "EQUIVALENT" else 0.0
+            post_answer_score = score_answer_with_verifier(
+                answer_verifier, answer, case.gold_answer
+            )
         else:
             post_answer_score = (
                 1.0 if case.gold_answer.casefold() in answer.casefold() else 0.0
@@ -288,14 +308,21 @@ def validate_sandbox_path(
 # ── ECS rule helpers ──────────────────────────────────────────────────
 
 
-def _ecs_for_label(case, predicted_label: str, replay) -> tuple[str, str, str]:
+def _ecs_for_label(
+    case,
+    predicted_label: str,
+    replay,
+    *,
+    repair_guidance_override: str | None = None,
+) -> tuple[str, str, str]:
     """Return (cause, corrected_memory, repair_guidance) for a predicted label."""
     from .actions import (
         get_targeted_repair_action_v1,
     )  # lazy import to avoid circular dependency
 
     action = get_targeted_repair_action_v1(predicted_label)
-    return (action.cause, replay.evidence_block, action.repair_guidance)
+    repair_guidance = repair_guidance_override or action.repair_guidance
+    return (action.cause, replay.evidence_block, repair_guidance)
 
 
 def _combine_context(ctx: RepairedContext) -> str:

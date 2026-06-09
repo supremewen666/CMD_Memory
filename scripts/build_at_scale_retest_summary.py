@@ -102,13 +102,17 @@ def build_scale_predictions(
         if attribution_failed:
             failure_reason = "zero_gain" if top_gain == 0.0 else "negative_gain"
         else:
-            predicted_label = _label_for_replay(
-                top["replay_name"],
-                has_ingestion_trace=meta.has_ingestion_trace,
-            )
+            predicted_label = _label_for_replay(top["replay_name"])
+            if predicted_label is None:
+                attribution_failed = True
+                failure_reason = "out_of_scope_replay"
         top2_labels = tuple(
-            _label_for_replay(row["replay_name"], has_ingestion_trace=meta.has_ingestion_trace)
+            label
             for row in ranked[:2]
+            for label in (
+                _label_for_replay(row["replay_name"]),
+            )
+            if label is not None
         )
         predictions.append(
             ScalePrediction(
@@ -201,10 +205,8 @@ def write_summary_csv(path: str | Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(rows)
 
 
-def _label_for_replay(replay_name: str, *, has_ingestion_trace: bool) -> str:
-    if replay_name == "oracle_write" and not has_ingestion_trace:
-        return "ingestion_error"
-    return REPLAY_TO_LABEL[replay_name]
+def _label_for_replay(replay_name: str) -> str | None:
+    return REPLAY_TO_LABEL.get(replay_name)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,6 +1,7 @@
 """Public API for cmd_audit.scoring."""
 
 from .llm import (
+    AnswerRubricScorer,
     AnswerVerifier,
     ContextLeakError,
     EvidenceVerifier,
@@ -34,6 +35,7 @@ from .retrieval import (
 )
 
 __all__ = [
+    "AnswerRubricScorer",
     "AnswerVerifier",
     "ContextLeakError",
     "EvidenceVerifier",

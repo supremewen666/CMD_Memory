@@ -71,6 +71,7 @@ class Mem0Trace:
                     source_event_ids=tuple(item.get("source_event_ids", ())),
                     store=item.get("store", "default"),
                     is_graph_expanded=item.get("is_graph_expanded", False),
+                    passed_safety_filter=item.get("passed_safety_filter", False),
                 )
                 for item in d["search_results"]
             ),
@@ -121,6 +122,7 @@ class LettaTrace:
                     source_event_ids=tuple(item.get("source_event_ids", ())),
                     store=item.get("store", "default"),
                     is_graph_expanded=item.get("is_graph_expanded", False),
+                    passed_safety_filter=item.get("passed_safety_filter", False),
                 )
                 for item in d["recall_results"]
             ),

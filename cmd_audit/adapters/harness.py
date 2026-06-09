@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from cmd_audit.attribution import assign_attribution
+from cmd_audit.attribution import assign_replay_baseline_attribution
 from cmd_audit.baselines import run_baseline_suite
 from cmd_audit.harness import (
     AuditResult,
@@ -69,13 +69,14 @@ def _run_case_with_adapter(
             distractor_edges = get_graph_distractor_edges(case, r)
             break
 
-    attribution = assign_attribution(
+    attribution = assign_replay_baseline_attribution(
         replays,
-        has_ingestion_trace=case.has_ingestion_trace,
         positive_gain_threshold=0.0,
         top_k=top_k,
         distractor_edges=distractor_edges,
     )
+    if attribution.attribution_failed:
+        attribution = None
     return AuditResult(
         case_id=case.case_id,
         perturbation_label=case.perturbation_label,
@@ -87,6 +88,7 @@ def _run_case_with_adapter(
         baseline_suite=baseline_suite,
         baseline_evidence_score_llm=baseline_evidence_score_llm,
         baseline_answer_score_llm=baseline_answer_score_llm,
+        runtime_branch="offline_replay",
     )
 
 

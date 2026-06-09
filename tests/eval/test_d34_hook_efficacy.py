@@ -26,11 +26,11 @@ class HookEfficacySupplementaryTest(unittest.TestCase):
         rows = hook_eff.build_hook_efficacy_rows(
             retest,
             case_index,
-            decision_fn=lambda query, retrieved: ("oracle_retrieval", "oracle_write"),
+            decision_fn=lambda query, retrieved: ("retrieval_error", "injection_error"),
         )
 
         self.assertTrue(rows[0].recall_hit)
-        self.assertEqual(rows[0].cost_reduction, 0.8)
+        self.assertEqual(rows[0].cost_reduction, 0.6)
 
     def test_summary_averages_rows(self) -> None:
         rows = [
@@ -38,7 +38,7 @@ class HookEfficacySupplementaryTest(unittest.TestCase):
                 case_id="c1",
                 source="unit",
                 top_replay="oracle_retrieval",
-                selected_replays=("oracle_retrieval",),
+                selected_replays=("retrieval_error",),
                 recall_hit=True,
                 cost_reduction=0.9,
             ),
@@ -46,7 +46,7 @@ class HookEfficacySupplementaryTest(unittest.TestCase):
                 case_id="c2",
                 source="unit",
                 top_replay="oracle_write",
-                selected_replays=("oracle_retrieval",),
+                selected_replays=("retrieval_error",),
                 recall_hit=False,
                 cost_reduction=0.9,
             ),

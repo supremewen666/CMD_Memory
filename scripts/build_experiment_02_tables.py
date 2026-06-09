@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cmd_audit.core.labels import REPLAY_TO_LABEL
+from cmd_audit.core.labels import PIPELINE_LABEL_ORDER
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.eval.metrics import DiagnosisPrediction, compute_diagnosis_metrics
 from cmd_audit.core.models import ProbeCase
@@ -28,16 +29,7 @@ from cmd_audit.data_io import load_real_cases_by_source
 from cmd_audit.baselines import run_baseline_suite
 
 
-HEADLINE_LABELS = (
-    "write_error",
-    "compression_error",
-    "premature_extraction_error",
-    "retrieval_error",
-    "injection_error",
-    "reasoning_error",
-    "route_error",
-    "ingestion_error",
-)
+HEADLINE_LABELS = PIPELINE_LABEL_ORDER
 
 # DiagnosisMetrics still requires a numeric cost field. Decision 34 cost
 # reporting must use CostLatency rows below; this sentinel is never emitted.
@@ -220,13 +212,17 @@ def build_cmd_predictions(
         if attribution_failed:
             failure_reason = "zero_gain" if top_gain == 0.0 else "negative_gain"
         else:
-            predicted = _label_for_replay(
-                top["replay_name"],
-                has_ingestion_trace=case.has_ingestion_trace,
-            )
+            predicted = _label_for_replay(top["replay_name"])
+            if predicted is None:
+                attribution_failed = True
+                failure_reason = "out_of_scope_replay"
         top2 = tuple(
-            _label_for_replay(row["replay_name"], has_ingestion_trace=case.has_ingestion_trace)
+            label
             for row in ranked[:2]
+            for label in (
+                _label_for_replay(row["replay_name"]),
+            )
+            if label is not None
         )
         predictions.append(
             CmdPrediction(
@@ -513,10 +509,8 @@ def write_csv(path: str | Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(rows)
 
 
-def _label_for_replay(replay_name: str, *, has_ingestion_trace: bool) -> str:
-    if replay_name == "oracle_write" and not has_ingestion_trace:
-        return "ingestion_error"
-    return REPLAY_TO_LABEL[replay_name]
+def _label_for_replay(replay_name: str) -> str | None:
+    return REPLAY_TO_LABEL.get(replay_name)
 
 
 def _cost_from_retest_rows(rows: list[dict[str, str]]) -> CostLatency:

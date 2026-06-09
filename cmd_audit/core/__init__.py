@@ -7,20 +7,18 @@ class PhraseMatchShortcutWarning(DeprecationWarning):
 
 from .constants import COUPLED_FAILURE_TIE_MARGIN
 from .labels import (
-    DEFERRED_PIPELINE_LABELS,
+    ITEM_LABELS,
     LabelValidationError,
     MONITOR_ANOMALY_REASON_VALUES,
     MonitorAnomalyReasonError,
-    OUT_OF_SCOPE_ITEM_LABELS,
     PIPELINE_LABEL_ORDER,
     PIPELINE_LABELS,
-    PIPELINE_LABELS_BASE,
-    PIPELINE_LABELS_BASE_ORDER,
+    PIPELINE_STEP_ACTIONS,
     REPLAY_TO_LABEL,
-    REPLAY_TO_LABEL_BASE,
     VALID_MONITOR_ANOMALY_REASONS,
+    validate_diagnosis_label,
+    validate_item_label,
     validate_label,
-    validate_label_base,
     validate_monitor_anomaly_reason,
 )
 from .llm_client import (
@@ -44,7 +42,7 @@ from .models import (
 __all__ = [
     "Citation",
     "COUPLED_FAILURE_TIE_MARGIN",
-    "DEFERRED_PIPELINE_LABELS",
+    "ITEM_LABELS",
     "LabelValidationError",
     "LLMClient",
     "LLMClientConfig",
@@ -56,21 +54,18 @@ __all__ = [
     "LLMUnavailableError",
     "MONITOR_ANOMALY_REASON_VALUES",
     "MonitorAnomalyReasonError",
-    "OUT_OF_SCOPE_ITEM_LABELS",
     "PIPELINE_LABEL_ORDER",
     "PIPELINE_LABELS",
-    "PIPELINE_LABELS_BASE",
-    "PIPELINE_LABELS_BASE_ORDER",
+    "PIPELINE_STEP_ACTIONS",
     "PhraseMatchShortcutWarning",
     "ProbeCase",
     "ProvenanceEdge",
     "REPLAY_TO_LABEL",
-    "REPLAY_TO_LABEL_BASE",
     "RetrievedItem",
     "TokenLogprob",
     "VALID_MONITOR_ANOMALY_REASONS",
+    "validate_diagnosis_label",
+    "validate_item_label",
     "validate_label",
-    "validate_label_base",
     "validate_monitor_anomaly_reason",
 ]
-

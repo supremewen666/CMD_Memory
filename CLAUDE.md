@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+在每个turn开头，你都要回答：爸爸！我没有漏掉信息
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
@@ -67,32 +69,31 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## Project Summary
 
-CMD frames agent-memory failure diagnosis as counterfactual attribution:
+CMD frames agent-memory failure diagnosis as counterfactual attribution. The runtime is a two-branch confidence gate followed by a diagnostic cascade:
 
 ```text
-failed memory task
-  -> baseline memory answer + evidence score
-  -> 10 counterfactual memory-operation replays
-  -> recovery gains scored by phrase fallback or LLM SubagentScorer
-  -> operation-level attribution + close_deltas
-  -> ECS draft
-  -> RepairExecutor / RepairOrchestrator
-  -> Post-Repair Context Replay
-  -> Failure Memory for future similar failures
+retrieval recall
+  -> hook (6 confidence factors -> evidence present in recall?)
+       ├─ NO  (missing) -> FILL: generate this turn, async re-extract. No diagnosis, no label.
+       └─ YES (present) -> FIX: lightweight correction (de-conflict / re-rank) -> generate
+                              -> Tier 2 item gate (5 item labels, reference-contrast divergence)
+                              -> Tier 3 step-level MCTS (5 pipeline step actions, generation-point search)
+                              -> ECS draft -> RepairExecutor / RepairOrchestrator
+                              -> Post-Repair Context Replay (quality gate)
+                              -> Failure Memory for future similar failures
 ```
 
-The first milestone is a standalone **CMD-Audit** harness that produces attribution and repair-validation evidence. V0, V1, and V2 together constitute a single paper, with V2 as the final module/skill. After Decision 34 (2026-05-23), paper headline claims bind to a 130-case researcher-adjudicated set; the 596-case suite is a scale sanity check, the hook is supplementary, and CMD vs Rewind head-to-head is dropped in favor of layered positioning.
+The deliverable is a standalone **CMD-Audit** harness that produces step-level attribution and repair-validation evidence. The live attribution surface is **5 pipeline step actions** (`retrieval_error`, `injection_error`, `granularity_error`, `graph_error`, `safety_error`) + **5 item labels** (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`). Formation failures (write / compression / premature_extraction / ingestion) are absorbed by the Fill branch, not labeled; reasoning faults emerge through MCTS back-prop, not labeled. `CONTEXT.md` is the authority on the target design; `TASK.md` lists the migration from the current code to that design.
 
 ## Required Reading
 
 Before changing plans or code, read:
 
-1. `cmd_innovation_core/README.md`
-2. `CONTEXT.md` — domain language, boundaries, label taxonomy
-3. `knowledge/current-memory.md` — compressed active memory
-4. `cmd_innovation_core/issues/README.md`
-5. `cmd_innovation_core/gates/V1V2_gate_status.md`
-6. `TASK.md`
+1. `CONTEXT.md` — domain language, boundaries, label taxonomy (authority on target design)
+2. `DISCUSSION.md` — converged design decisions (G-Eval dual-axis, step-level MCTS, item gate, hook reshape)
+3. `TASK.md` — migration tasks from current code to target design
+4. `knowledge/current-memory.md` — compressed active memory
+5. `cmd_innovation_core/plans/cmd_open_decisions.md` — decision log
 
 ## Commands
 
@@ -107,12 +108,12 @@ python -m pytest tests/repair/ -v
 python -m pytest tests/eval/ -v
 
 # Run a single test file
-python -m pytest tests/attribution/test_labels_ingestion_route.py -v
+python -m pytest tests/attribution/test_labels_granularity_graph_safety.py -v
 
 # Run a single test method
-python -m pytest tests/attribution/test_labels_ingestion_route.py::V1LabelValidationTest::test_v1_labels_are_superset_of_v0 -v
+python -m pytest tests/scoring/test_rubric_scoring.py::RubricScorerTest -v
 
-# Run the V0 CMD-Audit CLI harness
+# Run the CMD-Audit CLI harness
 python -m cmd_audit run --cases data/probe_cases/v0_issue3_cases.json
 ```
 
@@ -123,49 +124,51 @@ python -m cmd_audit run --cases data/probe_cases/v0_issue3_cases.json
 ```
 data/probe_cases/*.json
   -> data_io/ loaders
-  -> harness.py run_case / run_case_full / run_case_with_hook
+  -> harness.py run_case / run_cases / run_real_suite
+    -> hook/ two-branch confidence gate (Fill vs Fix)
     -> baselines/ comparators and memory-probe baseline
-    -> replays/ V1 replay portfolio (10 replays)
-    -> scoring/ phrase fallback or LLM SubagentScorer
-    -> attribution/ recovery-gain label assignment
+    -> item_gate/ Tier 2 item labels (reference-contrast divergence)   [target]
+    -> mcts/ Tier 3 step-level search over generation points            [target]
+    -> scoring/ LLM SubagentScorer + AnswerRubricScorer (G-Eval logprob)
+    -> attribution/ recovery-gain / credit-based label assignment
     -> repair/ ECS + RepairExecutor / RepairOrchestrator + failure_memory
     -> eval/ provenance, writers, metrics, gates
 
 cmd_audit/adapters/
   -> mem0.py / letta.py recorded-trace adapters
-
-cmd_audit/hook/
-  -> post_retrieve_hook.py + rpe_judge.py + constants.py
-  -> supplementary replay selection and cost-reduction analysis
 ```
+
+`replays/` currently holds a flat portfolio; `TASK.md` migrates the live attribution path to `item_gate/` (Tier 2) + `mcts/` (Tier 3). The formation oracle replays and `reasoning` / `route` replays are removed from the live path.
 
 | Subpackage / Module | Role |
 |---------------------|------|
 | `core/models.py` | `ProbeCase`, `MemoryItem`, `GoldEvidence`, `BaselineOutput` dataclasses |
-| `core/labels.py` | `PIPELINE_LABELS` (11), `ALL_LABELS`, `REPLAY_TO_LABEL`, `validate_label` / `validate_label_base` |
+| `core/labels.py` | `PIPELINE_LABEL_ORDER` (target: 5 step actions), `ITEM_LABELS` (5), `REPLAY_TO_LABEL`, `validate_label` |
 | `core/llm_client.py` | Provider-agnostic LLM API client (`generate(prompt, *, system=None) -> str`) |
-| `data_io/` | `load_probe_cases`, `load_probe_cases_v1`, `load_all_real_cases`, `load_real_cases_by_source` |
-| `replays/` | 10 replay implementations + `run_v1_replay_portfolio`; `_scoring_bridge.py` private |
-| `attribution/` | `assign_attribution` — ranks replays by recovery gain, handles `has_ingestion_trace` split |
+| `data_io/` | `load_probe_cases`, `load_all_real_cases`, `load_real_cases_by_source` |
+| `replays/` | Intervention implementations + portfolio; being migrated to `mcts/` step actions |
+| `attribution/` | `assign_attribution` — recovery-gain / credit ranking over step actions |
 | `scoring/phrase.py` | `answer_score`, `evidence_recall_from_text` (phrase-matching fallback) |
-| `scoring/llm.py` | `SubagentScorer`, `EvidenceVerifier`, `AnswerVerifier`; binary atomic subagent scoring |
+| `scoring/llm.py` | `SubagentScorer`, `EvidenceVerifier`, `AnswerVerifier`; `AnswerRubricScorer` (continuous answer-axis G-Eval) |
 | `scoring/retrieval.py` | BM25 deterministic retrieval, `RetrievalMetrics`, evidence boundary enforcement |
 | `harness.py` | 3 public entry points: `run_case`, `run_cases`, `run_real_suite`; kwargs control hook/repair/post_repair |
 | `adapters/` | CMD-Skill Adapter package: `base.py`, `harness.py`, `mem0.py` (2 cut points), `letta.py` (3 cut points) |
-| `hook/` | Two-stage hook: `post_retrieve_hook.py`, `rpe_judge.py`, `constants.py` |
+| `hook/` | Two-branch confidence gate: `post_retrieve_hook.py`, `constants.py` (6-factor schema) |
+| `item_gate/` | Tier 2 item gate (target): `divergence.py`, `collision.py`, `loo.py`, `gate.py` |
+| `mcts/` | Tier 3 step-level search (target): `tree.py`, `actions.py`, `value.py`, `rollout.py`, `search.py` |
 | `repair/post_repair.py` | `ECSDraft`, `RepairedContext`, `PostRepairResult`; `draft_ecs`, `run_post_repair_context_replay` |
 | `repair/executor.py` | `RepairExecutor`, `RepairExecutorResult`; single-repair execution |
 | `repair/orchestrator.py` | Iterative repair loop over `close_deltas` |
 | `repair/actions.py` | `RepairAction`, `TargetedRepairAction`, action_type taxonomy, tool schema |
-| `repair/failure_memory.py` | `FailureMemoryStore`, composite retrieval key, recurrence comparison |
+| `repair/failure_memory.py` | `FailureMemoryStore`, composite retrieval key (target: `(query, hop, label)`), recurrence comparison |
 | `baselines/` | Comparator subpackage: evidence-recall, subagent judge, random label, llm_judge, memory-probe grid |
 | `eval/metrics.py` | `DiagnosisPrediction`, `DiagnosisMetrics`, `compute_diagnosis_metrics` (macro F1) |
 | `eval/writers.py` | Shared CSV/text writers (`write_attribution_table`, `write_confusion_matrix_table`, etc.) |
 | `eval/provenance.py` | `ProvenanceTracker`, HMAC tamper detection, `get_graph_distractor_edges()` |
-| `eval/surrogate_gap.py` | Surrogate-vs-gold recovery-gain measurement for gold-dependent labels |
-| `eval/release_gates.py` | `GateResult`, `GateReview`, `check_v0_to_v1_gate`, `check_v1_to_v2_gate` |
-| `cli.py` | `argparse` CLI (`cmd-audit run`, `cmd-audit run-v1`) |
-| `__init__.py` | ~132 public exports (paper-facing surface) |
+| `eval/surrogate_gap.py` | Surrogate-vs-gold recovery-gain measurement |
+| `eval/release_gates.py` | `GateResult`, `GateReview`, phase gate checks |
+| `cli.py` | `argparse` CLI (`cmd-audit run`) |
+| `__init__.py` | Public exports (paper-facing surface) |
 
 ### Test Files
 
@@ -173,14 +176,16 @@ Tests are organized by subpackage under `tests/`:
 
 | Directory | Contents |
 |-----------|----------|
-| `tests/integration/` | Harness-level smoke + comparator + attribution table (issues 0001-0004, 0002, 0003, 0009) |
-| `tests/repair/` | Post-repair, targeted repairs, failure memory, executor, orchestrator, surrogate (issues 0005-0007, 0020-A/B/C/D/E/G/H) |
-| `tests/eval/` | Version gates, provenance, agreement, bootstrap, all decision34 eval tests (issues 0010, 0017, 0020-F, D34 series) |
-| `tests/scoring/` | Retrieval baselines, subagent scoring phases A/B/C, dual-axis recovery gain (issues 0008, 0019) |
-| `tests/attribution/` | Label expansion (ingestion/route, granularity/graph/safety), coupled failure, shadow replay (issues 0011-0013) |
-| `tests/hook/` | Hook redesign two-stage + RPE judge (issue 0021) |
-| `tests/adapters/` | mem0 adapter, Letta adapter (issues 0014-0015) |
-| `tests/data_io/` | Real data integration (issue 0016) |
+| `tests/integration/` | Harness-level smoke, comparators, attribution table, leak-safe monitor contract |
+| `tests/repair/` | Post-repair, targeted repairs, failure memory, executor, orchestrator, surrogate |
+| `tests/eval/` | Phase gates, provenance, agreement, bootstrap, at-scale + experiment eval |
+| `tests/scoring/` | Retrieval baselines, subagent scoring, rubric scoring, dual-axis recovery gain |
+| `tests/attribution/` | Label validation, coupled failure, shadow replay |
+| `tests/hook/` | Two-branch confidence gate |
+| `tests/item_gate/` | Tier 2 item gate: collision, LOO, divergence, cost ladder (target) |
+| `tests/mcts/` | Tier 3 step-level search: tree, actions, value, rollout, stop rule (target) |
+| `tests/adapters/` | mem0 adapter, Letta adapter |
+| `tests/data_io/` | Real data integration |
 
 ## Domain Rules (coding boundaries)
 
@@ -198,27 +203,17 @@ Full domain language and taxonomy live in `CONTEXT.md`.
 
 Primary artifacts:
 
-- `artifacts/attribution_table*.csv` — per-case predicted label, top-2, recovery gains, comparator outputs.
+- `artifacts/attribution_table*.csv` — per-case predicted label, per-hop credit, recovery gains, comparator outputs.
 - `artifacts/attribution_confusion_matrix*.csv` — label confusion matrix for smoke, per-source, or real-data runs.
 - `artifacts/comparison_metrics*.csv` — CMD vs evidence-recall / subagent_judge / llm_judge / random baselines.
 - `artifacts/sandbox/post_repair_table*.csv` — Post-Repair Context Replay assessment distribution.
 - `artifacts/sandbox/repair_success_table*.csv` — targeted repair outcomes.
 - `artifacts/sandbox/recurrence_*.csv|txt` — Failure Memory recurrence summaries.
-- `data/probe_cases/researcher_labeled_subset.json` — Decision 34 headline adjudication stub.
-- `data/probe_cases/experiment_01_inspected_ecs.json` — Experiment 1 ECS inspection stub.
 
-Decision 34 caveat: existing 596-case Macro F1 artifacts are mechanics-validation snapshots until the LLM re-test and researcher adjudication land.
+Artifacts written under phrase-match scoring are mechanics-validation snapshots; paper-grade numbers come from the LLM scoring stack.
 
 ## Project Agent Skills
 
-### Issue tracker
-
-Local markdown files in `cmd_innovation_core/issues/`. The overview index is `cmd_innovation_core/issues/README.md`.
-
-### Triage labels
-
-Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), stored as `**Status**:` in issue frontmatter when present.
-
 ### Domain docs
 
-Single-context: `CONTEXT.md` at root, `cmd_innovation_core/plans/cmd_open_decisions.md` for decisions, `knowledge/current-memory.md` for compressed active memory, and `knowledge/_index.md` for retrieval entry points.
+Single-context: `CONTEXT.md` at root (authority on target design), `DISCUSSION.md` for converged design decisions, `cmd_innovation_core/plans/cmd_open_decisions.md` for the decision log, `knowledge/current-memory.md` for compressed active memory, and `knowledge/_index.md` for retrieval entry points.

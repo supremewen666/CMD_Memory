@@ -1,38 +1,34 @@
 """Attribution label registry.
 
-Canonical 11-label pipeline taxonomy. PIPELINE_LABELS will be narrowed in W2
-(Decision 35) to 10 labels excluding reasoning_error; ALL_LABELS will be the
-11-label superset.
+Target taxonomy (CONTEXT.md / DISCUSSION.md):
+- **Pipeline step actions (5, Tier 3 MCTS)**: retrieval_error, injection_error,
+  granularity_error, graph_error, safety_error
+- **Item labels (5, Tier 2 Item Gate)**: item_wrong, item_stale, item_conflict,
+  item_poisoned, item_compression_distorted
 """
 
 from __future__ import annotations
 
-PIPELINE_LABEL_ORDER = (
-    "write_error",
-    "compression_error",
-    "premature_extraction_error",
+# =============================================================================
+# Pipeline step actions (5, Tier 3 MCTS generation-point actions)
+# =============================================================================
+
+PIPELINE_STEP_ACTIONS = (
     "retrieval_error",
     "injection_error",
-    "reasoning_error",
-    "ingestion_error",
-    "route_error",
     "granularity_error",
     "graph_error",
     "safety_error",
 )
 
-PIPELINE_LABELS = frozenset(PIPELINE_LABEL_ORDER)
+PIPELINE_LABELS = frozenset(PIPELINE_STEP_ACTIONS)
+PIPELINE_LABEL_ORDER = PIPELINE_STEP_ACTIONS  # Alias
 
-# W2 (Decision 35) will narrow PIPELINE_LABELS to 10 (drop reasoning_error).
-# ALL_LABELS will then be the 11-label superset. Pre-W2: both are identical.
-ALL_LABELS = PIPELINE_LABELS
+# =============================================================================
+# Item labels (5, Tier 2 Item Gate)
+# =============================================================================
 
-# Historical V0 boundary subset, retained for boundary-validation tests until
-# W2 finalization (Decision 35) collapses to PIPELINE_LABELS (10) + ALL_LABELS (11).
-PIPELINE_LABELS_BASE_ORDER = PIPELINE_LABEL_ORDER[:6]
-PIPELINE_LABELS_BASE = frozenset(PIPELINE_LABELS_BASE_ORDER)
-
-OUT_OF_SCOPE_ITEM_LABELS = frozenset(
+ITEM_LABELS = frozenset(
     {
         "item_wrong",
         "item_stale",
@@ -42,7 +38,24 @@ OUT_OF_SCOPE_ITEM_LABELS = frozenset(
     }
 )
 
-DEFERRED_PIPELINE_LABELS: frozenset[str] = frozenset()
+# =============================================================================
+# Replay-to-label mapping (5 step actions)
+# =============================================================================
+
+REPLAY_TO_LABEL = {
+    "oracle_retrieval": "retrieval_error",
+    "injection_oracle": "injection_error",
+    "oracle_granularity": "granularity_error",
+    "graph_off": "graph_error",
+    "safety_off": "safety_error",
+}
+# Offline baseline replay names that still map to live step actions.
+# Formation, reasoning, and route replays are intentionally absent. They do not
+# produce live labels in the current runtime.
+
+# =============================================================================
+# Monitor anomaly reasons
+# =============================================================================
 
 MONITOR_ANOMALY_REASON_VALUES = (
     "answer_vs_evidence_mismatch",
@@ -54,24 +67,9 @@ MONITOR_ANOMALY_REASON_VALUES = (
 
 VALID_MONITOR_ANOMALY_REASONS = frozenset(MONITOR_ANOMALY_REASON_VALUES)
 
-REPLAY_TO_LABEL = {
-    "oracle_write": "write_error",
-    "oracle_compression": "compression_error",
-    "verbatim_event_oracle": "premature_extraction_error",
-    "oracle_retrieval": "retrieval_error",
-    "injection_oracle": "injection_error",
-    "evidence_given_reasoning": "reasoning_error",
-    "oracle_route": "route_error",
-    "oracle_granularity": "granularity_error",
-    "graph_off": "graph_error",
-    "safety_off": "safety_error",
-}
-
-REPLAY_TO_LABEL_BASE = {
-    name: label
-    for name, label in REPLAY_TO_LABEL.items()
-    if label in PIPELINE_LABELS_BASE
-}
+# =============================================================================
+# Validation
+# =============================================================================
 
 
 class LabelValidationError(ValueError):
@@ -93,39 +91,31 @@ def validate_monitor_anomaly_reason(reason: str) -> str:
 
 
 def validate_label(label: str) -> str:
-    """Return a valid pipeline label or raise with the boundary reason."""
+    """Return a valid pipeline step action label or raise."""
     if label in PIPELINE_LABELS:
         return label
-    if label in OUT_OF_SCOPE_ITEM_LABELS:
+    if label in ITEM_LABELS:
         raise LabelValidationError(
-            f"{label!r} is a bad memory item label and is outside CMD-Audit attribution scope"
+            f"{label!r} is an item label; use validate_item_label() instead"
         )
-    if label in DEFERRED_PIPELINE_LABELS:
-        raise LabelValidationError(
-            f"{label!r} is deferred and is outside current attribution scope"
-        )
-    raise LabelValidationError(f"{label!r} is not a CMD-Audit attribution label")
+    raise LabelValidationError(f"{label!r} is not a valid step action label")
 
 
-def validate_label_base(label: str) -> str:
-    """Return a valid base-subset label (historical V0 boundary).
-
-    Retained for boundary-validation tests until W2 finalization. Use
-    ``validate_label`` for canonical attribution scope.
-    """
-    if label in PIPELINE_LABELS_BASE:
+def validate_item_label(label: str) -> str:
+    """Return a valid item label or raise."""
+    if label in ITEM_LABELS:
         return label
-    if label in OUT_OF_SCOPE_ITEM_LABELS:
-        raise LabelValidationError(
-            f"{label!r} is a bad memory item label and is outside base attribution scope"
-        )
-    if label in DEFERRED_PIPELINE_LABELS:
-        raise LabelValidationError(
-            f"{label!r} is deferred and is outside base attribution scope"
-        )
     if label in PIPELINE_LABELS:
         raise LabelValidationError(
-            f"{label!r} is an extended pipeline label and is outside base attribution scope"
+            f"{label!r} is a step action; use validate_label() instead"
         )
-    raise LabelValidationError(f"{label!r} is not a CMD-Audit base attribution label")
+    raise LabelValidationError(f"{label!r} is not a valid item label")
 
+
+def validate_diagnosis_label(label: str) -> str:
+    """Return a valid live diagnosis label from either diagnosis stream."""
+    if label in PIPELINE_LABELS:
+        return label
+    if label in ITEM_LABELS:
+        return label
+    raise LabelValidationError(f"{label!r} is not a valid diagnosis label")

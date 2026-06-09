@@ -35,8 +35,13 @@ from .actions import (
 from .ecs import ECSDraft, ECSCauseValidationError
 from .executor import RepairExecutor, RepairExecutorResult
 from .failure_memory import (
+    FailureMemoryDiagnosis,
+    FailureMemoryOutcome,
     FailureMemoryRecord,
+    FailureMemorySkill,
     FailureMemoryStore,
+    MarkdownFailureMemoryStore,
+    PatternValidationResult,
     RecurrenceComparisonRow,
     RecurrenceSummary,
     build_failure_memory_context,
@@ -45,6 +50,7 @@ from .failure_memory import (
     compute_recurrence_summary,
     run_recurrence_comparison,
     run_recurrence_comparisons,
+    step_level_record_from_mcts_result,
     write_recurrence_comparison_table,
 )
 from .orchestrator import AttributionFailed, RepairOrchestrator, RepairOrchestratorResult
@@ -94,9 +100,16 @@ __all__ = [
     "RepairOrchestrator",
     "RepairOrchestratorResult",
     # failure_memory
+    "FailureMemoryDiagnosis",
+    "FailureMemoryOutcome",
     "FailureMemoryRecord",
+    "FailureMemorySkill",
     "FailureMemoryStore",
+    "MarkdownFailureMemoryStore",
+    "PatternValidationResult",
     "RecurrenceComparisonRow",
     "RecurrenceSummary",
     "build_failure_memory_context",
+    "build_repair_context",
+    "step_level_record_from_mcts_result",
 ]

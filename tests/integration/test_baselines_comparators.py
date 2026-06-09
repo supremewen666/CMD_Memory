@@ -39,13 +39,14 @@ class BaselineAndComparatorTest(unittest.TestCase):
         self.assertFalse(suite.subagent_judge.uses_counterfactual_replay)
         self.assertEqual(suite.random_label.comparator_name, "random_label")
 
-    def test_run_case_exposes_baseline_suite_but_cmd_label_still_comes_from_replay(
+    def test_run_case_exposes_baseline_suite_but_cmd_label_still_comes_from_runtime(
         self,
     ) -> None:
         result = run_case(load_probe_cases(FIXTURE)[0])
 
         self.assertEqual(result.attribution.predicted_label, "retrieval_error")
-        self.assertEqual(result.attribution.top_replay, "oracle_retrieval")
+        self.assertEqual(result.attribution.top_replay, "retrieval_error")
+        self.assertEqual(result.runtime_branch, "fix")
         self.assertEqual(
             result.baseline_suite.subagent_judge.predicted_label, "retrieval_error"
         )

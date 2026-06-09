@@ -19,38 +19,6 @@ from .interventions import (
 )
 
 
-def _run_v0_replay_portfolio(
-    case: ProbeCase,
-    *,
-    tracker: object | None = None,
-    scorer: EvidenceScorer | None = None,
-    agent_generate: AgentGenerate | None = None,
-    answer_verifier: object | None = None,
-) -> tuple[ReplayResult, ...]:
-    """Run the currently implemented V0 replay portfolio for one case."""
-
-    return (
-        run_oracle_write(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
-        ),
-        run_oracle_compression(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
-        ),
-        run_verbatim_event_oracle(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
-        ),
-        run_oracle_retrieval(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
-        ),
-        run_injection_oracle(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
-        ),
-        run_evidence_given_reasoning(
-            case, tracker=tracker, scorer=scorer, agent_generate=agent_generate, answer_verifier=answer_verifier
-        ),
-    )
-
-
 def run_replay_portfolio(
     case: ProbeCase,
     *,

@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
-from cmd_audit.core.labels import validate_label
+from cmd_audit.core.labels import validate_diagnosis_label
 
 
 @dataclass(frozen=True)
@@ -20,11 +20,11 @@ class DiagnosisPrediction:
 
     def __post_init__(self) -> None:
         if self.gold_label is not None:
-            validate_label(self.gold_label)
+            validate_diagnosis_label(self.gold_label)
         if self.predicted_label is not None:
-            validate_label(self.predicted_label)
+            validate_diagnosis_label(self.predicted_label)
         for label in self.top2_labels:
-            validate_label(label)
+            validate_diagnosis_label(label)
 
 
 @dataclass(frozen=True)

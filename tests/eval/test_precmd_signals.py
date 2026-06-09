@@ -38,12 +38,13 @@ class HookSignalsInAuditResultTest(unittest.TestCase):
         result = run_case(self.case, hook=True)
         self.assertIsInstance(result.per_replay_scores, tuple)
 
-    def test_run_case_without_hook_has_empty_signals(self) -> None:
-        from cmd_audit import run_case
+    def test_run_case_default_uses_runtime_hook(self) -> None:
         result = run_case(self.case)
-        self.assertEqual(result.hook_stage, "")
-        self.assertEqual(result.selected_replays, ())
-        self.assertEqual(result.per_replay_scores, ())
+        self.assertIn(result.hook_stage, {"fill", "fix"})
+
+    def test_run_case_hook_false_is_not_a_runtime_path(self) -> None:
+        with self.assertRaisesRegex(ValueError, "run_replay_baseline_case"):
+            run_case(self.case, hook=False)
 
     def test_audit_result_is_frozen(self) -> None:
         result = run_case(self.case, hook=True)

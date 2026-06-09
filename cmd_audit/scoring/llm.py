@@ -423,6 +423,39 @@ GUIDANCE:
 OUTPUT: A single JSON object with this exact shape, no prose around it:
   {"reasoning": "<one short sentence>", "score": <integer 0..4>}"""
 
+_ANSWER_RUBRIC_SYSTEM_PROMPT = """\
+TASK: Rate how well ANSWER matches the factual content of GOLD ANSWER, on a 0–4 scale.
+
+RUBRIC ANCHORS:
+
+  0 = WRONG or UNRELATED. ANSWER contradicts GOLD ANSWER, or addresses a
+      completely different question.
+
+  1 = VAGUE. ANSWER is in the right general domain but communicates none of
+      the specific factual content of GOLD ANSWER.
+
+  2 = PARTIAL. ANSWER captures some key facts from GOLD ANSWER but is missing
+      important information, or contains a significant factual error.
+
+  3 = MOSTLY CORRECT. ANSWER communicates the core factual content of GOLD
+      ANSWER with minor omissions or different phrasing; the main claim is
+      preserved.
+
+  4 = CORRECT. ANSWER is factually equivalent to GOLD ANSWER — same facts,
+      same meaning, possibly different wording or extra non-contradictory
+      detail.
+
+GUIDANCE:
+  - Extract the core factual claims from GOLD ANSWER, then judge how many
+    are preserved in ANSWER.
+  - Contradictions in ANSWER lower the score even if other facts are correct.
+  - Extra non-contradictory details in ANSWER do not lower the score.
+  - When uncertain between two adjacent levels, choose the lower one
+    (conservative tie-break).
+
+OUTPUT: A single JSON object with this exact shape, no prose around it:
+  {"reasoning": "<one short sentence>", "score": <integer 0..4>}"""
+
 
 class RubricParseError(ValueError):
     """Raised when a rubric subagent response is not valid JSON or out of range."""
@@ -795,3 +828,127 @@ def _scorer_score_continuous(
 
 
 RubricScorer.score_continuous = _scorer_score_continuous  # type: ignore[attr-defined]
+
+
+# ── Answer Rubric (G-Eval answer axis) ─────────────────────────────────
+
+
+def _continuous_verify_answer(
+    client: Any,
+    answer: str,
+    gold_answer: str,
+    *,
+    top_logprobs: int = 10,
+) -> float | None:
+    """Run one answer-rubric call requesting logprobs; return E[score] or None.
+
+    Parallel to :func:`_continuous_verify` but uses
+    :data:`_ANSWER_RUBRIC_SYSTEM_PROMPT` and the ``ANSWER / GOLD ANSWER``
+    message format matching :class:`AnswerVerifier`.
+
+    ``None`` signals the caller to fall back to the discrete rubric path.
+    """
+    if client is None:
+        return None
+    if not hasattr(client, "generate_with_logprobs"):
+        return None
+
+    user_message = f"ANSWER:\n  {answer}\n\nGOLD ANSWER:\n  {gold_answer}"
+    _validate_context_isolation(user_message)
+
+    try:
+        response = client.generate_with_logprobs(
+            user_message,
+            system=_ANSWER_RUBRIC_SYSTEM_PROMPT,
+            top_logprobs=top_logprobs,
+        )
+    except Exception as exc:
+        _logger.warning("AnswerRubricScorer logprob call failed: %s", exc)
+        return None
+
+    if not isinstance(response, LLMResponse):
+        return None
+    if not response.token_logprobs:
+        return None
+
+    digits = _find_score_digit_logprobs(response.token_logprobs)
+    if not digits:
+        return None
+    try:
+        return _expected_score_from_logprobs(digits)
+    except ValueError:
+        return None
+
+
+class AnswerRubricScorer:
+    """G-Eval rubric scorer for the answer axis.
+
+    Scores ``(answer, gold_answer)`` pairs on a continuous ``[0, 1]`` scale
+    using :data:`_ANSWER_RUBRIC_SYSTEM_PROMPT`.  Logprob path is tried first
+    (zero sampling variance); falls back to discrete rubric when logprobs are
+    unavailable; returns ``0.0`` on parse failure (conservative tie-break,
+    consistent with the evidence axis).
+
+    Implements the ``(answer, gold_answer) -> float`` callable contract so it
+    can be passed directly to :func:`score_answer_with_verifier` or used as
+    the ``answer_verifier`` kwarg in the harness.
+    """
+
+    def __init__(self, llm_client: Any, *, max_retries: int = 1) -> None:
+        self._client = llm_client
+        self._max_retries = max_retries
+
+    @property
+    def is_available(self) -> bool:
+        return self._client is not None
+
+    def verify(self, answer: str, gold_answer: str) -> float:
+        """Score answer equivalence; returns float in ``[0, 1]``.
+
+        Logprob G-Eval path -> discrete rubric fallback -> ``0.0`` on failure.
+        """
+        expected = _continuous_verify_answer(self._client, answer, gold_answer)
+        if expected is not None:
+            return expected / RUBRIC_MAX_SCORE
+
+        user_message = f"ANSWER:\n  {answer}\n\nGOLD ANSWER:\n  {gold_answer}"
+        _validate_context_isolation(user_message)
+
+        try:
+            response = self._client.generate(
+                user_message, system=_ANSWER_RUBRIC_SYSTEM_PROMPT
+            )
+        except Exception as exc:
+            _logger.warning("AnswerRubricScorer LLM call failed: %s", exc)
+            return 0.0
+
+        for attempt in range(self._max_retries + 1):
+            try:
+                score = _parse_rubric_output(response)
+                return score / RUBRIC_MAX_SCORE
+            except RubricParseError:
+                if attempt < self._max_retries:
+                    _logger.debug(
+                        "AnswerRubricScorer parse failed, retrying: %r", response
+                    )
+                    retry_msg = (
+                        user_message
+                        + '\n\nOUTPUT ONLY A JSON OBJECT OF THE FORM '
+                        + '{"reasoning": "...", "score": <0-4>}. NO OTHER TEXT.'
+                    )
+                    try:
+                        response = self._client.generate(
+                            retry_msg, system=_ANSWER_RUBRIC_SYSTEM_PROMPT
+                        )
+                    except Exception as exc:
+                        _logger.warning(
+                            "AnswerRubricScorer retry LLM call failed: %s", exc
+                        )
+
+        _logger.warning(
+            "AnswerRubricScorer exhausted retries. Last response: %r", response
+        )
+        return 0.0
+
+    def __call__(self, answer: str, gold_answer: str) -> float:
+        return self.verify(answer, gold_answer)

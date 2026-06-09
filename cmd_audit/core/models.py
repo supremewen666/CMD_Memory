@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .labels import validate_label_base
+from .labels import validate_diagnosis_label
 
 
 class ProbeCaseError(ValueError):
@@ -31,6 +31,7 @@ class MemoryItem:
     source_event_ids: tuple[str, ...] = ()
     store: str = "default"
     is_graph_expanded: bool = False
+    passed_safety_filter: bool = False
     provenance: tuple = ()
 
     @classmethod
@@ -61,6 +62,7 @@ class MemoryItem:
             source_event_ids=tuple(value.get("source_event_ids", ())),
             store=str(value.get("store", "default")),
             is_graph_expanded=bool(value.get("is_graph_expanded", False)),
+            passed_safety_filter=bool(value.get("passed_safety_filter", False)),
             provenance=provenance,
         )
 
@@ -225,8 +227,6 @@ class ProbeCase:
 
     @classmethod
     def from_mapping_v1(cls, value: dict[str, Any]) -> "ProbeCase":
-        from .labels import validate_label
-
         case = cls(
             case_id=_required_str(value, "case_id"),
             query=_required_str(value, "query"),
@@ -314,20 +314,28 @@ def _required_str(value: dict[str, Any], key: str) -> str:
 
 
 def _optional_label_v0(raw: Any) -> str | None:
-    """Accept None or a valid V0 pipeline label; reject invalid labels."""
+    """Accept None or a live diagnosis label; absorb removed legacy labels."""
     if raw is None:
         return None
     if not isinstance(raw, str) or not raw.strip():
         raise ProbeCaseError("perturbation_label must be a non-empty string or null")
-    return validate_label_base(raw)
+    if raw in {
+        "write_error",
+        "compression_error",
+        "premature_extraction_error",
+        "ingestion_error",
+        "reasoning_error",
+    }:
+        return None
+    if raw == "route_error":
+        return "retrieval_error"
+    return validate_diagnosis_label(raw)
 
 
 def _optional_label_v1(raw: Any) -> str | None:
-    """Accept None or a valid V1 pipeline label; reject invalid labels."""
-    from .labels import validate_label
-
+    """Accept None or a live diagnosis label; absorb removed legacy labels."""
     if raw is None:
         return None
     if not isinstance(raw, str) or not raw.strip():
         raise ProbeCaseError("perturbation_label must be a non-empty string or null")
-    return validate_label(raw)
+    return _optional_label_v0(raw)

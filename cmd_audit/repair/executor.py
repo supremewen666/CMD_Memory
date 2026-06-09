@@ -195,17 +195,16 @@ class RepairExecutor:
         reasonable default actions.
         """
         label_to_action: dict[str, str] = {
-            "write_error": "append",
-            "compression_error": "replace",
-            "premature_extraction_error": "append",
             "retrieval_error": "update_routing",
             "injection_error": "replace",
-            "reasoning_error": "update_template",
-            "ingestion_error": "append",
-            "route_error": "update_routing",
             "granularity_error": "replace",
             "graph_error": "update_routing",
             "safety_error": "update_template",
+            "item_wrong": "replace",
+            "item_stale": "replace",
+            "item_conflict": "append",
+            "item_poisoned": "replace",
+            "item_compression_distorted": "replace",
         }
         preferred = label_to_action.get(label, "append")
         if preferred in supported_actions:

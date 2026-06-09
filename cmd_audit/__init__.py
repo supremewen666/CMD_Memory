@@ -10,6 +10,7 @@ from .harness import (
     run_case,
     run_cases,
     run_real_suite,
+    run_replay_baseline_case,
 )
 
 # ── Core types ────────────────────────────────────────────────────────────────
@@ -19,21 +20,24 @@ from .core.models import (
     ProbeCase,
     ProvenanceEdge,
 )
-from .attribution import AttributionResult, assign_attribution
+from .attribution import (
+    AttributionResult,
+    assign_attribution,
+    assign_replay_baseline_attribution,
+)
 
 # ── Label registry ────────────────────────────────────────────────────────────
 from .core.labels import (
-    ALL_LABELS,
+    ITEM_LABELS,
     MONITOR_ANOMALY_REASON_VALUES,
     PIPELINE_LABELS,
-    PIPELINE_LABELS_BASE,
-    PIPELINE_LABELS_BASE_ORDER,
     PIPELINE_LABEL_ORDER,
+    PIPELINE_STEP_ACTIONS,
     REPLAY_TO_LABEL,
     LabelValidationError,
     MonitorAnomalyReasonError,
+    validate_item_label,
     validate_label,
-    validate_label_base,
     validate_monitor_anomaly_reason,
 )
 from .core import PhraseMatchShortcutWarning
@@ -61,13 +65,19 @@ from .eval import (
     write_post_repair_table,
     write_retrieval_metrics_table,
     write_retrieval_trace_table,
+    write_step_level_metrics_table,
 )
 
 # ── Repair pipeline ───────────────────────────────────────────────────────────
 from .repair import (
     ECSDraft,
+    FailureMemoryDiagnosis,
+    FailureMemoryOutcome,
     FailureMemoryRecord,
+    FailureMemorySkill,
     FailureMemoryStore,
+    MarkdownFailureMemoryStore,
+    PatternValidationResult,
     PostRepairResult,
     RepairAction,
     RepairClaimLedger,
@@ -94,6 +104,7 @@ from .repair import (
     run_hard_case_update_baseline,
     run_post_repair_context_replay,
     run_recurrence_comparisons,
+    step_level_record_from_mcts_result,
     validate_sandbox_path,
     write_recurrence_comparison_table,
 )
@@ -108,7 +119,7 @@ from .baselines.comparators import (
 )
 
 # ── Hook (public contract) ────────────────────────────────────────────────────
-from .hook import PreCmdDecision
+from .hook import HookDecision, ConfidenceFactors, post_retrieve_hook
 
 # ── Replays (paper-facing subset) ─────────────────────────────────────────────
 from .replays import (
@@ -119,14 +130,15 @@ from .replays import (
 __all__ = [
     # entry points
     "AuditResult", "run_case", "run_cases", "run_real_suite",
+    "run_replay_baseline_case",
     # core types
     "Citation", "MemoryItem", "ProbeCase", "ProvenanceEdge",
-    "AttributionResult", "assign_attribution",
+    "AttributionResult", "assign_attribution", "assign_replay_baseline_attribution",
     # label registry
-    "ALL_LABELS", "MONITOR_ANOMALY_REASON_VALUES", "PIPELINE_LABELS",
-    "PIPELINE_LABELS_BASE", "PIPELINE_LABELS_BASE_ORDER", "PIPELINE_LABEL_ORDER",
-    "REPLAY_TO_LABEL", "LabelValidationError", "MonitorAnomalyReasonError",
-    "validate_label", "validate_label_base", "validate_monitor_anomaly_reason",
+    "ITEM_LABELS", "MONITOR_ANOMALY_REASON_VALUES", "PIPELINE_LABELS",
+    "PIPELINE_LABEL_ORDER", "PIPELINE_STEP_ACTIONS", "REPLAY_TO_LABEL",
+    "LabelValidationError", "MonitorAnomalyReasonError",
+    "validate_item_label", "validate_label", "validate_monitor_anomaly_reason",
     "PhraseMatchShortcutWarning",
     # data I/O
     "load_probe_cases", "load_probe_cases_v1",
@@ -137,8 +149,11 @@ __all__ = [
     "compute_surrogate_gap_summary", "write_attribution_table",
     "write_confusion_matrix_table", "write_post_repair_table",
     "write_retrieval_metrics_table", "write_retrieval_trace_table",
+    "write_step_level_metrics_table",
     # repair
-    "ECSDraft", "FailureMemoryRecord", "FailureMemoryStore", "PostRepairResult",
+    "ECSDraft", "FailureMemoryDiagnosis", "FailureMemoryOutcome",
+    "FailureMemoryRecord", "FailureMemorySkill", "FailureMemoryStore",
+    "MarkdownFailureMemoryStore", "PatternValidationResult", "PostRepairResult",
     "RepairAction", "RepairClaimLedger", "RepairComparisonRow", "RepairExecutor",
     "RepairExecutorResult", "RepairOrchestrator", "RepairOrchestratorResult",
     "RepairedContext", "RecurrenceSummary", "TargetedRepairAction",
@@ -149,7 +164,8 @@ __all__ = [
     "draft_ecs", "draft_ecs_for_label", "get_targeted_repair_action",
     "make_repair_comparison", "run_hard_case_update_baseline",
     "run_post_repair_context_replay", "run_recurrence_comparisons",
-    "validate_sandbox_path", "write_recurrence_comparison_table",
+    "step_level_record_from_mcts_result", "validate_sandbox_path",
+    "write_recurrence_comparison_table",
     # scoring
     "SubagentScorer",
     # baselines

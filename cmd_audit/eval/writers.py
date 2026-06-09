@@ -11,7 +11,7 @@ import csv
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
-from cmd_audit.core.labels import PIPELINE_LABEL_ORDER
+from cmd_audit.core.labels import ITEM_LABELS, PIPELINE_LABEL_ORDER, PIPELINE_STEP_ACTIONS
 from cmd_audit.core.models import MemoryItem
 from .provenance import compute_provenance_completeness
 
@@ -115,7 +115,12 @@ def write_attribution_table(
     rows: list[dict[str, str]] = []
     for result in results:
         attribution = result.attribution
-        replay = result.replay if attribution is not None else None
+        replay = None
+        if attribution is not None:
+            try:
+                replay = result.replay
+            except KeyError:
+                replay = None
         row = {
             "case_id": result.case_id,
             "perturbation_label": result.perturbation_label,
@@ -174,18 +179,24 @@ def write_confusion_matrix_table(
     output_path: str | Path,
 ) -> None:
     """Write the CMD-Audit attribution confusion matrix CSV."""
+    diagnosis_order = (*PIPELINE_LABEL_ORDER, *tuple(sorted(ITEM_LABELS)))
     counts = {
-        gold_label: {predicted_label: 0 for predicted_label in PIPELINE_LABEL_ORDER}
-        for gold_label in PIPELINE_LABEL_ORDER
+        gold_label: {predicted_label: 0 for predicted_label in diagnosis_order}
+        for gold_label in diagnosis_order
     }
     for result in results:
         if result.attribution is None or result.perturbation_label is None:
             continue
+        if (
+            result.perturbation_label not in counts
+            or result.attribution.predicted_label not in counts[result.perturbation_label]
+        ):
+            continue
         counts[result.perturbation_label][result.attribution.predicted_label] += 1
 
-    fieldnames = ["gold_label", *PIPELINE_LABEL_ORDER]
+    fieldnames = ["gold_label", *diagnosis_order]
     rows: list[dict[str, str]] = []
-    for gold_label in PIPELINE_LABEL_ORDER:
+    for gold_label in diagnosis_order:
         row: dict[str, str] = {"gold_label": gold_label}
         row.update({k: str(v) for k, v in counts[gold_label].items()})
         rows.append(row)
@@ -227,6 +238,121 @@ def write_provenance_completeness_summary(
         )
 
     write_csv_table(output_path, fieldnames, rows)
+
+
+# ── Step-level metrics ─────────────────────────────────────────────────────
+
+
+def write_step_level_metrics_table(
+    results: list[AuditResult],
+    output_path: str | Path,
+) -> None:
+    """Write aggregate MCTS step-level attribution metrics."""
+    step_fix_cases = [
+        result
+        for result in results
+        if result.runtime_branch == "fix"
+        and result.perturbation_label in PIPELINE_STEP_ACTIONS
+    ]
+    mcts_primary_cases = [
+        result
+        for result in step_fix_cases
+        if _mcts_primary_action_name(result) is not None
+    ]
+
+    identity_baseline_count = sum(
+        1 for result in mcts_primary_cases if _mcts_has_identity_baseline(result)
+    )
+    positive_credit_count = sum(
+        1 for result in mcts_primary_cases if _mcts_primary_credit(result) > 0.0
+    )
+    primary_correct_count = sum(
+        1
+        for result in mcts_primary_cases
+        if _mcts_primary_action_name(result) == result.perturbation_label
+    )
+
+    rows = [
+        _metric_row(
+            "step_attribution_coverage",
+            len(mcts_primary_cases),
+            len(step_fix_cases),
+            "Share of fix-branch pipeline-gold cases where MCTS produced a primary step action.",
+        ),
+        _metric_row(
+            "identity_baseline_coverage",
+            identity_baseline_count,
+            len(mcts_primary_cases),
+            "Share of MCTS-attributed cases with an identity sibling baseline in every credited generation point.",
+        ),
+        _metric_row(
+            "positive_credit_rate",
+            positive_credit_count,
+            len(mcts_primary_cases),
+            "Share of MCTS-attributed cases whose primary action has positive credit.",
+        ),
+        _metric_row(
+            "primary_label_correctness",
+            primary_correct_count,
+            len(mcts_primary_cases),
+            "Share of MCTS-attributed pipeline-gold cases whose primary action matches the gold step label.",
+        ),
+    ]
+
+    write_csv_table(
+        output_path,
+        ["metric_name", "value", "numerator", "denominator", "description"],
+        rows,
+    )
+
+
+def _metric_row(
+    metric_name: str,
+    numerator: int,
+    denominator: int,
+    description: str,
+) -> dict[str, str]:
+    value = numerator / denominator if denominator else 0.0
+    return {
+        "metric_name": metric_name,
+        "value": f"{value:.6f}",
+        "numerator": str(numerator),
+        "denominator": str(denominator),
+        "description": description,
+    }
+
+
+def _mcts_primary_action_name(result: AuditResult) -> str | None:
+    mcts_result = getattr(result, "mcts_result", None)
+    if mcts_result is None:
+        return None
+    primary = getattr(mcts_result, "primary_attribution_label", None)
+    if primary is None:
+        return None
+    return _action_name(primary)
+
+
+def _mcts_primary_credit(result: AuditResult) -> float:
+    mcts_result = getattr(result, "mcts_result", None)
+    culprit = getattr(mcts_result, "main_culprit", None)
+    if culprit is not None and len(culprit) >= 3:
+        return float(culprit[2])
+    return 0.0
+
+
+def _mcts_has_identity_baseline(result: AuditResult) -> bool:
+    mcts_result = getattr(result, "mcts_result", None)
+    action_credits = getattr(mcts_result, "action_credits", {})
+    if not action_credits:
+        return False
+    return all(
+        any(_action_name(action) == "identity" for action in credits)
+        for credits in action_credits.values()
+    )
+
+
+def _action_name(action: object) -> str:
+    return str(getattr(action, "value", action))
 
 
 # ── Post-repair table ────────────────────────────────────────────────────
