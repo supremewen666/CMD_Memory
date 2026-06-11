@@ -1,4 +1,4 @@
-"""Tests for AnswerRubricScorer (G-Eval answer axis) — Issue 0019 Phase C."""
+"""Tests for AnswerRubricScorer on the G-Eval answer axis."""
 
 import unittest
 from unittest.mock import Mock, patch

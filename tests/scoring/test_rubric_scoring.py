@@ -1,4 +1,4 @@
-"""Behavior tests for Issue 0019 Phase C: rubric-based continuous scoring."""
+"""Behavior tests for rubric-based continuous scoring."""
 
 from __future__ import annotations
 
@@ -142,7 +142,7 @@ class RubricVerifierTest(unittest.TestCase):
         client = _FakeClient(['{"score": 4}'])
         verifier = RubricVerifier(client)
         with self.assertRaises(ContextLeakError):
-            verifier.verify("gold_label=write_error", "text")
+            verifier.verify("gold_label=forbidden", "text")
 
 
 # ── RubricScorer ───────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-"""Unified loaders for the four real-data sources (issue 0016)."""
+"""Unified loaders for the three current real-data probe sources."""
 
 from __future__ import annotations
 
@@ -15,16 +15,15 @@ _REAL_DATA_FILES: tuple[tuple[str, str], ...] = (
     ("longmemeval", "real_longmemeval_cases.json"),
     ("memoryarena", "real_memoryarena_cases.json"),
     ("toolbench", "real_toolbench_cases.json"),
-    ("null_label", "v1_null_label_cases.json"),
 )
 
 
 def load_all_real_cases(
     base_dir: str | Path | None = None,
 ) -> list[ProbeCase]:
-    """Load all 601 real-data probe cases (596 labeled + 5 null-label).
+    """Load all current real-data probe cases from the three approved sources.
 
-    Returns a single flat list from all four source files.
+    Returns a single flat list from LongMemEval, MemoryArena, and ToolBench.
     """
     root = Path(base_dir) if base_dir else _REAL_DATA_DIR
     all_cases: list[ProbeCase] = []
@@ -36,9 +35,9 @@ def load_all_real_cases(
 def load_real_cases_by_source(
     base_dir: str | Path | None = None,
 ) -> dict[str, list[ProbeCase]]:
-    """Load all 601 real-data probe cases keyed by source name.
+    """Load current real-data probe cases keyed by source name.
 
-    Returns {"longmemeval": [...], "memoryarena": [...], "toolbench": [...], "null_label": [...]}.
+    Returns {"longmemeval": [...], "memoryarena": [...], "toolbench": [...]}.
     """
     root = Path(base_dir) if base_dir else _REAL_DATA_DIR
     return {

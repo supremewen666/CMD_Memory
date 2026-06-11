@@ -89,6 +89,36 @@ def compute_directed_divergence(
     )
 
 
+def compute_symmetric_divergence(
+    client: Any,
+    item_a: MemoryItem,
+    item_b: MemoryItem,
+    *,
+    fallback_threshold: float = 0.5,
+) -> DirectedDivergence:
+    """Compute a directionless contrast baseline for Exp4.
+
+    The return type intentionally matches :func:`compute_directed_divergence`
+    so callers can swap the operator. Both directions receive the same averaged
+    score, which preserves "different vs same" magnitude while removing the
+    direction needed to distinguish wrong from compression.
+    """
+    directed = compute_directed_divergence(
+        client,
+        item_a,
+        item_b,
+        fallback_threshold=fallback_threshold,
+    )
+    score = (directed.forward_score + directed.reverse_score) / 2.0
+    divergence = _score_to_divergence(score)
+    return DirectedDivergence(
+        forward_score=score,
+        reverse_score=score,
+        forward_divergence=divergence,
+        reverse_divergence=divergence,
+    )
+
+
 def _score_to_divergence(score: float) -> float:
     entailment = max(0.0, min(1.0, score / RUBRIC_MAX_SCORE))
     return 1.0 - entailment

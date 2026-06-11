@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from ..core.models import MemoryItem
 from .divergence import DirectedDivergence, compute_directed_divergence
@@ -138,6 +138,7 @@ def compute_loo_divergence(
     *,
     divergence_threshold: float = 0.5,
     reconstruction_prompt_template: str | None = None,
+    divergence_fn: Callable[..., DirectedDivergence] | None = None,
 ) -> LOOReconstructionResult:
     """Compute LOO reconstruction divergence for item classification.
 
@@ -170,7 +171,8 @@ def compute_loo_divergence(
         )
 
     # Step 2: Compute directed divergence
-    divergence = compute_directed_divergence(client, target_item, reconstructed_item)
+    active_divergence_fn = divergence_fn or compute_directed_divergence
+    divergence = active_divergence_fn(client, target_item, reconstructed_item)
 
     # Step 3: Classify based on divergence direction and magnitude
     item_label = _classify_loo_divergence(divergence, divergence_threshold)

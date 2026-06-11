@@ -268,7 +268,7 @@ def _score_cmd_relevance(case: dict) -> float:
     elif "memoryarena" in source:
         score += 0.2
 
-    # Tool keywords (relevant for route_error / ingestion_error)
+    # Tool keywords for tool-use and source-aware cleaning.
     tool_hits = sum(1 for kw in TOOL_KEYWORDS if kw in query)
     if tool_hits:
         score += min(tool_hits * 0.08, 0.2)

@@ -51,6 +51,7 @@ def get_legal_actions(
     generation_point: int,
     *,
     include_gated_actions: bool = True,
+    restrict_to_hop: int | None = None,
 ) -> list[PipelineAction]:
     """Get legal actions for a generation point.
 
@@ -62,6 +63,9 @@ def get_legal_actions(
     Returns:
         List of legal actions for this generation point
     """
+    if restrict_to_hop is not None and generation_point + 1 != restrict_to_hop:
+        return [PipelineAction.IDENTITY]
+
     actions = [
         PipelineAction.RETRIEVAL_ERROR,
         PipelineAction.INJECTION_ERROR,

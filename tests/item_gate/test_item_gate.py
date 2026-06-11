@@ -10,6 +10,7 @@ from cmd_audit.item_gate import (
     ItemGateResult,
     ItemGateStatus,
     compute_directed_divergence,
+    compute_symmetric_divergence,
     detect_item_collision,
     compute_recall_set_divergence,
     leave_one_out_reconstruct,
@@ -82,6 +83,25 @@ class TestDirectedDivergence(unittest.TestCase):
 
         self.assertEqual(divergence.max_divergence, 0.75)
         self.assertTrue(divergence.is_forward_dominant)
+        self.assertFalse(divergence.is_reverse_dominant)
+
+    @patch('cmd_audit.item_gate.divergence._continuous_verify')
+    def test_compute_symmetric_divergence_removes_direction(self, mock_continuous):
+        """Symmetric ablation keeps magnitude but erases direction."""
+        mock_continuous.side_effect = [4.0, 0.0]
+
+        divergence = compute_symmetric_divergence(
+            self.mock_client,
+            self.item_a,
+            self.item_b,
+        )
+
+        self.assertEqual(divergence.forward_score, divergence.reverse_score)
+        self.assertEqual(
+            divergence.forward_divergence,
+            divergence.reverse_divergence,
+        )
+        self.assertFalse(divergence.is_forward_dominant)
         self.assertFalse(divergence.is_reverse_dominant)
 
 
@@ -353,6 +373,46 @@ class TestItemGate(unittest.TestCase):
         self.assertFalse(result.needs_item_treatment)
         self.assertFalse(result.should_skip_tier3)
         self.assertEqual(result.processing_cost, 1)  # One generation for LOO
+
+    @patch('cmd_audit.item_gate.gate.compute_recall_set_divergence')
+    @patch('cmd_audit.item_gate.gate.compute_loo_divergence')
+    def test_run_item_gate_can_disable_loo(self, mock_loo, mock_collision):
+        """Exp5 no-LOO ablation should pass after collision has no hit."""
+        mock_collision.return_value = []
+
+        result = run_item_gate(
+            self.mock_client,
+            self.target_item,
+            self.recall_set,
+            "query",
+            enable_loo=False,
+        )
+
+        self.assertEqual(result.status, ItemGateStatus.PASS)
+        self.assertIn("loo_skipped", result.decision_path)
+        mock_loo.assert_not_called()
+
+    @patch('cmd_audit.item_gate.gate.compute_recall_set_divergence')
+    @patch('cmd_audit.item_gate.gate.compute_loo_divergence')
+    def test_run_item_gate_can_disable_collision(self, mock_loo, mock_collision):
+        """Exp5 no-collision ablation should go straight to LOO."""
+        mock_loo.return_value = LOOReconstructionResult(
+            original_item=self.target_item, reconstructed_item=Mock(),
+            divergence=DirectedDivergence(1.0, 1.2, 0.25, 0.3),
+            reconstruction_successful=True, item_label=None
+        )
+
+        result = run_item_gate(
+            self.mock_client,
+            self.target_item,
+            self.recall_set,
+            "query",
+            enable_collision=False,
+        )
+
+        self.assertEqual(result.status, ItemGateStatus.PASS)
+        self.assertIn("collision_skipped", result.decision_path)
+        mock_collision.assert_not_called()
 
     @patch('cmd_audit.item_gate.gate.compute_recall_set_divergence')
     def test_run_item_gate_stale_collision(self, mock_collision):

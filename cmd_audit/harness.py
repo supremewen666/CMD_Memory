@@ -761,6 +761,22 @@ class _AgentGenerateClient:
         context = prompt if system is None else f"{system}\n\n{prompt}"
         return self._agent_generate(self._query, context)
 
+    def generate_with_logprobs(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        top_logprobs: int = 10,
+    ):
+        generator = self._agent_generate
+        if hasattr(generator, "generate_with_logprobs"):
+            return generator.generate_with_logprobs(
+                prompt,
+                system=system,
+                top_logprobs=top_logprobs,
+            )
+        raise AttributeError("agent_generate does not expose generate_with_logprobs")
+
 
 def _agent_generate_client(
     query: str, agent_generate: AgentGenerate | None

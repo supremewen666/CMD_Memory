@@ -14,10 +14,16 @@ from cmd_audit.mcts import (
     SearchResult,
     NestedValue,
     ValueFunction,
+    NaiveWeightedValue,
     get_legal_actions,
     apply_pipeline_action,
     rollout_to_terminal,
     run_mcts_attribution,
+)
+from cmd_audit.mcts.distill import (
+    distill_action_priors,
+    flatten_action_priors,
+    prior_alignment,
 )
 
 
@@ -56,6 +62,24 @@ class TestPipelineActions(unittest.TestCase):
         # and safety_error (due to passed_safety_filter metadata)
         self.assertIn(PipelineAction.GRAPH_ERROR, actions)
         self.assertIn(PipelineAction.SAFETY_ERROR, actions)
+
+    def test_get_legal_actions_restricts_to_one_based_hop(self):
+        """Experiment 8 can isolate a single hop without pruning identity."""
+        hop1_actions = get_legal_actions(
+            self.recall_set,
+            0,
+            include_gated_actions=True,
+            restrict_to_hop=2,
+        )
+        hop2_actions = get_legal_actions(
+            self.recall_set,
+            1,
+            include_gated_actions=True,
+            restrict_to_hop=2,
+        )
+
+        self.assertEqual(hop1_actions, [PipelineAction.IDENTITY])
+        self.assertIn(PipelineAction.RETRIEVAL_ERROR, hop2_actions)
 
     def test_get_legal_actions_does_not_use_store_string_for_safety(self):
         """Safety gating must use metadata, not a store-name string hack."""
@@ -368,6 +392,24 @@ class TestValueFunction(unittest.TestCase):
         self.assertFalse(value.is_evidence_complete)
         self.assertTrue(value.has_evidence_gaps)
 
+    @patch('cmd_audit.mcts.value._score_answer_prefix')
+    @patch('cmd_audit.mcts.value._continuous_verify')
+    def test_naive_weighted_value_removes_evidence_ceiling(
+        self, mock_continuous, mock_answer_prefix
+    ):
+        """Naive ablation lets evidence compensate for a zero answer score."""
+        mock_continuous.side_effect = [4.0, 0.0]
+        mock_answer_prefix.return_value = 0.0
+
+        result = NaiveWeightedValue(self.mock_client).evaluate_node(
+            "partial evidence",
+            self.gold_evidence,
+            "Paris",
+        )
+
+        self.assertEqual(result.evidence_count, 1)
+        self.assertAlmostEqual(result.scalar_value, 0.3 * 0.5)
+
 
 class TestMCTSSearch(unittest.TestCase):
     """Tests for complete MCTS search."""
@@ -612,6 +654,33 @@ class TestRollout(unittest.TestCase):
         self.assertEqual(result.terminal_answer, "")
         self.assertEqual(result.recovery_gain, 0.0)
 
+
+class TestDistill(unittest.TestCase):
+    """Tests for MCTS credit distillation."""
+
+    def test_distill_action_priors_aligns_positive_credit_with_gold_label(self):
+        result = Mock(
+            perturbation_label="injection_error",
+            mcts_result=Mock(
+                action_credits={
+                    0: {
+                        PipelineAction.IDENTITY: 0.0,
+                        PipelineAction.INJECTION_ERROR: 0.8,
+                        PipelineAction.RETRIEVAL_ERROR: 0.1,
+                    }
+                }
+            ),
+        )
+
+        priors = distill_action_priors([result])
+        flat = flatten_action_priors(priors)
+
+        self.assertGreater(
+            priors["injection_error"]["injection_error"],
+            priors["injection_error"]["retrieval_error"],
+        )
+        self.assertGreater(flat["injection_error"], 0.5)
+        self.assertGreater(prior_alignment(priors), 0.0)
 
 class TestIntegration(unittest.TestCase):
     """Integration tests for complete MCTS pipeline."""

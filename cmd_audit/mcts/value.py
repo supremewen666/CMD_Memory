@@ -164,6 +164,55 @@ class ValueFunction:
         return _score_answer_prefix(self.client, context, gold_answer)
 
 
+class NaiveWeightedValue(ValueFunction):
+    """Naive weighted value function used as an ablation baseline.
+
+    This intentionally removes the evidence ceiling. It lets high evidence
+    scores compensate for low answer-prefix scores, which is exactly the
+    failure mode Exp3 is meant to measure on injection/granularity cases.
+    """
+
+    def evaluate_node(
+        self,
+        context: str,
+        gold_evidence: tuple[GoldEvidence, ...],
+        gold_answer: str,
+    ) -> NestedValue:
+        if not gold_evidence:
+            return NestedValue(
+                evidence_count=0,
+                total_evidence=0,
+                evidence_ceiling=0.0,
+                answer_score=0.0,
+                scalar_value=0.0,
+                per_atom_scores=[],
+                answer_continuous=0.0,
+            )
+
+        per_atom_scores = self._evaluate_evidence_atoms(context, gold_evidence)
+        evidence_count = sum(
+            1
+            for score in per_atom_scores
+            if score >= (self.evidence_threshold * RUBRIC_MAX_SCORE)
+        )
+        evidence_avg = sum(per_atom_scores) / len(per_atom_scores)
+        answer_score = self._evaluate_answer_prefix(context, gold_answer)
+        scalar_value = (
+            0.7 * (answer_score / RUBRIC_MAX_SCORE)
+            + 0.3 * (evidence_avg / RUBRIC_MAX_SCORE)
+        )
+
+        return NestedValue(
+            evidence_count=evidence_count,
+            total_evidence=len(gold_evidence),
+            evidence_ceiling=evidence_count / len(gold_evidence),
+            answer_score=answer_score,
+            scalar_value=max(0.0, min(1.0, scalar_value)),
+            per_atom_scores=per_atom_scores,
+            answer_continuous=answer_score,
+        )
+
+
 _ANSWER_PREFIX_RUBRIC_SYSTEM_PROMPT = """\
 TASK: Rate how much the CURRENT PREFIX already entails the GOLD ANSWER, on a 0-4 scale.
 

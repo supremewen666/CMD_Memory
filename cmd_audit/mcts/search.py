@@ -14,7 +14,7 @@ from ..core.models import GoldEvidence, MemoryItem
 from .actions import PipelineAction, get_legal_actions, apply_pipeline_action
 from .rollout import rollout_with_early_stopping, RolloutResult
 from .tree import MCTSNode, MCTSTree
-from .value import ValueFunction, NestedValue
+from .value import NaiveWeightedValue, ValueFunction, NestedValue
 
 _logger = logging.getLogger(__name__)
 
@@ -34,10 +34,15 @@ class MCTSConfig:
 
     # Value function settings
     use_nested_value: bool = True
+    value_function_type: str = "nested"
 
     # Experience reuse settings
     action_priors: dict[str, float] = field(default_factory=dict)
     prior_bonus_weight: float = 0.25
+
+    # Experiment-only action restriction. Hop indexes are 1-based; when set,
+    # only that hop may use non-identity actions.
+    restrict_to_hop: int | None = None
 
 
 @dataclass
@@ -94,8 +99,15 @@ class SearchResult:
 class MCTSSearch:
     """Monte Carlo Tree Search for step-level memory failure attribution."""
 
-    def __init__(self, config: MCTSConfig | None = None):
+    def __init__(
+        self,
+        config: MCTSConfig | None = None,
+        *,
+        value_function_type: str | None = None,
+    ):
         self.config = config or MCTSConfig()
+        if value_function_type is not None:
+            self.config.value_function_type = value_function_type
         self.value_function = None
         self._stats = {
             'iterations': 0,
@@ -133,7 +145,8 @@ class MCTSSearch:
         self._reset_stats()
 
         # Initialize value function
-        self.value_function = ValueFunction(
+        value_class = _value_function_class(self.config.value_function_type)
+        self.value_function = value_class(
             client, evidence_threshold=self.config.evidence_threshold
         )
 
@@ -223,7 +236,8 @@ class MCTSSearch:
         legal_actions = get_legal_actions(
             recall_set,
             selected_node.generation_point,
-            include_gated_actions=self.config.include_gated_actions
+            include_gated_actions=self.config.include_gated_actions,
+            restrict_to_hop=self.config.restrict_to_hop,
         )
 
         def context_generator(action: PipelineAction, parent_context: str) -> str:
@@ -361,6 +375,8 @@ def run_mcts_attribution(
     baseline_answer_score: float = 0.0,
     intervention_config: dict[str, Any] | None = None,
     action_priors: dict[str, float] | None = None,
+    value_function_type: str = "nested",
+    restrict_to_hop: int | None = None,
 ) -> SearchResult:
     """Convenience function to run MCTS attribution with default config.
 
@@ -381,6 +397,8 @@ def run_mcts_attribution(
         max_iterations=max_iterations,
         max_depth=max_depth,
         action_priors=dict(action_priors or {}),
+        value_function_type=value_function_type,
+        restrict_to_hop=restrict_to_hop,
     )
 
     search = MCTSSearch(config)
@@ -389,4 +407,15 @@ def run_mcts_attribution(
         answer_verifier=answer_verifier,
         baseline_answer_score=baseline_answer_score,
         intervention_config=intervention_config,
+    )
+
+
+def _value_function_class(value_function_type: str):
+    if value_function_type == "nested":
+        return ValueFunction
+    if value_function_type == "naive":
+        return NaiveWeightedValue
+    raise ValueError(
+        "value_function_type must be 'nested' or 'naive', "
+        f"got {value_function_type!r}"
     )

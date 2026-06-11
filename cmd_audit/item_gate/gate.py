@@ -97,6 +97,8 @@ def run_item_gate(
     divergence_threshold: float = 0.5,
     timestamp_tolerance_days: int = 7,
     reconstruction_prompt_template: str | None = None,
+    enable_collision: bool = True,
+    enable_loo: bool = True,
 ) -> ItemGateResult:
     """Run complete Tier 2 item gate cost ladder for target item.
 
@@ -139,34 +141,53 @@ def run_item_gate(
                 decision_path=" → ".join(decision_path) + " → no_client",
             )
 
-        # Step ②: Recall-set collision detection
-        _logger.debug("Item gate step ②: recall-set collision for %s", target_item.memory_id)
-        collision_results = compute_recall_set_divergence(
-            client,
-            recall_set,
-            divergence_threshold=divergence_threshold,
-            timestamp_tolerance_days=timestamp_tolerance_days,
-        )
-        decision_path.append("collision_detection")
+        collision_results: list[CollisionResult] = []
+        if enable_collision:
+            # Step ②: Recall-set collision detection
+            _logger.debug("Item gate step ②: recall-set collision for %s", target_item.memory_id)
+            collision_results = compute_recall_set_divergence(
+                client,
+                recall_set,
+                divergence_threshold=divergence_threshold,
+                timestamp_tolerance_days=timestamp_tolerance_days,
+            )
+            decision_path.append("collision_detection")
 
-        # Check if target item involved in any collision
-        target_collision = _find_target_collision(target_item, collision_results)
+            # Check if target item involved in any collision
+            target_collision = _find_target_collision(target_item, collision_results)
 
-        if target_collision is not None:
-            # Target item has collision, classify based on collision type
-            if target_collision.is_stale_collision:
-                status = ItemGateStatus.ITEM_STALE
-            elif target_collision.is_conflict_collision:
-                status = ItemGateStatus.ITEM_CONFLICT
-            else:
-                # Fallback for unexpected collision type
-                status = ItemGateStatus.ITEM_CONFLICT
+            if target_collision is not None:
+                # Target item has collision, classify based on collision type
+                if target_collision.is_stale_collision:
+                    status = ItemGateStatus.ITEM_STALE
+                elif target_collision.is_conflict_collision:
+                    status = ItemGateStatus.ITEM_CONFLICT
+                else:
+                    # Fallback for unexpected collision type
+                    status = ItemGateStatus.ITEM_CONFLICT
 
+                return ItemGateResult(
+                    target_item=target_item,
+                    recall_set=recall_set,
+                    query=query,
+                    status=status,
+                    collision_results=collision_results,
+                    has_timestamp_conflicts=has_timestamp_conflicts,
+                    loo_result=None,
+                    processing_cost=processing_cost,
+                    decision_path=" → ".join(decision_path),
+                )
+        else:
+            decision_path.append("collision_skipped")
+
+        # Step ③: LOO reconstruction (only if no collision detected)
+        if not enable_loo:
+            decision_path.append("loo_skipped")
             return ItemGateResult(
                 target_item=target_item,
                 recall_set=recall_set,
                 query=query,
-                status=status,
+                status=ItemGateStatus.PASS,
                 collision_results=collision_results,
                 has_timestamp_conflicts=has_timestamp_conflicts,
                 loo_result=None,
@@ -174,7 +195,6 @@ def run_item_gate(
                 decision_path=" → ".join(decision_path),
             )
 
-        # Step ③: LOO reconstruction (only if no collision detected)
         _logger.debug("Item gate step ③: LOO reconstruction for %s", target_item.memory_id)
         loo_result = compute_loo_divergence(
             client,
@@ -234,6 +254,8 @@ def run_item_gate_for_recall_set(
     divergence_threshold: float = 0.5,
     timestamp_tolerance_days: int = 7,
     reconstruction_prompt_template: str | None = None,
+    enable_collision: bool = True,
+    enable_loo: bool = True,
 ) -> ItemGateResult | None:
     """Run item gate over recall-set items in experience-prioritized order.
 
@@ -253,6 +275,8 @@ def run_item_gate_for_recall_set(
             divergence_threshold=divergence_threshold,
             timestamp_tolerance_days=timestamp_tolerance_days,
             reconstruction_prompt_template=reconstruction_prompt_template,
+            enable_collision=enable_collision,
+            enable_loo=enable_loo,
         )
         last_result = result
         if result.status != ItemGateStatus.PASS:

@@ -13,9 +13,15 @@ Tree structure:
 """
 
 from .actions import PipelineAction, get_legal_actions, apply_pipeline_action
+from .distill import (
+    distill_action_priors,
+    flatten_action_priors,
+    oracle_action_priors,
+    prior_alignment,
+)
 from .search import MCTSSearch, MCTSConfig, SearchResult, run_mcts_attribution
 from .tree import MCTSNode, MCTSTree
-from .value import ValueFunction, compute_node_value, NestedValue
+from .value import NaiveWeightedValue, ValueFunction, compute_node_value, NestedValue
 from .rollout import rollout_to_terminal, RolloutResult
 
 __all__ = [
@@ -24,13 +30,18 @@ __all__ = [
     "MCTSSearch",
     "MCTSTree",
     "NestedValue",
+    "NaiveWeightedValue",
     "PipelineAction",
     "RolloutResult",
     "SearchResult",
     "ValueFunction",
     "apply_pipeline_action",
     "compute_node_value",
+    "distill_action_priors",
+    "flatten_action_priors",
     "get_legal_actions",
+    "oracle_action_priors",
+    "prior_alignment",
     "rollout_to_terminal",
     "run_mcts_attribution",
 ]
