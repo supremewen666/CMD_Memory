@@ -71,7 +71,7 @@ def main() -> None:
         if expected.get("hop_index") is not None:
             expected_hops[str(row["case_id"])] = int(expected["hop_index"])
 
-    by_label = defaultdict(lambda: [0, 0, 0])
+    by_label = defaultdict(lambda: [0, 0, 0, 0])
     pred_by_label = defaultdict(Counter)
     genpoint_by_label = defaultdict(Counter)
 
@@ -91,7 +91,10 @@ def main() -> None:
             if expected_hop is not None and gp + 1 == expected_hop:
                 by_label[gold][2] += 1
         else:
-            pred_by_label[gold]["<none>"] += 1
+            # Principled abstention: no positive-credit repair (failure absent,
+            # out of scope, or identity already recovered). Not a wrong label.
+            by_label[gold][3] += 1
+            pred_by_label[gold]["<abstain>"] += 1
         if not args.aggregate:
             print(f"case_id    : {case.case_id}")
             print(f"gold       : {gold}  expected_hop={expected_hops.get(case.case_id)}")
@@ -171,8 +174,12 @@ def _evaluate_case(case, client, verifier):
         ctx = _step_context(client, id1_ctx, a, recall_set, 1, cfg)
         credits[1][a] = own(ctx, 2) - id_id_recovery
 
+    # Principled abstention: only commit to an action with strictly positive
+    # credit. A non-positive best means no repair recovered, or identity already
+    # recovered (the model did not commit the labeled failure) — committing the
+    # first-iterated action then fabricates a label. Mirrors find_main_culprit.
     culprit = None
-    best = float("-inf")
+    best = 0.0
     for gp in (0, 1):
         for a, c in credits[gp].items():
             if a != PipelineAction.IDENTITY and c > best:
@@ -183,14 +190,32 @@ def _evaluate_case(case, client, verifier):
 
 def _print_aggregate(by_label, pred_by_label, genpoint_by_label, n_cases):
     print("\n=== Per-label accuracy (exhaustive single-point) ===")
-    print(f"{'gold label':22s} {'n':>3s} {'label_acc':>10s} {'hop_acc':>10s}")
-    tot = [0, 0, 0]
+    print(
+        f"{'gold label':22s} {'n':>3s} {'abst':>4s} "
+        f"{'label_acc':>10s} {'decided_acc':>12s} {'hop_acc':>10s}"
+    )
+    tot = [0, 0, 0, 0]
     for label in sorted(by_label):
-        n, lc, hc = by_label[label]
-        tot[0] += n; tot[1] += lc; tot[2] += hc
-        print(f"{label:22s} {n:>3d} {lc/n:>10.4f} {hc/n:>10.4f}")
+        n, lc, hc, ab = by_label[label]
+        tot[0] += n; tot[1] += lc; tot[2] += hc; tot[3] += ab
+        decided = n - ab
+        dec_acc = lc / decided if decided else 0.0
+        print(
+            f"{label:22s} {n:>3d} {ab:>4d} {lc/n:>10.4f} "
+            f"{dec_acc:>12.4f} {hc/n:>10.4f}"
+        )
     if tot[0]:
-        print(f"{'TOTAL':22s} {tot[0]:>3d} {tot[1]/tot[0]:>10.4f} {tot[2]/tot[0]:>10.4f}")
+        dec_tot = tot[0] - tot[3]
+        dec_acc_tot = tot[1] / dec_tot if dec_tot else 0.0
+        print(
+            f"{'TOTAL':22s} {tot[0]:>3d} {tot[3]:>4d} {tot[1]/tot[0]:>10.4f} "
+            f"{dec_acc_tot:>12.4f} {tot[2]/tot[0]:>10.4f}"
+        )
+    print(
+        "\n(label_acc counts abstentions as wrong; decided_acc excludes them. "
+        "Abstention = no positive-credit repair: failure absent / out of scope / "
+        "identity already recovered.)"
+    )
     print("\n=== Predicted-label distribution per gold ===")
     for label in sorted(pred_by_label):
         print(f"  {label:22s} -> {dict(pred_by_label[label])}")

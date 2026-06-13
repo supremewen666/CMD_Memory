@@ -108,16 +108,20 @@ def build_all(
         ]
 
         multihop_start = target_per_source + poisoned_per_source
+        multihop_rows = selected[multihop_start : multihop_start + multihop_per_source]
+        # Pool of real gold answers across this source's multihop rows. A graph
+        # distractor borrows another row's gold (correct elsewhere, wrong here)
+        # as a credible competing claim instead of a synthetic not-X token.
+        multihop_gold_pool = [_gold_answer(r, source_name) for r in multihop_rows]
         multihop_cases = [
             _build_multihop_case(
                 source_name,
                 i,
                 row,
                 PIPELINE_LABEL_CYCLE[i % len(PIPELINE_LABEL_CYCLE)],
+                distractor_gold_pool=multihop_gold_pool,
             )
-            for i, row in enumerate(
-                selected[multihop_start : multihop_start + multihop_per_source]
-            )
+            for i, row in enumerate(multihop_rows)
         ]
 
         coupled_start = multihop_start + multihop_per_source
@@ -427,6 +431,8 @@ def _build_multihop_case(
     idx: int,
     row: dict[str, Any],
     label: str,
+    *,
+    distractor_gold_pool: list[str] | None = None,
 ) -> dict[str, Any]:
     query = _shorten(_query(row), 620)
     gold_answer = _gold_answer(row, source_name)
@@ -524,16 +530,41 @@ def _build_multihop_case(
         )
 
     elif label == "graph_error":
+        # Borrow another multihop row's real gold as the competing claim: it is
+        # a genuine memory ("correct" for some other query) that the graph
+        # expansion wrongly pulled in here. A credible rival, not a not-X token.
+        distractor_claim = _sibling_gold(distractor_gold_pool, idx, gold_answer, wrong)
+        # Both memories use IDENTICAL neutral framing ("resolves to: X"). The
+        # model gets no textual cue to which is authoritative — it must decide.
+        # The intruder is marked only by is_graph_expanded metadata, never by
+        # wording. If gold self-labelled "the correct remembered answer is X",
+        # the model would trust it and ignore the distractor, so the case would
+        # never exercise graph distraction (identity would already recover).
+        graph_gold = _memory(
+            "m_hop2_gold",
+            f"Bridge key {bridge_key} resolves to: {gold_answer}",
+            ["e_gold"],
+        )
         graph_distractor = _memory(
             "m_hop2_graph_distractor",
-            f"Graph-expanded neighbor for bridge key {bridge_key} claims {wrong}.",
+            f"Bridge key {bridge_key} resolves to: {distractor_claim}",
             ["e_query"],
             is_graph_expanded=True,
         )
-        extracted_memory = [bridge_memory, gold_memory, graph_distractor]
+        extracted_memory = [bridge_memory, graph_gold, graph_distractor]
         retrieved = ["m_hop1_bridge", "m_hop2_graph_distractor", "m_hop2_gold"]
-        injected = f"{bridge_memory['text']}\n{graph_distractor['text']}"
-        answer = wrong
+        # A true graph failure: the direct gold evidence IS present in context,
+        # but a graph-expanded neighbor injects a competing distractor that
+        # misleads generation. Removing the distractor (pure-subtractive graph
+        # repair) recovers; re-injecting recall (injection) leaves the conflict.
+        # Gold must therefore be in the base context, not absent — otherwise the
+        # case is injection-shaped (gold dropped) rather than graph-shaped.
+        injected = (
+            f"{bridge_memory['text']}\n"
+            f"{graph_gold['text']}\n"
+            f"{graph_distractor['text']}"
+        )
+        answer = distractor_claim
         gold_source_id = "m_hop2_gold"
 
     elif label == "safety_error":
@@ -573,6 +604,11 @@ def _build_multihop_case(
         answer=answer,
         retrieved_memory_ids=retrieved,
         injected_context=injected,
+        # graph_error renders gold + a full-length sibling-gold distractor in
+        # one context; both can be ~300 chars, so the default 700 cap would
+        # truncate the distractor away and dissolve the conflict. Other labels
+        # stay well under 700.
+        max_context=900 if label == "graph_error" else 700,
     )
     return {
         "case_id": case_id,
@@ -901,6 +937,7 @@ def _baseline(
     answer: str,
     retrieved_memory_ids: list[str],
     injected_context: str,
+    max_context: int = 700,
 ) -> dict[str, Any]:
     return {
         "baseline_name": "vector_memory",
@@ -908,7 +945,7 @@ def _baseline(
         "retrieved_memory_ids": retrieved_memory_ids,
         "answer_score": 0.0,
         "evidence_score": 0.0,
-        "injected_context": _shorten(injected_context, 700),
+        "injected_context": _shorten(injected_context, max_context),
     }
 
 
@@ -1040,6 +1077,30 @@ def _wrong_value(gold_answer: str, source_name: str) -> str:
     if tokens:
         return f"not-{tokens[0]}"
     return "an incorrect value"
+
+
+def _sibling_gold(
+    gold_pool: list[str] | None,
+    idx: int,
+    own_gold: str,
+    fallback: str,
+) -> str:
+    """Pick another row's real gold as a credible competing claim.
+
+    A graph-expanded distractor should be a genuine memory that is correct for
+    some other query but wrong here — the failure mode of graph expansion. We
+    therefore borrow a sibling row's gold from the same source, skipping our own
+    and any answer equal to it. Falls back to ``fallback`` (the synthetic
+    ``_wrong_value``) only when no distinct sibling gold is available.
+    """
+    if not gold_pool:
+        return fallback
+    n = len(gold_pool)
+    for offset in range(1, n):
+        candidate = gold_pool[(idx + offset) % n]
+        if candidate and candidate.strip() and candidate != own_gold:
+            return candidate
+    return fallback
 
 
 def _distractor_text(source_name: str, row: dict[str, Any], query: str) -> str:

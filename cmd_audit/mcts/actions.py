@@ -332,15 +332,30 @@ def _repair_graph_context(
     context: str,
     recall_set: tuple[MemoryItem, ...],
 ) -> str:
-    """Suppress graph-expanded distractors and keep direct memory evidence."""
-    direct_items = tuple(item for item in recall_set if not item.is_graph_expanded)
-    if not direct_items:
+    """Remove graph-expanded distractor text from the context — add nothing.
+
+    A graph failure is a graph-expanded neighbor that injected a competing
+    distractor over evidence already present. The repair is purely subtractive:
+    strip each ``is_graph_expanded`` item's text from the context and add no new
+    block. This keeps graph DISJOINT from injection — injection re-renders
+    (adds) the recall buffer, graph only deletes the distractor. When the
+    distractor text is not in the context, this is a no-op (≈0 credit), so graph
+    cannot recover a case whose gold was never present (that is injection's
+    territory).
+    """
+    distractors = tuple(item for item in recall_set if item.is_graph_expanded)
+    if not distractors:
         return context
-    return _append_block(
-        context,
-        "Graph expansion disabled; direct memory only",
-        _format_memory_items(direct_items),
+    stripped = context
+    for item in distractors:
+        stripped = stripped.replace(item.text, "")
+    # Collapse the blank lines the deletion may have left behind.
+    stripped = "\n".join(
+        line for line in stripped.splitlines() if line.strip() or not line
     )
+    if stripped.rstrip() == context.rstrip():
+        return context
+    return stripped.rstrip()
 
 
 def _repair_safety_context(

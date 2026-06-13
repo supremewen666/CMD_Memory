@@ -254,15 +254,28 @@ class MCTSTree:
         _compute_credits_recursive(self.root)
         return credits
 
-    def find_main_culprit(self) -> tuple[int, PipelineAction, float] | None:
-        """Find the generation point and action with highest credit.
+    def find_main_culprit(
+        self, *, min_credit: float = 0.0
+    ) -> tuple[int, PipelineAction, float] | None:
+        """Find the generation point and action with highest positive credit.
+
+        Returns ``None`` (principled abstention) when no non-identity action
+        clears ``min_credit``. A non-positive top credit means every repair
+        either failed to recover or the identity rollout already recovered
+        (the failure was not present / not in scope), so committing to the
+        first-iterated action would fabricate a label. This mirrors the
+        zero/negative-gain abstention in ``attribution/failure.py``.
+
+        Args:
+            min_credit: Minimum credit a non-identity action must exceed to be
+                eligible. Defaults to 0.0 (strictly positive recovery).
 
         Returns:
-            Tuple of (generation_point, action, credit) or None if no credits
+            Tuple of (generation_point, action, credit), or None to abstain.
         """
         all_credits = self.get_action_credits()
 
-        max_credit = float('-inf')
+        max_credit = min_credit
         best_generation = None
         best_action = None
 
