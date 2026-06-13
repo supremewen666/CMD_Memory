@@ -294,6 +294,11 @@ class MCTSSearch:
 
         # 4. Back-propagation: Update Q-values with max-backup
         if rollout_result.rollout_successful:
+            # Record this node's own single-point recovery before back-prop;
+            # credit assignment reads own_recovery, not the inflated q_max.
+            rollout_node.own_recovery = max(
+                rollout_node.own_recovery, rollout_result.recovery_gain
+            )
             rollout_node.back_propagate(rollout_result.recovery_gain)
 
         return self._should_early_stop(rollout_node, rollout_result)

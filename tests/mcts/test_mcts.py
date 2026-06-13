@@ -100,15 +100,34 @@ class TestPipelineActions(unittest.TestCase):
         self.assertEqual(result, context)
 
     def test_apply_pipeline_action_interventions(self):
-        """Test that repair interventions modify context without adding bad evidence."""
+        """Repair actions fire only when their corruption signature is present."""
         context = "Original context"
 
-        for action in [PipelineAction.RETRIEVAL_ERROR, PipelineAction.INJECTION_ERROR]:
-            result = apply_pipeline_action(action, context, self.recall_set, 0)
-            self.assertNotEqual(result, context)
-            self.assertIn(context, result)  # Original should be preserved
-            self.assertNotIn("WRONG_RETRIEVAL", result)
-            self.assertNotIn("Malformed", result)
+        # INJECTION fires on a clean recall set (no graph/safety signature):
+        # already-retrieved memory was mis-ordered or omitted at injection time.
+        clean_recall = (MemoryItem("item1", "Paris is the capital of France"),)
+        result = apply_pipeline_action(
+            PipelineAction.INJECTION_ERROR, context, clean_recall, 0
+        )
+        self.assertNotEqual(result, context)
+        self.assertIn(context, result)  # Original should be preserved
+        self.assertNotIn("WRONG_RETRIEVAL", result)
+        self.assertNotIn("Malformed", result)
+
+        # RETRIEVAL fires when a candidate is absent from recall and
+        # source-event-disjoint from it (a pure miss), supplied via config.
+        missed = MemoryItem("gold", "The answer is 42", source_event_ids=("e_gold",))
+        result = apply_pipeline_action(
+            PipelineAction.RETRIEVAL_ERROR,
+            context,
+            clean_recall,
+            0,
+            intervention_config={"candidate_items": (clean_recall[0], missed)},
+        )
+        self.assertNotEqual(result, context)
+        self.assertIn(context, result)
+        self.assertNotIn("WRONG_RETRIEVAL", result)
+        self.assertNotIn("Malformed", result)
 
     def test_pipeline_action_properties(self):
         """Test PipelineAction property methods."""
@@ -243,12 +262,13 @@ class TestMCTSTree(unittest.TestCase):
 
     def test_credit_assignment(self):
         """Test action credit computation."""
-        # Create tree with identity and intervention
+        # Create tree with identity and intervention. Credit reads own_recovery
+        # (each node's single-point rollout), not the back-propagated q_max.
         identity_child = MCTSNode("identity", 1, (PipelineAction.IDENTITY,))
-        identity_child.q_max = 0.3
+        identity_child.own_recovery = 0.3
 
         intervention_child = MCTSNode("intervention", 1, (PipelineAction.RETRIEVAL_ERROR,))
-        intervention_child.q_max = 0.7
+        intervention_child.own_recovery = 0.7
 
         self.root.add_child(PipelineAction.IDENTITY, identity_child)
         self.root.add_child(PipelineAction.RETRIEVAL_ERROR, intervention_child)
@@ -262,7 +282,7 @@ class TestMCTSTree(unittest.TestCase):
     def test_credit_assignment_skips_node_without_identity_baseline(self):
         """Missing identity sibling must not default to Q=0 and inflate credit."""
         intervention_child = MCTSNode("intervention", 1, (PipelineAction.RETRIEVAL_ERROR,))
-        intervention_child.q_max = 0.7
+        intervention_child.own_recovery = 0.7
         self.root.add_child(PipelineAction.RETRIEVAL_ERROR, intervention_child)
 
         credits = self.tree.get_action_credits()
@@ -280,7 +300,7 @@ class TestMCTSTree(unittest.TestCase):
 
         for action, score in actions_and_scores:
             child = MCTSNode(f"child_{action.value}", 1, (action,))
-            child.q_max = score
+            child.own_recovery = score
             self.root.add_child(action, child)
 
         main_culprit = self.tree.find_main_culprit()

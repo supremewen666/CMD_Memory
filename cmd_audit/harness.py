@@ -698,7 +698,10 @@ def _run_with_hook(
                 if baseline_answer_score_llm is not None
                 else baseline.answer_score
             ),
-            intervention_config={"candidate_items": case.extracted_memory},
+            intervention_config={
+                "candidate_items": case.extracted_memory,
+                "raw_events": case.raw_events,
+            },
             action_priors=(
                 failure_memory_store.get_mcts_action_priors(case.query)
                 if failure_memory_store is not None

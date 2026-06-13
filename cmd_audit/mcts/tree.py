@@ -33,7 +33,8 @@ class MCTSNode:
 
     # MCTS statistics
     visit_count: int = 0
-    q_max: float = 0.0  # Max Q-value seen (max-backup)
+    q_max: float = 0.0  # Max Q-value seen (max-backup), drives UCB selection.
+    own_recovery: float = 0.0  # This node's own rollout recovery (no back-prop).
     prior_bonus: float = 0.0
 
     # Node state
@@ -216,7 +217,13 @@ class MCTSTree:
     def get_action_credits(self) -> dict[int, dict[PipelineAction, float]]:
         """Compute credit assignment for each generation point and action.
 
-        Credit = Qmax(prefix + action) - Qmax(prefix + identity)
+        Credit = own_recovery(prefix + action) - own_recovery(prefix + identity)
+
+        Uses each node's own rollout recovery, NOT the back-propagated q_max.
+        q_max carries the max recovery of the whole subtree (so a deep hop-2
+        recovery would inflate its hop-1 ancestor); own_recovery is the
+        single-point counterfactual "repair only this hop, identity elsewhere"
+        signal, which is what step-level credit must attribute.
 
         Returns:
             Dictionary mapping generation_point -> action -> credit_score
@@ -231,14 +238,14 @@ class MCTSTree:
             identity_child = node.children.get(PipelineAction.IDENTITY)
             if identity_child is None:
                 return
-            identity_q = identity_child.q_max
+            identity_recovery = identity_child.own_recovery
 
             if generation_point not in credits:
                 credits[generation_point] = {}
 
             # Compute credit for each action
             for action, child in node.children.items():
-                credit = child.q_max - identity_q
+                credit = child.own_recovery - identity_recovery
                 credits[generation_point][action] = credit
 
                 # Recurse to children

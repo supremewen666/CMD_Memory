@@ -92,6 +92,44 @@ def get_legal_actions(
     return actions
 
 
+def _hop_for_generation_point(generation_point: int) -> int:
+    """Map a 0-based generation point to its 1-based hop number.
+
+    generation_point 0 acts at hop 1, generation_point 1 at hop 2, etc.
+    Mirrors the ``hop == generation_point + 1`` convention in
+    ``get_legal_actions``.
+    """
+    return generation_point + 1
+
+
+def _hop_local_items(
+    items: tuple[MemoryItem, ...],
+    generation_point: int,
+) -> tuple[MemoryItem, ...]:
+    """Restrict items to the hop owned by ``generation_point``.
+
+    Multihop probe cases tag memory by hop via the ``m_hop{N}_`` memory_id
+    prefix. A counterfactual repair at a generation point must only touch
+    that hop's evidence, otherwise injecting a later hop's gold item lets an
+    early-hop intervention recover the terminal answer and collapses credit
+    onto generation_point 0.
+
+    Items without an ``m_hop{N}_`` prefix carry no hop tag (non-multihop
+    data) and are always kept, preserving the original full-recall behaviour
+    for those cases.
+    """
+    hop = _hop_for_generation_point(generation_point)
+    prefix = f"m_hop{hop}_"
+    tagged = tuple(item for item in items if item.memory_id.startswith("m_hop"))
+    if not tagged:
+        return items
+    local = tuple(item for item in items if item.memory_id.startswith(prefix))
+    untagged = tuple(
+        item for item in items if not item.memory_id.startswith("m_hop")
+    )
+    return local + untagged
+
+
 def apply_pipeline_action(
     action: PipelineAction,
     context: str,
@@ -119,8 +157,13 @@ def apply_pipeline_action(
     if action == PipelineAction.IDENTITY:
         return context
 
+    # A repair at this generation point may only touch its own hop's
+    # evidence; otherwise an early-hop intervention can pull in a later hop's
+    # gold item and spuriously recover the terminal answer.
+    recall_set = _hop_local_items(recall_set, generation_point)
+
     if action == PipelineAction.RETRIEVAL_ERROR:
-        return _repair_retrieval_context(context, recall_set, intervention_config)
+        return _repair_retrieval_context(context, recall_set, intervention_config, generation_point)
 
     elif action == PipelineAction.INJECTION_ERROR:
         return _repair_injection_context(context, recall_set)
@@ -132,27 +175,94 @@ def apply_pipeline_action(
         return _repair_graph_context(context, recall_set)
 
     elif action == PipelineAction.SAFETY_ERROR:
-        return _repair_safety_context(context, recall_set, intervention_config)
+        return _repair_safety_context(context, recall_set)
 
     else:
         _logger.warning("Unknown pipeline action: %s", action)
         return context
 
 
+def _source_events(item: MemoryItem) -> set[str]:
+    return set(item.source_event_ids)
+
+
+def _recall_source_events(recall_set: tuple[MemoryItem, ...]) -> set[str]:
+    events: set[str] = set()
+    for item in recall_set:
+        events |= _source_events(item)
+    return events
+
+
+def _retrieval_missed_items(
+    recall_set: tuple[MemoryItem, ...],
+    candidates: tuple[MemoryItem, ...],
+) -> tuple[MemoryItem, ...]:
+    """Pool items absent from recall and source-event-disjoint from it.
+
+    The signature of a pure miss: the retriever never surfaced this evidence
+    and nothing recalled covers its source events. A finer item masked by a
+    coarser recalled summary shares source events and is excluded here (it is
+    a granularity signature instead).
+    """
+    recalled_ids = {item.memory_id for item in recall_set}
+    recall_events = _recall_source_events(recall_set)
+    return tuple(
+        item
+        for item in candidates
+        if item.memory_id not in recalled_ids
+        and not (_source_events(item) & recall_events)
+    )
+
+
+def _coarse_recall_items(
+    recall_set: tuple[MemoryItem, ...],
+) -> tuple[MemoryItem, ...]:
+    """Recalled items that compressed more than one raw event into a summary.
+
+    A granularity failure is a coarse summary that masked detail; the operation
+    that repairs it de-summarizes such an item back to its constituent raw
+    events. An item carrying a single source event is already atomic — there is
+    nothing to de-summarize — so it is excluded here (injection, not
+    granularity, owns re-ordering already-atomic recalled items).
+    """
+    return tuple(item for item in recall_set if len(item.source_event_ids) > 1)
+
+
+def _raw_event_texts(
+    intervention_config: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Build an ``event_id -> text`` map from the configured raw events."""
+    if not intervention_config:
+        return {}
+    raw_events = intervention_config.get("raw_events")
+    if not raw_events:
+        return {}
+    return {ev.event_id: ev.text for ev in raw_events}
+
+
 def _repair_retrieval_context(
     context: str,
     recall_set: tuple[MemoryItem, ...],
     intervention_config: dict[str, Any] | None,
+    generation_point: int,
 ) -> str:
-    """Replace the retrieval boundary with best available candidate memory."""
-    candidates = _candidate_items(recall_set, intervention_config)
-    if not candidates:
+    """Add candidate items the retriever missed entirely.
+
+    Precondition: fires only for pool items that are (a) absent from the recall
+    set and (b) source-event-disjoint from everything recalled — the signature
+    of a pure miss. A finer item masked by a coarser summary already in recall
+    shares source events and belongs to ``granularity_error`` instead, so this
+    action no-ops there (≈0 credit).
+    """
+    candidates = _candidate_items(recall_set, intervention_config, generation_point)
+    missed = _retrieval_missed_items(recall_set, candidates)
+    if not missed:
         return context
 
     return _append_block(
         context,
         "Corrected retrieval candidates",
-        _format_memory_items(candidates),
+        _format_memory_items(missed),
     )
 
 
@@ -160,14 +270,28 @@ def _repair_injection_context(
     context: str,
     recall_set: tuple[MemoryItem, ...],
 ) -> str:
-    """Normalize injection into an explicit, ordered memory block."""
-    if not recall_set:
+    """Re-render the injection buffer as an explicit, ordered memory block.
+
+    Injection sits after retrieval, graph-expansion, and the safety filter in
+    the pipeline, so its input buffer is every recalled item EXCEPT those the
+    safety layer already redacted upstream — those never reached injection and
+    re-rendering cannot resurrect them (that is ``safety_error``'s job). Graph-
+    expanded items DID enter the buffer and are re-rendered as-is, distractor
+    and all.
+
+    This reads only injection's own input boundary (data-flow scoping); it
+    never computes whether another action would recover. When it co-fires with
+    another action (e.g. graph, which additionally drops the distractor),
+    recovery credit — not a hard rule — decides between them.
+    """
+    buffer = tuple(item for item in recall_set if not item.passed_safety_filter)
+    if not buffer:
         return context
 
     return _append_block(
         context,
         "Normalized injected memory",
-        _format_memory_items(recall_set),
+        _format_memory_items(buffer),
     )
 
 
@@ -176,19 +300,31 @@ def _repair_granularity_context(
     recall_set: tuple[MemoryItem, ...],
     intervention_config: dict[str, Any] | None,
 ) -> str:
-    """Expose lower-granularity memory text when summaries mask evidence."""
-    candidates = _candidate_items(recall_set, intervention_config)
-    if not candidates:
+    """De-summarize coarse recalled summaries back to their raw events.
+
+    Operates in-place on recall, not the pool: a granularity failure is a
+    recalled item that compressed several raw events into one summary, masking
+    the detail. The repair expands each such item to the text of its
+    constituent raw events (``source_event_ids`` -> ``raw_events`` text). Items
+    already atomic (a single source event) carry no masked detail and are
+    skipped — re-ordering those is injection's job. Because this touches no pool
+    item, a pure retrieval miss cannot recover here.
+    """
+    coarse = _coarse_recall_items(recall_set)
+    if not coarse:
+        return context
+    event_texts = _raw_event_texts(intervention_config)
+    if not event_texts:
         return context
 
     lines = []
-    for item in candidates:
-        source = (
-            f" source_events={','.join(item.source_event_ids)}"
-            if item.source_event_ids
-            else ""
-        )
-        lines.append(f"- [{item.memory_id}{source}] {item.text}")
+    for item in coarse:
+        for event_id in item.source_event_ids:
+            text = event_texts.get(event_id)
+            if text:
+                lines.append(f"- [{item.memory_id}:{event_id}] {text}")
+    if not lines:
+        return context
     return _append_block(context, "Expanded memory granularity", "\n".join(lines))
 
 
@@ -210,27 +346,37 @@ def _repair_graph_context(
 def _repair_safety_context(
     context: str,
     recall_set: tuple[MemoryItem, ...],
-    intervention_config: dict[str, Any] | None,
 ) -> str:
-    """Restore safe evidence candidates after an over-broad safety filter."""
-    candidates = _candidate_items(recall_set, intervention_config)
-    if not candidates:
+    """Restore evidence the safety layer redacted despite being safe.
+
+    Precondition: fires only for recalled items flagged
+    ``passed_safety_filter=True`` — items the structural safety gate marked
+    safe but an over-broad filter redacted from context. Re-emits their text
+    so the terminal answer can recover. No-ops (≈0 credit) when no such item
+    is present, keeping this action exclusive to the safety signature.
+    """
+    safe_items = tuple(item for item in recall_set if item.passed_safety_filter)
+    if not safe_items:
         return context
     return _append_block(
         context,
         "Safety-reviewed evidence candidates",
-        _format_memory_items(candidates),
+        _format_memory_items(safe_items),
     )
 
 
 def _candidate_items(
     recall_set: tuple[MemoryItem, ...],
     intervention_config: dict[str, Any] | None,
+    generation_point: int,
 ) -> tuple[MemoryItem, ...]:
     if intervention_config:
         configured = intervention_config.get("candidate_items")
         if configured:
-            return tuple(configured)
+            # The configured pool is the full extracted memory across all
+            # hops; restrict it to the hop this generation point repairs so a
+            # later hop's gold item can't leak into an early-hop intervention.
+            return _hop_local_items(tuple(configured), generation_point)
     return recall_set
 
 

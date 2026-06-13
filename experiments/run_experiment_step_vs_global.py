@@ -26,19 +26,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from cmd_audit.baselines.comparators import run_baseline_suite
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases
-from cmd_audit.eval.metrics import compute_diagnosis_metrics
 from cmd_audit.eval.writers import write_csv_table
-from cmd_audit.harness import diagnosis_predictions, run_cases
 from experiments.experiment_runner_common import (
-    AGENT_SYSTEM_PROMPT,
-    AgentGenerateWithLogprobs,
     assert_g_eval_available,
     build_answer_verifier,
-    build_evidence_scorer,
     load_raw_rows,
+    run_mcts_for_case,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -75,16 +72,6 @@ def main() -> None:
 
     agent_client = LLMClient(LLMClientConfig())
     assert_g_eval_available(agent_client, role="step-vs-global")
-    agent_generate = AgentGenerateWithLogprobs(
-        agent_client,
-        system_prompt=AGENT_SYSTEM_PROMPT,
-    )
-    scorer = build_evidence_scorer(
-        agent_client,
-        scorer_mode=args.scorer_mode,
-        max_workers=1,
-        max_retries=args.max_retries,
-    )
     answer_verifier = build_answer_verifier(
         agent_client,
         answer_mode=args.answer_mode,
@@ -102,51 +89,52 @@ def main() -> None:
     expected_hops = _load_expected_hops(args.cases)
     print(f"Loaded {len(cases)} multihop pipeline-action cases from {args.cases}")
 
-    # Run CMD step-level harness (hook → item_gate → MCTS)
-    results = run_cases(
-        cases,
-        scorer=scorer,
-        agent_generate=agent_generate,
-        answer_verifier=answer_verifier,
-    )
-
-    # Gather predictions for global-label comparators
-    all_predictions = [p for r in results for p in diagnosis_predictions(r)]
-    metrics = compute_diagnosis_metrics(tuple(all_predictions))
-
-    # CMD step-level: per-hop analysis
+    # Run CMD step-level attribution by calling MCTS directly, bypassing the
+    # hook's Fill/Fix gate. The hook routes retrieval_error cases to Fill (no
+    # diagnosis) by design, but this experiment measures MCTS attribution over
+    # all 5 step actions, so it must reach MCTS for every case.
     cmd_label_correct = 0
     cmd_hop_correct = 0
-    for r in results:
-        if r.mcts_result and r.mcts_result.main_culprit:
-            hop_idx, action, credit = r.mcts_result.main_culprit
+    # Per-case baseline predictions, keyed by comparator name.
+    baseline_correct: dict[str, int] = {
+        "evidence_recall": 0,
+        "random_label": 0,
+        "llm_judge": 0,
+    }
+    for case in cases:
+        search = run_mcts_for_case(
+            case,
+            agent_client,
+            answer_verifier,
+            max_iterations=40,
+        )
+        if search.main_culprit:
+            generation_point, action, _credit = search.main_culprit
             pred_label = getattr(action, "value", str(action))
-            if pred_label == r.perturbation_label:
+            if pred_label == case.perturbation_label:
                 cmd_label_correct += 1
-            # Check hop index against expected_fault in case metadata
-            expected_hop = expected_hops.get(r.case_id)
-            if expected_hop is not None and hop_idx == expected_hop:
+            # MCTS generation_point is 0-based node depth; the data's
+            # expected_fault.hop_index is 1-based. The convention in
+            # get_legal_actions (actions.py) is hop == generation_point + 1.
+            expected_hop = expected_hops.get(case.case_id)
+            if expected_hop is not None and generation_point + 1 == expected_hop:
                 cmd_hop_correct += 1
 
+        # Global-label baselines run independently of the hook/MCTS path.
+        suite = run_baseline_suite(case, llm_client=agent_client)
+        for comparator in suite.comparator_results:
+            name = comparator.comparator_name
+            if name in baseline_correct and comparator.predicted_label == case.perturbation_label:
+                baseline_correct[name] += 1
+
     cmd_result = SystemResult(
-        "CMD-step-level", len(results), cmd_label_correct, cmd_hop_correct
+        "CMD-step-level", len(cases), cmd_label_correct, cmd_hop_correct
     )
 
-    # Global-label baselines (no hop concept)
-    global_results = []
-    for system_name in ["evidence_recall", "random_label", "llm_judge"]:
-        if system_name not in metrics:
-            continue
-        m = metrics[system_name]
-        # Count correct by matching DiagnosisPrediction.gold_label == predicted
-        correct = sum(
-            1
-            for p in all_predictions
-            if p.system_name == system_name and p.predicted_label == p.gold_label
-        )
-        global_results.append(
-            SystemResult(system_name, len(results), correct, hop_correct=None)
-        )
+    global_results = [
+        SystemResult(name, len(cases), baseline_correct[name], hop_correct=None)
+        for name in ("evidence_recall", "random_label", "llm_judge")
+    ]
 
     print(f"\n{'System':30s} {'Label Acc':>10s}  {'Hop Acc':>10s}")
     print("-" * 52)

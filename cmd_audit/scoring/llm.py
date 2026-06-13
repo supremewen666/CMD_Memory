@@ -665,13 +665,13 @@ def _find_score_digit_logprobs(
         stripped = _normalise_score_digit_token(tok.token)
         if not stripped:
             continue
-        if stripped.isdigit() and 0 <= int(stripped) <= RUBRIC_MAX_SCORE:
+        if stripped.isdecimal() and 0 <= int(stripped) <= RUBRIC_MAX_SCORE:
             digits: dict[int, float] = {}
             chosen = stripped
             digits[int(chosen)] = tok.logprob
             for alt_token, alt_lp in tok.alternatives:
                 cand = _normalise_score_digit_token(alt_token)
-                if cand.isdigit() and 0 <= int(cand) <= RUBRIC_MAX_SCORE:
+                if cand.isdecimal() and 0 <= int(cand) <= RUBRIC_MAX_SCORE:
                     digits.setdefault(int(cand), alt_lp)
             return digits or None
         # Skip JSON structural tokens (":, space, quotes) but bail if we
@@ -696,7 +696,7 @@ def _normalise_score_digit_token(token: str) -> str:
     """
     stripped = token.strip().strip('"').strip("'")
     stripped = stripped.lstrip("Ġ▁")
-    if stripped and stripped[0].isdigit():
+    if stripped and stripped[0].isdecimal():
         return stripped[0]
     return stripped
 
