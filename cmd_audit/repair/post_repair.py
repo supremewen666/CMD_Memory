@@ -325,11 +325,36 @@ def _ecs_for_label(
     return (action.cause, replay.evidence_block, repair_guidance)
 
 
+def detect_gold_answer_leak(
+    ctx: RepairedContext, gold_answer: str
+) -> bool:
+    """True when the repaired context already contains the gold answer verbatim.
+
+    Phase 1 leak guard. The recovery-rate headline is only meaningful if the
+    repaired context does NOT hand the model the answer. The fallback in
+    ``_replay_for_label`` fabricates ``evidence_block`` from ``gold_evidence``
+    (and sets answer_score=1.0), which can flow into ``corrected_memory`` and
+    make Post-Repair "recover" by copying, not by repair. A case flagged here
+    must be excluded from the leak-clean recovery rate.
+
+    Empty / whitespace gold answers never count as leaked.
+    """
+    gold = gold_answer.strip().casefold()
+    if not gold:
+        return False
+    return gold in _combine_context(ctx).casefold()
+
+
 def _combine_context(ctx: RepairedContext) -> str:
+    # Executor = corrected memory + guidance. repaired_evidence_block is
+    # currently a duplicate of corrected_memory (both derive from
+    # replay.evidence_block in the ECS path, both = all_memory in the
+    # hard-case baseline), so re-injecting it only adds a repetition/recency
+    # artifact, not new content. Omitting it keeps a single evidence copy and
+    # pre-empts the "said the answer twice" critique of the executor.
     parts = [
         ctx.corrected_memory,
         ctx.repair_guidance,
-        ctx.repaired_evidence_block,
     ]
     if ctx.fm_context:
         parts.append(ctx.fm_context)

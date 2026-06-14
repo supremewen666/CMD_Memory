@@ -51,6 +51,17 @@ def main() -> None:
     parser.add_argument("--cases", default=str(DATA / "real_multihop_cases.json"))
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument("--aggregate", action="store_true")
+    parser.add_argument(
+        "--min-credit",
+        type=float,
+        default=0.0,
+        help=(
+            "Abstention threshold: a culprit must exceed this credit to be "
+            "committed. Raise above 0 (e.g. 0.05-0.1) to abstain on "
+            "noise-floor credits that would otherwise become confident wrong "
+            "labels. Default 0.0 (any positive credit wins)."
+        ),
+    )
     args = parser.parse_args()
 
     client = LLMClient(LLMClientConfig())
