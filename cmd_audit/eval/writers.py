@@ -247,7 +247,7 @@ def write_step_level_metrics_table(
     results: list[AuditResult],
     output_path: str | Path,
 ) -> None:
-    """Write aggregate MCTS step-level attribution metrics."""
+    """Write aggregate step-level attribution metrics."""
     step_fix_cases = [
         result
         for result in results
@@ -277,25 +277,25 @@ def write_step_level_metrics_table(
             "step_attribution_coverage",
             len(mcts_primary_cases),
             len(step_fix_cases),
-            "Share of fix-branch pipeline-gold cases where MCTS produced a primary step action.",
+            "Share of fix-branch pipeline-gold cases where attribution produced a primary step action.",
         ),
         _metric_row(
             "identity_baseline_coverage",
             identity_baseline_count,
             len(mcts_primary_cases),
-            "Share of MCTS-attributed cases with an identity sibling baseline in every credited generation point.",
+            "Share of attributed cases with an identity sibling baseline in every credited generation point.",
         ),
         _metric_row(
             "positive_credit_rate",
             positive_credit_count,
             len(mcts_primary_cases),
-            "Share of MCTS-attributed cases whose primary action has positive credit.",
+            "Share of attributed cases whose primary action has positive credit.",
         ),
         _metric_row(
             "primary_label_correctness",
             primary_correct_count,
             len(mcts_primary_cases),
-            "Share of MCTS-attributed pipeline-gold cases whose primary action matches the gold step label.",
+            "Share of attributed pipeline-gold cases whose primary action matches the gold step label.",
         ),
     ]
 

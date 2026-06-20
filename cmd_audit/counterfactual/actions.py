@@ -1,10 +1,9 @@
-"""Pipeline repair actions for MCTS tree expansion.
+"""Pipeline repair actions for counterfactual attribution.
 
-Implements the 5 pipeline step actions from DISCUSSION.md decision F:
+Implements the live pipeline step actions:
 - retrieval_error: Wrong retrieval decisions
 - injection_error: Injection format/order or context management issues
 - granularity_error: Granularity masking evidence
-- graph_error: Graph expansion introducing distraction (gated)
 - safety_error: Safety layer blocking evidence (gated)
 """
 from __future__ import annotations
@@ -23,7 +22,6 @@ class PipelineAction(Enum):
     RETRIEVAL_ERROR = "retrieval_error"
     INJECTION_ERROR = "injection_error"
     GRANULARITY_ERROR = "granularity_error"
-    GRAPH_ERROR = "graph_error"
     SAFETY_ERROR = "safety_error"
     IDENTITY = "identity"  # No intervention (baseline)
 
@@ -41,7 +39,6 @@ class PipelineAction(Enum):
     def requires_gating(self) -> bool:
         """True if action requires metadata gating flags."""
         return self in {
-            PipelineAction.GRAPH_ERROR,
             PipelineAction.SAFETY_ERROR,
         }
 
@@ -58,7 +55,7 @@ def get_legal_actions(
     Args:
         recall_set: Memory items from retrieval
         generation_point: Which generation point in the trajectory
-        include_gated_actions: Whether to include gated actions (graph/safety)
+        include_gated_actions: Whether to include gated actions (safety)
 
     Returns:
         List of legal actions for this generation point
@@ -74,13 +71,6 @@ def get_legal_actions(
     ]
 
     if include_gated_actions:
-        # Check if any items have graph expansion metadata
-        has_graph_expansion = any(
-            item.is_graph_expanded for item in recall_set
-        )
-        if has_graph_expansion:
-            actions.append(PipelineAction.GRAPH_ERROR)
-
         # Check if any items passed the structural safety metadata gate.
         has_safety_metadata = any(
             item.passed_safety_filter
@@ -142,7 +132,7 @@ def apply_pipeline_action(
 
     The action label names the suspected pipeline failure. The transform asks:
     "if this failure were repaired at this point, would the terminal answer
-    recover?" MCTS then assigns credit from the recovery delta.
+    recover?" Step-level attribution assigns credit from the recovery delta.
 
     Args:
         action: Pipeline action to apply
@@ -166,16 +156,13 @@ def apply_pipeline_action(
         return _repair_retrieval_context(context, recall_set, intervention_config, generation_point)
 
     elif action == PipelineAction.INJECTION_ERROR:
-        return _repair_injection_context(context, recall_set)
+        return _repair_injection_context(context, recall_set, intervention_config)
 
     elif action == PipelineAction.GRANULARITY_ERROR:
         return _repair_granularity_context(context, recall_set, intervention_config)
 
-    elif action == PipelineAction.GRAPH_ERROR:
-        return _repair_graph_context(context, recall_set)
-
     elif action == PipelineAction.SAFETY_ERROR:
-        return _repair_safety_context(context, recall_set)
+        return _repair_safety_context(context, recall_set, intervention_config)
 
     else:
         _logger.warning("Unknown pipeline action: %s", action)
@@ -262,27 +249,21 @@ def _repair_retrieval_context(
     return _append_block(
         context,
         "Corrected retrieval candidates",
-        _format_memory_items(missed),
+        _format_memory_items(missed, intervention_config),
     )
 
 
 def _repair_injection_context(
     context: str,
     recall_set: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None,
 ) -> str:
     """Re-render the injection buffer as an explicit, ordered memory block.
 
-    Injection sits after retrieval, graph-expansion, and the safety filter in
+    Injection sits after retrieval and the safety filter in
     the pipeline, so its input buffer is every recalled item EXCEPT those the
     safety layer already redacted upstream — those never reached injection and
-    re-rendering cannot resurrect them (that is ``safety_error``'s job). Graph-
-    expanded items DID enter the buffer and are re-rendered as-is, distractor
-    and all.
-
-    This reads only injection's own input boundary (data-flow scoping); it
-    never computes whether another action would recover. When it co-fires with
-    another action (e.g. graph, which additionally drops the distractor),
-    recovery credit — not a hard rule — decides between them.
+    re-rendering cannot resurrect them (that is ``safety_error``'s job).
     """
     buffer = tuple(item for item in recall_set if not item.passed_safety_filter)
     if not buffer:
@@ -291,7 +272,7 @@ def _repair_injection_context(
     return _append_block(
         context,
         "Normalized injected memory",
-        _format_memory_items(buffer),
+        _format_memory_items(buffer, intervention_config),
     )
 
 
@@ -318,7 +299,7 @@ def _repair_granularity_context(
         return context
 
     lines = []
-    for item in coarse:
+    for item in _order_items_by_signal(coarse, intervention_config):
         for event_id in item.source_event_ids:
             text = event_texts.get(event_id)
             if text:
@@ -327,40 +308,10 @@ def _repair_granularity_context(
         return context
     return _append_block(context, "Expanded memory granularity", "\n".join(lines))
 
-
-def _repair_graph_context(
-    context: str,
-    recall_set: tuple[MemoryItem, ...],
-) -> str:
-    """Remove graph-expanded distractor text from the context — add nothing.
-
-    A graph failure is a graph-expanded neighbor that injected a competing
-    distractor over evidence already present. The repair is purely subtractive:
-    strip each ``is_graph_expanded`` item's text from the context and add no new
-    block. This keeps graph DISJOINT from injection — injection re-renders
-    (adds) the recall buffer, graph only deletes the distractor. When the
-    distractor text is not in the context, this is a no-op (≈0 credit), so graph
-    cannot recover a case whose gold was never present (that is injection's
-    territory).
-    """
-    distractors = tuple(item for item in recall_set if item.is_graph_expanded)
-    if not distractors:
-        return context
-    stripped = context
-    for item in distractors:
-        stripped = stripped.replace(item.text, "")
-    # Collapse the blank lines the deletion may have left behind.
-    stripped = "\n".join(
-        line for line in stripped.splitlines() if line.strip() or not line
-    )
-    if stripped.rstrip() == context.rstrip():
-        return context
-    return stripped.rstrip()
-
-
 def _repair_safety_context(
     context: str,
     recall_set: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None,
 ) -> str:
     """Restore evidence the safety layer redacted despite being safe.
 
@@ -376,7 +327,7 @@ def _repair_safety_context(
     return _append_block(
         context,
         "Safety-reviewed evidence candidates",
-        _format_memory_items(safe_items),
+        _format_memory_items(safe_items, intervention_config),
     )
 
 
@@ -391,12 +342,64 @@ def _candidate_items(
             # The configured pool is the full extracted memory across all
             # hops; restrict it to the hop this generation point repairs so a
             # later hop's gold item can't leak into an early-hop intervention.
-            return _hop_local_items(tuple(configured), generation_point)
-    return recall_set
+            return _order_items_by_signal(
+                _hop_local_items(tuple(configured), generation_point),
+                intervention_config,
+            )
+    return _order_items_by_signal(recall_set, intervention_config)
 
 
-def _format_memory_items(items: tuple[MemoryItem, ...]) -> str:
-    return "\n".join(f"- [{item.memory_id}] {item.text}" for item in items)
+def _format_memory_items(
+    items: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None = None,
+) -> str:
+    lines = []
+    hints = _item_signal_hints(intervention_config)
+    for item in _order_items_by_signal(items, intervention_config):
+        signal = hints.get(item.memory_id, 0.0)
+        marker = ""
+        if signal > 0.0:
+            marker = " priority"
+        elif signal < 0.0:
+            marker = " downweighted"
+        lines.append(f"- [{item.memory_id}{marker}] {item.text}")
+    return "\n".join(lines)
+
+
+def _order_items_by_signal(
+    items: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None,
+) -> tuple[MemoryItem, ...]:
+    hints = _item_signal_hints(intervention_config)
+    if not hints or len(items) <= 1:
+        return items
+    indexed = [
+        (float(hints.get(item.memory_id, 0.0)), index, item)
+        for index, item in enumerate(items)
+    ]
+    if not any(score != 0.0 for score, _index, _item in indexed):
+        return items
+    indexed.sort(key=lambda entry: (-entry[0], entry[1]))
+    return tuple(item for _score, _index, item in indexed)
+
+
+def _item_signal_hints(intervention_config: dict[str, Any] | None) -> dict[str, float]:
+    if not intervention_config:
+        return {}
+    raw = (
+        intervention_config.get("item_signal_hints")
+        or intervention_config.get("item_priority_hints")
+        or {}
+    )
+    if not isinstance(raw, dict):
+        return {}
+    hints: dict[str, float] = {}
+    for key, value in raw.items():
+        try:
+            hints[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return hints
 
 
 def _append_block(context: str, heading: str, body: str) -> str:

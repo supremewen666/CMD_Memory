@@ -198,7 +198,6 @@ class RepairExecutor:
             "retrieval_error": "update_routing",
             "injection_error": "replace",
             "granularity_error": "replace",
-            "graph_error": "update_routing",
             "safety_error": "update_template",
             "item_wrong": "replace",
             "item_stale": "replace",

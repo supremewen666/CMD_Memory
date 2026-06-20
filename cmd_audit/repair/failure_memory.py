@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -104,15 +105,16 @@ class FailureMemoryRecord:
     @classmethod
     def from_ecs_draft(cls, ecs: ECSDraft, case: ProbeCase) -> "FailureMemoryRecord":
         baseline = case.primary_baseline
+        recovered_action = ecs.recovered_action or ecs.predicted_label
         return cls(
-            error_type=ecs.predicted_label,
+            error_type=recovered_action,
             wrong_memory=baseline.injected_context,
             original_evidence=" | ".join(ev.text for ev in case.gold_evidence),
             cause=ecs.cause,
             corrected_memory=ecs.corrected_memory,
-            repair_action=ecs.predicted_label,
+            repair_action=recovered_action,
             repair_guidance=ecs.repair_guidance,
-            trigger_signature=_build_trigger_signature(case.query, ecs.predicted_label),
+            trigger_signature=_build_trigger_signature(case.query, recovered_action),
             memory_top_terms=compute_memory_top_terms(case.extracted_memory),
         )
 
@@ -853,6 +855,177 @@ class MarkdownFailureMemoryStore:
         self.index_path.write_text(text, encoding="utf-8")
 
 
+@dataclass(frozen=True)
+class FailureMemoryPatternRecord:
+    """Reusable second-tier pattern distilled from recovered step-action cases."""
+
+    pattern_id: str
+    label: str
+    hop_index: int
+    source_case_ids: tuple[str, ...]
+    query_signature: str
+    valid: bool
+    review_required: bool
+
+    def __post_init__(self) -> None:
+        validate_label(self.label)
+
+
+class FailureMemorySkillLoop:
+    """Case ledger -> reusable pattern loop for two-tier Failure Memory.
+
+    The loop stores concrete recovered cases first. Once enough cases share the
+    same recovered action, it formats and validates a markdown pattern, then
+    exposes the pattern as a ``(generation_point, action)`` seed hint.
+    """
+
+    def __init__(
+        self,
+        markdown_store: MarkdownFailureMemoryStore,
+        *,
+        threshold: int = 3,
+        skill: FailureMemorySkill | None = None,
+    ) -> None:
+        if threshold < 1:
+            raise ValueError("threshold must be >= 1")
+        self.markdown_store = markdown_store
+        self.threshold = threshold
+        self.skill = skill or FailureMemorySkill()
+        self._cases_by_label: dict[str, list[tuple[str, str, str, int]]] = {}
+        self._patterns: dict[str, FailureMemoryPatternRecord] = {}
+
+    @property
+    def pattern_count(self) -> int:
+        return len(self._patterns)
+
+    def record_recovered_case(
+        self,
+        *,
+        case_id: str,
+        query: str,
+        hop_index: int,
+        label: str,
+        cause: str,
+        corrected_memory: str,
+        repair_guidance: str,
+        retrieved_items: tuple[str, ...] = (),
+        recovery_gain: float = 0.0,
+        llm_client=None,
+    ) -> FailureMemoryPatternRecord | None:
+        """Write a recovered case and update its action-level pattern."""
+        validate_label(label)
+        diagnosis = FailureMemoryDiagnosis(
+            query=query,
+            label=label,
+            cause=cause,
+            corrected_memory=corrected_memory,
+            repair_guidance=repair_guidance,
+            retrieved_items=retrieved_items,
+        )
+        outcome = FailureMemoryOutcome(
+            assessment="recovered",
+            recovered=True,
+            recovery_gain=recovery_gain,
+        )
+        case_markdown = self.skill.format_case(diagnosis, outcome)
+        self.markdown_store.write_case(
+            case_id,
+            case_markdown,
+            summary=f"{label} at hop {hop_index}",
+        )
+
+        bucket = self._cases_by_label.setdefault(label, [])
+        bucket.append((case_id, case_markdown, query, hop_index))
+        if len(bucket) < self.threshold:
+            return None
+        return self._write_pattern(label, bucket, llm_client=llm_client)
+
+    def retrieve_seed_pairs(
+        self,
+        query: str,
+        *,
+        max_depth: int,
+        top_k: int = 2,
+    ) -> tuple[list[tuple[int, str]], int]:
+        """Return pattern-derived ``(generation_point, action)`` seed pairs."""
+        query_signature = " ".join(_extract_keywords(query)[:10])
+        scored: list[tuple[float, FailureMemoryPatternRecord]] = []
+        for record in self._patterns.values():
+            if record.review_required:
+                continue
+            score = _query_signature_similarity(record.query_signature, query_signature)
+            if score > 0.0:
+                scored.append((score, record))
+        scored.sort(key=lambda item: item[0], reverse=True)
+
+        pairs: list[tuple[int, str]] = []
+        seen = set()
+        for _score, record in scored:
+            gen_point = record.hop_index - 1
+            if not (0 <= gen_point < max_depth):
+                continue
+            pair = (gen_point, record.label)
+            if pair in seen:
+                continue
+            pairs.append(pair)
+            seen.add(pair)
+            if len(pairs) >= top_k:
+                break
+        return pairs, len(scored)
+
+    def _write_pattern(
+        self,
+        label: str,
+        bucket: list[tuple[str, str, str, int]],
+        *,
+        llm_client=None,
+    ) -> FailureMemoryPatternRecord:
+        case_ids = tuple(case_id for case_id, _case_md, _query, _hop in bucket)
+        case_markdowns = tuple(case_md for _case_id, case_md, _query, _hop in bucket)
+        queries = " ".join(query for _case_id, _case_md, query, _hop in bucket)
+        hop_index = Counter(hop for _case_id, _case_md, _query, hop in bucket).most_common(1)[0][0]
+
+        pattern_markdown = self.skill.format_pattern(
+            case_markdowns,
+            llm_client=llm_client,
+        )
+        validation = self.skill.validate_pattern(
+            pattern_markdown,
+            case_markdowns,
+            llm_client=llm_client,
+        )
+        if not validation.valid:
+            notes = "\n".join(f"- {item}" for item in validation.inconsistencies)
+            pattern_markdown = "\n".join((
+                pattern_markdown.rstrip(),
+                "",
+                "## Review Required",
+                notes or validation.suggested_update or "- Pattern validation failed.",
+                "",
+            ))
+
+        pattern_id = f"pattern_{label}"
+        self.markdown_store.write_pattern(
+            pattern_id,
+            pattern_markdown,
+            summary=(
+                f"{label}, {len(bucket)} source cases, "
+                f"valid={str(validation.valid).lower()}"
+            ),
+        )
+        record = FailureMemoryPatternRecord(
+            pattern_id=pattern_id,
+            label=label,
+            hop_index=hop_index,
+            source_case_ids=case_ids,
+            query_signature=" ".join(_extract_keywords(queries)[:10]),
+            valid=validation.valid,
+            review_required=not validation.valid,
+        )
+        self._patterns[label] = record
+        return record
+
+
 def _extract_case_label(case_markdown: str) -> str:
     match = re.search(r"\*\*Label\*\*:\s*([a-z_]+)", case_markdown)
     return match.group(1) if match else ""
@@ -885,9 +1058,6 @@ class StepLevelKey:
 
     def similarity(self, other: "StepLevelKey") -> float:
         """Compute similarity score between two keys."""
-        if self.label != other.label:
-            return 0.0
-
         # Hop distance penalty
         hop_penalty = 1.0 / (1.0 + abs(self.hop_index - other.hop_index))
 
@@ -898,12 +1068,15 @@ class StepLevelKey:
             return 0.0
         overlap = len(self_kw & other_kw) / max(len(self_kw), len(other_kw))
 
-        return overlap * hop_penalty
+        score = overlap * hop_penalty
+        if self.label == other.label:
+            score *= 1.25
+        return score
 
 
 @dataclass(frozen=True)
 class StepLevelRecord:
-    """Failure memory record with step-level key for MCTS experience transfer."""
+    """Failure memory record with step-level key for attribution experience transfer."""
 
     key: StepLevelKey
     error_type: str
@@ -943,25 +1116,25 @@ def step_level_record_from_mcts_result(
     *,
     recovery_success_threshold: float = 0.0,
 ) -> StepLevelRecord | None:
-    """Convert an MCTS SearchResult into a step-level Failure Memory record."""
+    """Convert a SearchResult into a step-level Failure Memory record."""
     culprit = getattr(mcts_result, "main_culprit", None)
     if culprit is None:
         return None
 
-    hop_index, action, credit = culprit
+    generation_point, action, credit = culprit
     label = action.value if hasattr(action, "value") else str(action)
     if label == "identity":
         return None
+    hop_index = int(generation_point) + 1
     recovery_gain = float(credit)
     return StepLevelRecord.from_mcts_result(
         query=query,
         hop_index=int(hop_index),
         label=label,
-        cause=f"MCTS attributed recovery to {label} at generation point {hop_index}.",
+        cause=f"Single-point attribution recovered with {label} at hop {hop_index}.",
         corrected_memory="",
         repair_guidance=(
-            f"Prioritize {label} repairs when a similar query reaches "
-            f"generation point {hop_index}."
+            f"Prioritize {label} repairs when a similar query reaches hop {hop_index}."
         ),
         recovery_success=recovery_gain > recovery_success_threshold,
         recovery_gain=recovery_gain,
@@ -974,13 +1147,16 @@ class FailureMemoryStore:
     Retrieval key: (query_signature, hop_index, label)
     Used by:
     - Hook: similar signature history → adjust confidence
-    - MCTS: historical (signature → label) success rate → UCB prior bonus
+    - Attribution: historical (signature → label) success rate → action prior
     - LOO: historical item label hints → priority ordering
     """
 
     def __init__(self) -> None:
         self._records: list[StepLevelRecord | FailureMemoryRecord] = []
         self._label_success_rates: dict[str, tuple[int, int]] = {}  # label -> (success, total)
+
+    def __len__(self) -> int:
+        return len(self._records)
 
     def add(self, record: StepLevelRecord | FailureMemoryRecord) -> "FailureMemoryStore":
         """Add a record and update success rate statistics."""
@@ -1012,13 +1188,15 @@ class FailureMemoryStore:
         *,
         recovery_success_threshold: float = 0.0,
     ) -> StepLevelRecord | None:
-        """Persist MCTS attribution experience for future step-level reuse."""
+        """Persist step-level attribution experience for future reuse."""
         record = step_level_record_from_mcts_result(
             query,
             mcts_result,
             recovery_success_threshold=recovery_success_threshold,
         )
         if record is None:
+            return None
+        if not record.recovery_success:
             return None
         self.add(record)
         return record
@@ -1061,19 +1239,14 @@ class FailureMemoryStore:
             scored = [
                 (probe_key.similarity(r.key), r)
                 for r in self._records
-                if isinstance(r, StepLevelRecord) and r.key.label == label
+                if isinstance(r, StepLevelRecord)
             ]
         else:
-            # Match any label, use query similarity only
-            probe_keywords = set(_extract_keywords(query)[:10])
-            scored = []
-            for r in self._records:
-                if not isinstance(r, StepLevelRecord):
-                    continue
-                r_keywords = set(r.key.query_signature.split())
-                if probe_keywords and r_keywords:
-                    sim = len(probe_keywords & r_keywords) / max(len(probe_keywords), len(r_keywords))
-                    scored.append((sim, r))
+            scored = [
+                (_step_record_similarity(r, query, int(hop_index)), r)
+                for r in self._records
+                if isinstance(r, StepLevelRecord)
+            ]
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [r for _, r in scored[:top_k] if _ > 0]
@@ -1089,7 +1262,7 @@ class FailureMemoryStore:
 
         With no query, this returns the global success rate used by older
         callers. With a query/hop, it returns the similar-case weighted prior
-        used by online MCTS action ordering and UCB bonus.
+        used by online action ordering.
         """
         if query is not None:
             weighted_success = 0.0
@@ -1106,6 +1279,7 @@ class FailureMemoryStore:
                 total_weight += weight
             if total_weight > 0.0:
                 return weighted_success / total_weight
+            return 0.5
 
         success, total = self._label_success_rates.get(label, (0, 0))
         if total == 0:
@@ -1113,7 +1287,7 @@ class FailureMemoryStore:
         return success / total
 
     def get_label_priors(self) -> dict[str, float]:
-        """Get all label priors for MCTS."""
+        """Get all label priors for step-level attribution."""
         return {label: self.get_label_prior(label) for label in self._label_success_rates}
 
     def get_mcts_action_priors(
@@ -1123,7 +1297,7 @@ class FailureMemoryStore:
         hop_index: int | None = None,
         labels: tuple[str, ...] = PIPELINE_STEP_ACTIONS,
     ) -> dict[str, float]:
-        """Return query-aware action priors for MCTS.
+        """Return query-aware action priors for step-level attribution.
 
         Priors are soft hints only: callers should use them for ordering/bonus,
         never as hard pruning.

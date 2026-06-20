@@ -16,6 +16,7 @@ from cmd_audit.item_gate import (
     leave_one_out_reconstruct,
     compute_loo_divergence,
     order_items_by_experience,
+    item_signal_hints_from_result,
     run_item_gate,
     run_item_gate_for_recall_set,
 )
@@ -211,6 +212,32 @@ class TestCollisionDetection(unittest.TestCase):
         self.assertEqual(collisions[0], mock_collision)
         # Should call detect_item_collision C(3,2) = 3 times
         self.assertEqual(mock_detect.call_count, 3)
+
+    def test_collision_result_converts_to_ordering_hints(self):
+        collision = CollisionResult(
+            item_a=self.item_old,
+            item_b=self.item_new,
+            divergence=DirectedDivergence(3.0, 1.0, 0.75, 0.25),
+            has_collision=True,
+            collision_type="stale",
+            timestamp_direction="b_newer",
+        )
+        result = ItemGateResult(
+            target_item=self.item_old,
+            recall_set=(self.item_old, self.item_new),
+            query="Paris capital",
+            status=ItemGateStatus.ITEM_STALE,
+            collision_results=[collision],
+            has_timestamp_conflicts=True,
+            loo_result=None,
+            processing_cost=0,
+            decision_path="collision",
+        )
+
+        hints = item_signal_hints_from_result(result)
+
+        self.assertLess(hints["old_item"], 0.0)
+        self.assertGreater(hints["new_item"], 0.0)
 
 
 class TestLOOReconstruction(unittest.TestCase):
@@ -416,7 +443,7 @@ class TestItemGate(unittest.TestCase):
 
     @patch('cmd_audit.item_gate.gate.compute_recall_set_divergence')
     def test_run_item_gate_stale_collision(self, mock_collision):
-        """Test item gate with stale collision (skips LOO)."""
+        """Test item gate with stale collision (skips LOO only)."""
         # Mock stale collision involving target item
         mock_collision_result = CollisionResult(
             item_a=self.target_item, item_b=self.recall_set[1],
@@ -431,7 +458,7 @@ class TestItemGate(unittest.TestCase):
 
         self.assertEqual(result.status, ItemGateStatus.ITEM_STALE)
         self.assertTrue(result.needs_item_treatment)
-        self.assertTrue(result.should_skip_tier3)
+        self.assertFalse(result.should_skip_tier3)
         self.assertTrue(result.can_auto_update)
         self.assertIsNone(result.loo_result)  # LOO skipped due to collision
         self.assertEqual(result.processing_cost, 0)  # No generation, collision detected
@@ -474,7 +501,7 @@ class TestItemGate(unittest.TestCase):
         )
 
         self.assertEqual(result.status, ItemGateStatus.ITEM_WRONG)
-        self.assertTrue(result.should_skip_tier3)
+        self.assertFalse(result.should_skip_tier3)
 
     @patch('cmd_audit.item_gate.gate.compute_recall_set_divergence')
     @patch('cmd_audit.item_gate.gate.compute_loo_divergence')
@@ -500,7 +527,7 @@ class TestItemGate(unittest.TestCase):
         )
 
         self.assertTrue(result.needs_item_treatment)
-        self.assertTrue(result.should_skip_tier3)
+        self.assertFalse(result.should_skip_tier3)
         self.assertFalse(result.can_auto_update)
         self.assertFalse(result.needs_human_arbitration)
 

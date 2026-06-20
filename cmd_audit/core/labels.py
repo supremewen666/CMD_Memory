@@ -1,8 +1,8 @@
 """Attribution label registry.
 
 Target taxonomy (CONTEXT.md / DISCUSSION.md):
-- **Pipeline step actions (5, Tier 3 MCTS)**: retrieval_error, injection_error,
-  granularity_error, graph_error, safety_error
+- **Pipeline step actions (4)**: retrieval_error, injection_error,
+  granularity_error, safety_error
 - **Item labels (5, Tier 2 Item Gate)**: item_wrong, item_stale, item_conflict,
   item_poisoned, item_compression_distorted
 """
@@ -10,14 +10,13 @@ Target taxonomy (CONTEXT.md / DISCUSSION.md):
 from __future__ import annotations
 
 # =============================================================================
-# Pipeline step actions (5, Tier 3 MCTS generation-point actions)
+# Pipeline step actions (4 live generation-point actions)
 # =============================================================================
 
 PIPELINE_STEP_ACTIONS = (
     "retrieval_error",
     "injection_error",
     "granularity_error",
-    "graph_error",
     "safety_error",
 )
 
@@ -39,14 +38,13 @@ ITEM_LABELS = frozenset(
 )
 
 # =============================================================================
-# Replay-to-label mapping (5 step actions)
+# Replay-to-label mapping (4 live step actions)
 # =============================================================================
 
 REPLAY_TO_LABEL = {
     "oracle_retrieval": "retrieval_error",
     "injection_oracle": "injection_error",
     "oracle_granularity": "granularity_error",
-    "graph_off": "graph_error",
     "safety_off": "safety_error",
 }
 # Offline baseline replay names that still map to live step actions.

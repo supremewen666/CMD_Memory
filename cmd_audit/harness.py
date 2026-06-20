@@ -49,8 +49,12 @@ from .eval import (
     write_step_level_metrics_table,
 )
 
-from .item_gate import ItemGateResult, ItemGateStatus, run_item_gate_for_recall_set
-from .mcts import PipelineAction, SearchResult, run_mcts_attribution
+from .item_gate import (
+    ItemGateResult,
+    item_signal_hints_from_result,
+    run_item_gate_for_recall_set,
+)
+from .counterfactual import PipelineAction, SearchResult, attribute_single_point
 
 
 @dataclass(frozen=True)
@@ -82,7 +86,7 @@ class AuditResult:
     # Two-branch runtime fields.
     hook_decision: HookDecision | None = None  # Two-branch gate result (fill/fix)
     item_gate_result: ItemGateResult | None = None  # Tier 2 item gate result
-    mcts_result: SearchResult | None = None  # Tier 3 MCTS search result
+    attribution_result: SearchResult | None = None  # Tier 3 step-level attribution result
     runtime_branch: str = ""  # "fill" | "fix" | "offline_replay"
 
     @property
@@ -139,7 +143,7 @@ def run_case(
     Optional stages are gated by keyword, all writing into the same result object:
 
     * ``hook`` — run the retrieval confidence gate before attribution. Fill
-      returns without diagnosis; Fix enters item gate and MCTS.
+      returns without diagnosis; Fix enters item gate and step-level attribution.
     * ``repair`` — a CMD-Skill adapter; runs the RepairOrchestrator after
       attribution (implies ``hook``). Populates ``orchestrator_result`` / ``repaired``.
     * ``post_repair`` — run the full ECS + Post-Repair Context Replay pipeline.
@@ -632,7 +636,7 @@ def _run_with_hook(
     on_the_fly_baseline_rescore: bool = False,
     failure_memory_store: FailureMemoryStore | None = None,
 ) -> AuditResult:
-    """Run hook → Fill/Fix → item gate → MCTS for one case."""
+    """Run hook → Fill/Fix → item gate → step-level attribution for one case."""
     baseline_suite = run_baseline_suite(case)
     baseline = case.primary_baseline
     baseline_evidence_score_llm, baseline_answer_score_llm = _score_baseline_with_agent(
@@ -669,6 +673,7 @@ def _run_with_hook(
         )
 
     item_gate_result = None
+    item_signal_hints: dict[str, float] = {}
     attribution = None
     mcts_client = _agent_generate_client(case.query, agent_generate)
     if recall_set and mcts_client is not None:
@@ -678,20 +683,19 @@ def _run_with_hook(
             case.query,
             failure_memory_store=failure_memory_store,
         )
-        attribution = _attribution_from_item_gate(item_gate_result)
+        item_signal_hints = item_signal_hints_from_result(item_gate_result)
 
-    mcts_result = None
-    if attribution is None and (
-        item_gate_result is None or item_gate_result.status == ItemGateStatus.PASS
-    ):
-        mcts_result = run_mcts_attribution(
+    attribution_result = None
+    if attribution is None and mcts_client is not None:
+        mcts_max_depth = max(1, min(3, len(recall_set) or 1))
+        attribution_result = attribute_single_point(
             mcts_client,
             _initial_mcts_context(case, recall_set),
             recall_set,
             case.gold_evidence,
             case.gold_answer,
             max_iterations=10,
-            max_depth=max(1, min(3, len(recall_set) or 1)),
+            max_depth=mcts_max_depth,
             answer_verifier=answer_verifier,
             baseline_answer_score=(
                 baseline_answer_score_llm
@@ -701,18 +705,25 @@ def _run_with_hook(
             intervention_config={
                 "candidate_items": case.extracted_memory,
                 "raw_events": case.raw_events,
+                "item_signal_hints": item_signal_hints,
             },
             action_priors=(
-                failure_memory_store.get_mcts_action_priors(case.query)
+                {
+                    hop: failure_memory_store.get_mcts_action_priors(
+                        case.query,
+                        hop_index=hop,
+                    )
+                    for hop in range(1, mcts_max_depth + 1)
+                }
                 if failure_memory_store is not None
                 else None
             ),
         )
         if failure_memory_store is not None:
-            failure_memory_store.add_mcts_result(case.query, mcts_result)
-        attribution = _attribution_from_mcts(mcts_result)
-        if attribution is None:
-            attribution = _attribution_from_structural_gap(case)
+            failure_memory_store.add_attribution_result(case.query, attribution_result)
+        attribution = _attribution_from_mcts(attribution_result)
+    if attribution is None:
+        attribution = _attribution_from_structural_gap(case)
 
     return AuditResult(
         case_id=case.case_id,
@@ -728,7 +739,7 @@ def _run_with_hook(
         hook_stage="fix",
         hook_decision=decision,
         item_gate_result=item_gate_result,
-        mcts_result=mcts_result,
+        attribution_result=attribution_result,
         runtime_branch="fix",
     )
 
@@ -789,38 +800,12 @@ def _agent_generate_client(
     return _AgentGenerateClient(query, agent_generate)
 
 
-def _attribution_from_item_gate(
-    item_gate_result: ItemGateResult | None,
-) -> AttributionResult | None:
-    if item_gate_result is None:
-        return None
-    label_by_status = {
-        ItemGateStatus.ITEM_STALE: "item_stale",
-        ItemGateStatus.ITEM_CONFLICT: "item_conflict",
-        ItemGateStatus.ITEM_WRONG: "item_wrong",
-        ItemGateStatus.ITEM_COMPRESSION_DISTORTED: "item_compression_distorted",
-        ItemGateStatus.ITEM_POISONED: "item_poisoned",
-    }
-    label = label_by_status.get(item_gate_result.status)
-    if label is None:
-        return None
-    return AttributionResult(
-        predicted_label=label,
-        top_replay="item_gate",
-        recovery_gain=1.0,
-        top2_labels=(label,),
-        is_ambiguous=False,
-        top_k_labels=(label,),
-        close_deltas=((label, 0.0),),
-    )
-
-
-def _attribution_from_mcts(mcts_result: SearchResult | None) -> AttributionResult | None:
-    if mcts_result is None or mcts_result.primary_attribution_label is None:
+def _attribution_from_mcts(attribution_result: SearchResult | None) -> AttributionResult | None:
+    if attribution_result is None or attribution_result.primary_attribution_label is None:
         return None
 
     credits: list[tuple[str, float]] = []
-    for action_credits in mcts_result.action_credits.values():
+    for action_credits in attribution_result.action_credits.values():
         for action, credit in action_credits.items():
             if action == PipelineAction.IDENTITY:
                 continue
@@ -845,7 +830,7 @@ def _attribution_from_mcts(mcts_result: SearchResult | None) -> AttributionResul
 def _attribution_from_structural_gap(case: ProbeCase) -> AttributionResult | None:
     """Fallback attribution for deterministic evidence-boundary gaps.
 
-    MCTS needs a generator/verifier pair to score terminal recovery. In unit and
+    Step-level attribution needs a generator/verifier pair to score terminal recovery. In unit and
     trace-only runs, we can still attribute clear retrieval/injection boundary
     failures without falling back to the legacy replay portfolio.
     """

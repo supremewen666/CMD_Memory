@@ -1,8 +1,4 @@
-"""MCTS rollout to terminal states for step-level attribution.
-
-Implements rollout from intermediate nodes to terminal states using identity
-completion, then evaluates terminal answer quality for back-propagation.
-"""
+"""Roll out counterfactual contexts to terminal answers."""
 from __future__ import annotations
 
 import logging
@@ -167,7 +163,7 @@ def _compute_recovery_gain(
     """Compute recovery gain from terminal answer quality.
 
     Recovery gain = terminal AnswerVerifier score. The identity sibling is
-    subtracted later by MCTS credit assignment.
+    subtracted later by step-level credit assignment.
 
     Args:
         terminal_answer: Generated answer from rollout
@@ -192,67 +188,3 @@ def _compute_recovery_gain(
     except Exception as exc:
         _logger.warning("Recovery gain computation failed: %s", exc)
         return 0.0
-
-
-def rollout_with_early_stopping(
-    client: Any,
-    start_context: str,
-    start_generation_point: int,
-    max_generation_points: int,
-    recall_set: tuple[MemoryItem, ...],
-    gold_answer: str,
-    *,
-    answer_verifier: Any = None,
-    baseline_answer_score: float = 0.0,
-    recovery_threshold: float = 0.8,
-) -> RolloutResult:
-    """Rollout with early stopping on recovery achievement.
-
-    Implements "shallowest recovery depth" stopping rule from DISCUSSION.md:
-    if single-point intervention already recovers, stop expansion.
-
-    Args:
-        client: LLM client
-        start_context: Starting context
-        start_generation_point: Starting generation point
-        max_generation_points: Maximum depth
-        recall_set: Memory items
-        gold_answer: Ground truth
-        answer_verifier: Answer verifier
-        recovery_threshold: Threshold for "recovered" classification
-
-    Returns:
-        RolloutResult with potential early stopping
-    """
-    # Check if current state is already recovered
-    if start_generation_point == 1:  # Depth-1 intervention
-        intermediate_answer = _generate_terminal_answer(client, start_context)
-        if intermediate_answer:
-            recovery_score = _compute_recovery_gain(
-                intermediate_answer,
-                gold_answer,
-                answer_verifier,
-                baseline_answer_score=baseline_answer_score,
-            )
-
-            if recovery_score >= recovery_threshold:
-                _logger.debug("Early stopping: depth-1 recovery achieved")
-                return RolloutResult(
-                    terminal_context=start_context,
-                    terminal_answer=intermediate_answer,
-                    recovery_gain=recovery_score,
-                    rollout_successful=True,
-                    generation_points_completed=0,  # Early stop
-                )
-
-    # Continue with full rollout if no early recovery
-    return rollout_to_terminal(
-        client,
-        start_context,
-        start_generation_point,
-        max_generation_points,
-        recall_set,
-        gold_answer,
-        answer_verifier=answer_verifier,
-        baseline_answer_score=baseline_answer_score,
-    )

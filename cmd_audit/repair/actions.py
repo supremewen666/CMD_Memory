@@ -54,16 +54,6 @@ REPAIR_ACTION_BY_LABEL: dict[str, TargetedRepairAction] = {
         repair_guidance="adjust memory expression granularity to preserve evidence; "
         "consider the level that best balances detail and conciseness",
     ),
-    "graph_error": TargetedRepairAction(
-        label="graph_error",
-        action_name="Graph-Off Repair",
-        description="Disable graph expansion to avoid distractor items masking correct evidence.",
-        intervention_summary="Graph-Off recovers evidence when graph expansion introduced distractors.",
-        cause="graph expansion introduced distractor items that masked correct evidence "
-        "present in directly-matched memory items",
-        repair_guidance="constrain or re-rank graph expansion results to prevent "
-        "distractors from overriding directly-matched evidence",
-    ),
     "safety_error": TargetedRepairAction(
         label="safety_error",
         action_name="Safety-Off Repair",

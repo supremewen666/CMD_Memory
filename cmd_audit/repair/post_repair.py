@@ -80,11 +80,13 @@ def draft_ecs(
     if attribution is None:
         raise ValueError(f"{case.case_id}: no attribution is available")
     replay = _replay_for_label(case, audit_result, attribution.predicted_label)
+    recovery_delta = float(getattr(attribution, "recovery_gain", 0.0) or 0.0)
 
     cause, corrected_memory, repair_guidance = _ecs_for_label(
         case,
         attribution.predicted_label,
         replay,
+        recovery_delta=recovery_delta,
         repair_guidance_override=repair_guidance,
     )
 
@@ -95,6 +97,8 @@ def draft_ecs(
         corrected_memory=corrected_memory,
         repair_guidance=repair_guidance,
         repaired_evidence_block=replay.evidence_block,
+        recovered_action=attribution.predicted_label,
+        recovery_delta=recovery_delta,
     )
 
 
@@ -140,6 +144,7 @@ def draft_ecs_for_label(
         corrected_memory=corrected_memory,
         repair_guidance=repair_guidance,
         repaired_evidence_block=replay.evidence_block,
+        recovered_action=label,
     )
 
 
@@ -313,6 +318,7 @@ def _ecs_for_label(
     predicted_label: str,
     replay,
     *,
+    recovery_delta: float = 0.0,
     repair_guidance_override: str | None = None,
 ) -> tuple[str, str, str]:
     """Return (cause, corrected_memory, repair_guidance) for a predicted label."""
@@ -322,7 +328,13 @@ def _ecs_for_label(
 
     action = get_targeted_repair_action_v1(predicted_label)
     repair_guidance = repair_guidance_override or action.repair_guidance
-    return (action.cause, replay.evidence_block, repair_guidance)
+    cause = action.cause
+    if recovery_delta > 0.0:
+        cause = (
+            f"Counterfactual action {predicted_label} recovered the case "
+            f"with delta={recovery_delta:.3f}; {cause}"
+        )
+    return (cause, replay.evidence_block, repair_guidance)
 
 
 def detect_gold_answer_leak(

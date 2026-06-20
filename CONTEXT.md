@@ -16,7 +16,7 @@ Domain language for Counterfactual Memory Debugger research. Defines terminology
 
 **Counterfactual Replay** — Re-running the agent with a controlled memory intervention and measuring recovery gain: Δk = Metric(ŷ_k, y) - Metric(ŷ, y).
 
-**Recovery Gain** — Δk: the score improvement from a replay intervention over the baseline. Attribution label = argmax(Δk). CMD's universal primitive: "perturb, then measure directed response against the strongest available reference."
+**Recovery Gain** — Δk: the score improvement from a replay intervention over the baseline. CMD's universal primitive: "perturb, then measure directed response against the strongest available reference." Δk is the **fitness signal** for repair search and skill evolution — which intervention actually recovers — not a label scored against gold. (CMD has pivoted from a fault classifier reporting label macro-F1 to a self-repair + self-evolution loop headlined by repair efficacy; the step actions below are an internal action space, not prediction targets.)
 
 **Operation-Level Attribution** — Assigning a failure to a specific pipeline operation rather than a free-form explanation.
 
@@ -82,7 +82,7 @@ evidence in recalled content?
 
 **Distillation endpoint**: Use Tier2-3 post-diagnosis "actually needed diagnosis vs wasted run" as labels, train confidence model to replace hand-crafted factors.
 
-**Online mode**: Budget-capped shallow tree / UCT rollouts (preserves online diagnosis capability for paper demo). Distilled no-tree strategy is future latency-sensitive degradation path.
+**Online mode**: Offline-oracle / online-student. The offline exhaustive single-point scan is the oracle that distills transferable `(gen_point, action)` priors into Failure Memory (keyed `(query, hop, label)`); online search is a budget-capped top-2 directed seed plus UCT rollout remainder (the second seed is typically `injection` — re-injecting recall is a near-universal fallback repair). Single-point-unrecoverable cases (below the noise-floor abstention threshold — gold already answerable, or coupled) abstain and fall to MCTS's coupled `b^d` search. Distilled no-tree strategy is future latency-sensitive degradation path.
 
 ## Diagnostic Cascade (Fix Branch Only)
 
@@ -119,13 +119,13 @@ Terminal HITL   ③ divergence at threshold edge + item_poisoned (no source-free
 
 **Co-morbidity cost**: stale ∧ wrong → ② judges stale first, won't enter ③, "also wrong" not discovered. This is consistent tradeoff of CMD single-operation attribution, falls outside Shapley coalitional out-of-scope boundary; high label orthogonality reduces co-morbidity probability.
 
-### Tier 3: Pipeline MCTS (Step-Level Attribution)
+### Tier 3: Pipeline Single-Point Counterfactual Scan (Step-Level Attribution)
 
 **Precondition**: Memory content is both present AND correct (passed Tier 2 item gate).
 
-**Mechanism**: Single-player MCTS + UCT over pipeline labels as step actions, applied at each generation point (API send where LLM actually reasons). Tool calls / pure-reasoning hops / context accumulation = pass-through, no branching.
+**Mechanism**: Single-point counterfactual scan over pipeline labels as step actions, applied at each generation point (API send where LLM actually reasons). Tool calls / pure-reasoning hops / context accumulation = pass-through, no branching. (MCTS tree search retired from the mainline per C6: TRUE_COUPLED 1/30; offline exhaustive single-point oracle + online top-2 directed seed replaces it. The `counterfactual/` package, formerly `mcts/`, keeps the historical import path.)
 
-**Retrieval-period labels** (5, serve as MCTS step actions): `retrieval_error`, `injection_error`, `granularity_error`, `graph_error`, `safety_error`.
+**Retrieval-period labels** (4 live, serve as step actions): `retrieval_error`, `injection_error`, `granularity_error`, `safety_error`.
 
 **Action table per generation point**:
 
@@ -134,7 +134,6 @@ Terminal HITL   ③ divergence at threshold edge + item_poisoned (no source-free
 | `retrieval_error` | Always legal | Wrong retrieval (absorbs route: cross-tier misfetch, no sub-actions) |
 | `injection_error` | Always legal | Injection format/order error OR context management squeezed out injected evidence (dual semantics, b-sense explained separately in paper) |
 | `granularity_error` | Always legal | Granularity obscures evidence (rewrites item itself, relies on value pruning, not flag gating) |
-| `graph_error` | Gated `is_graph_expanded` | Graph expansion introduced distractors |
 | `safety_error` | Gated `passed_safety_filter` | Safety layer blocked evidence |
 
 3 always-legal + 2 gated. Gating flags = RPE metadata removed (`is_graph_expanded` / `passed_safety_filter`), reliable offline, online degrades to base actions only (same gold-dependent pattern, online relies on HITL).
@@ -169,17 +168,16 @@ Leaf Δ = terminal AnswerVerifier(leaf_answer, gold_answer). Max-backup not mean
 
 ## Pipeline Step Actions
 
-CMD's Tier 3 MCTS diagnoses retrieval-period failures at 5 generation-point step actions:
+CMD's Tier 3 single-point counterfactual scan diagnoses retrieval-period failures at 4 live generation-point step actions (was 5; `graph_error` retired 2026-06-19 — recovery floor 0.067, dropped from the action space):
 
 | Label | Definition | Intervention |
 |-------|-----------|--------------|
 | `retrieval_error` | Correct memory exists but not retrieved (absorbs cross-tier misfetch) | oracle_retrieval |
 | `injection_error` | Memory retrieved but injected with format/order errors; OR context management squeezed out injected evidence | injection_oracle |
 | `granularity_error` | Memory expressed at sub-optimal granularity, obscuring evidence | oracle_granularity |
-| `graph_error` | Graph expansion introduced distractors (gated `is_graph_expanded`) | graph_off |
 | `safety_error` | Safety filter blocked valid evidence (gated `passed_safety_filter`) | safety_off |
 
-3 always-legal (retrieval / injection / granularity) + 2 gated (graph / safety).
+3 always-legal (retrieval / injection / granularity) + 1 gated (safety).
 
 **Not labels**:
 - **Formation failures** (evidence never written / compressed away / lost in extraction / never ingested) surface as evidence-missing → Fill branch, no sub-typing (information-theoretic floor: can't name which formation op dropped evidence without gold).
@@ -196,7 +194,7 @@ CMD's Tier 3 MCTS diagnoses retrieval-period failures at 5 generation-point step
 
 4. **ECS cause constraint**: a step-action ECS cause must name a step action (`retrieval_error` etc.), not borrow item-label vocabulary; a Tier 2 item ECS cause uses the item label directly. The two streams stay separate — pipeline ECS never re-declares item-fault names in free text.
 
-5. **Context construction mode**: Failure Memory injects only `corrected_memory + repair_guidance`. Contrastive mode (`wrong_memory + cause + corrected_memory + repair_guidance`) is experimental.
+5. **Context construction mode**: Failure Memory injects only `corrected_memory + repair_guidance`. Contrastive mode (`wrong_memory + cause + corrected_memory + repair_guidance`) is experimental. **Gold-free construction guard** (structural, not text-based): repaired context is a pure function of `(recall_set, pipeline_action)` via `apply_pipeline_action` and never reads `case.gold_*` — scoring legitimately uses gold, construction does not. This isolates the selection-policy claim (CMD-repair vs no-repair vs random / llm_judge, all sharing one gold-free executor) from any gold leak.
 
 6. **Perturbation type**: Probe Case `perturbation_type` is an injected ground-truth label, never guessed.
 
@@ -214,7 +212,7 @@ CMD's Tier 3 MCTS diagnoses retrieval-period failures at 5 generation-point step
 
 - **CMD** diagnoses **Memory Failures** via **Counterfactual Replays** → **Recovery Gain** → **Operation-Level Attribution**.
 - **CMD-Audit** owns attribution, replay deltas, repair validation; **CMD-Skill Adapter** is deployment layer connecting to real memory agent APIs.
-- **5 live pipeline step actions**: retrieval, injection, granularity, graph, safety (Tier 3 MCTS generation-point actions).
+- **4 live pipeline step actions**: retrieval, injection, granularity, safety (Tier 3 generation-point actions; `graph_error` retired 2026-06-19).
 - **5 item labels**: item_wrong, item_stale, item_conflict, item_poisoned, item_compression_distorted (Tier 2 item gate).
 - **Formation failures** (write / compression / premature_extraction / ingestion) are not labels — absorbed by Fill branch as evidence-missing.
 - **Interventions** for step actions: oracle_retrieval, injection_oracle, oracle_granularity, graph_off, safety_off.
@@ -225,7 +223,7 @@ CMD's Tier 3 MCTS diagnoses retrieval-period failures at 5 generation-point step
 
 ## Limitations
 
-**Source-free detection floor**: Formation failures (`write` / `compression` / `premature_extraction` / `ingestion`) cannot be sub-typed at runtime — detecting "what should have been written" requires knowing "what should exist," which is unavailable without gold. CMD does not fabricate formation labels online; it routes evidence-missing cases to the Fill branch (re-extract this turn). This is an information-theoretic bound, stated as an honest contribution rather than papered over. The live attribution surface is therefore 5 pipeline step actions (Tier 3 MCTS) + 5 item labels (Tier 2 item gate); formation and reasoning faults are handled by Fill and back-prop respectively, not by label assignment.
+**Source-free detection floor**: Formation failures (`write` / `compression` / `premature_extraction` / `ingestion`) cannot be sub-typed at runtime — detecting "what should have been written" requires knowing "what should exist," which is unavailable without gold. CMD does not fabricate formation labels online; it routes evidence-missing cases to the Fill branch (re-extract this turn). This is an information-theoretic bound, stated as an honest contribution rather than papered over. The live attribution surface is therefore 4 pipeline step actions (Tier 3 single-point scan; `graph_error` retired) + 5 item labels (Tier 2 item gate); formation and reasoning faults are handled by Fill and back-prop respectively, not by label assignment.
 
 ## Flagged Ambiguities
 

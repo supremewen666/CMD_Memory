@@ -260,16 +260,18 @@ def target_item_for_case(case: Any):
 
 
 def max_tree_q(search_result: Any) -> float:
-    tree = getattr(search_result, "tree", None)
-    root = getattr(tree, "root", None)
-    if root is None:
-        return 0.0
+    """Return the best positive single-point credit.
+
+    Kept for legacy experiment code that used to inspect the MCTS tree's
+    maximum Q value. The live attribution result is tree-free and exposes the
+    same decision signal through ``action_credits``.
+    """
     best = 0.0
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        best = max(best, float(getattr(node, "q_max", 0.0)))
-        stack.extend(getattr(node, "children", {}).values())
+    for credits in getattr(search_result, "action_credits", {}).values():
+        for action, credit in credits.items():
+            if action_name(action) == "identity":
+                continue
+            best = max(best, float(credit))
     return best
 
 
@@ -280,15 +282,14 @@ def run_mcts_for_case(
     *,
     max_iterations: int,
     max_depth: int | None = None,
-    value_function_type: str = "nested",
     restrict_to_hop: int | None = None,
     action_priors: dict[str, float] | None = None,
 ):
     from cmd_audit.harness import _initial_mcts_context, _retrieved_memory_items
-    from cmd_audit.mcts.search import run_mcts_attribution
+    from cmd_audit.counterfactual.search import attribute_single_point
 
     recall_set = _retrieved_memory_items(case)
-    return run_mcts_attribution(
+    return attribute_single_point(
         client,
         _initial_mcts_context(case, recall_set),
         recall_set,
@@ -299,7 +300,6 @@ def run_mcts_for_case(
         answer_verifier=answer_verifier,
         baseline_answer_score=case.primary_baseline.answer_score,
         intervention_config={"candidate_items": case.extracted_memory},
-        value_function_type=value_function_type,
         restrict_to_hop=restrict_to_hop,
         action_priors=action_priors,
     )

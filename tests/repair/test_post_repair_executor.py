@@ -8,6 +8,7 @@ artifact that would inflate recovery for the wrong reason.
 
 import unittest
 
+from cmd_audit.repair import ECSDraft
 from cmd_audit.repair.post_repair import (
     RepairedContext,
     _combine_context,
@@ -74,6 +75,34 @@ class GoldAnswerLeakGuardTest(unittest.TestCase):
     def test_empty_gold_never_leaks(self) -> None:
         ctx = self._ctx("anything")
         self.assertFalse(detect_gold_answer_leak(ctx, "   "))
+
+
+class ECSSchemaSemanticsTest(unittest.TestCase):
+    def test_predicted_label_is_compatibility_alias_for_recovered_action(self) -> None:
+        draft = ECSDraft(
+            case_id="c1",
+            predicted_label="retrieval_error",
+            cause="Counterfactual action recovered the case.",
+            corrected_memory="corrected",
+            repair_guidance="guidance",
+            repaired_evidence_block="corrected",
+            recovery_delta=0.75,
+        )
+
+        self.assertEqual(draft.recovered_action, "retrieval_error")
+        self.assertEqual(draft.recovery_delta, 0.75)
+
+    def test_recovered_action_must_match_compatibility_label(self) -> None:
+        with self.assertRaises(ValueError):
+            ECSDraft(
+                case_id="c1",
+                predicted_label="retrieval_error",
+                recovered_action="injection_error",
+                cause="cause",
+                corrected_memory="corrected",
+                repair_guidance="guidance",
+                repaired_evidence_block="corrected",
+            )
 
 
 if __name__ == "__main__":

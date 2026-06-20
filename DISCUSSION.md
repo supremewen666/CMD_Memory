@@ -893,3 +893,100 @@ Skill 不管用户选哪个，只提供方法。
 
 ---
 
+## 交付物 Pivot + MCTS 覆盖缺口诊断（2026-06-14，已收敛）
+
+### 缘起：细分类在 agent 时代是否过时
+
+讨论中对"故障细分类（macro-F1）作为交付物"产生根本怀疑：agent 时代更需要的是**粗分类 + LLM 自分类 + skill 自进化**，而非把每个错误类别判准。结论不是"CMD 失败"，而是**交付物 pivot**：
+
+- **从** 故障分类器（headline = label macro-F1）**到** 自我修复 + 自我进化回路（headline = 反事实修复有效性）。
+- 5 个 step action **从预测目标降为内部动作空间**；recovery gain Δk 是 fitness / 验证信号，不再是对 gold 打分的标签。
+- 评估策略：**混合**。Phase 1 严证闭环修复有效（E2/E3）；Phase 2 演示进化轨迹。
+
+### 决策点 A：三个不可混淆的有效性claim
+
+| claim | 含义 | leak 是否抵消 | 是否 headline |
+|---|---|---|---|
+| **E1** | (corrected_memory + guidance) > 单 corrected_memory | 是（共模抵消） | 否（仅呈现） |
+| **E2** | CMD-repair > no-repair | **否**（需 gold-free 构造守卫） | **是** |
+| **E3** | CMD-selection > random / llm_judge | 否 | **是** |
+
+Executor 固定为 `corrected_memory + guidance`。**gold-free 构造守卫是结构性的**：repaired context 是 `(recall_set, pipeline_action)` 经 `apply_pipeline_action` 的纯函数，绝不读 `case.gold_*`。打分合法用 gold，只有构造不用。（拒绝了基于文本的 `detect_gold_answer_leak` 方案，降为回归 tripwire。）
+
+### 决策点 B：MCTS 归因缺口 = 搜索覆盖，不是信号质量（A2 实证）
+
+实验侧四臂对照（同一 case、同一 gold-free 执行核、同一 net_gain 判据，唯一变量 = cmd 臂归因来源）：
+
+```
+              mcts        exhaustive 全单点
+cmd recovered  0/9  →      4/9 (44.4%)
+no_repair      0/9         0/9
+llm_judge      0/9         0/9
+random         1/9         1/9（噪声）
+```
+
+指纹：MCTS culprit 全塌 `gp=0` 或 abstain；exhaustive 满覆盖即找到正确 `(gp=1, action)`。
+
+**代码层根因（两个叠加缺陷）：**
+1. **覆盖缺失**：`tree.select_leaf` 走 UCB（按 `q_max`），`injection@gp0` 靠"复述桥接键"拿 ~0.25 噪声 q_max，而 `hop1=identity` 骨架 q_max≈0 且 IDENTITY 的 prior bonus 恒 0 → UCB 永远扎进 `hop1=injection` 子树，**`identity` 骨架下的 `gp1` 单点节点在预算内从不被建出/rollout**。
+2. **credit 串台**：`tree.get_action_credits` 递归全树，`credits[gp][action]` 只按 `(gp, action)` 单键，多个 gp1 兄弟节点 last-write-wins，单点 credit 被非 identity 骨架污染。
+
+**本质判断**：单点归因（哪跳、哪动作、其余 identity）是 `b·d` 问题，exhaustive 全扫即对；UCB 优化累积回报、被噪声带偏是必然。MCTS 真正价值在**耦合/多点** `b^d`。
+
+### 决策点 C：在线机制 = 离线 oracle / 在线 student（修正决策点 H）
+
+决策点 H 的"prior bonus over UCB"**单独不够**：现有 `action_priors` 只按 `action.value` 单键，**带不了 gen_point**，无法区分 `injection@gp0`（噪声）与 `injection@gp1`（真信号），更改不了"该建哪个节点"（prior 只能改已存在节点的 UCB 分）。
+
+修正后的机制：
+- **离线**：每 case 跑 exhaustive 全单点扫描（无预算、满覆盖），产出正确 `(hop, action)` → 沉淀进 Failure Memory 复合键 `(query, hop, label)` 作为先验/蒸馏标签。
+- **在线**：**top-2 定向种子 + UCB 余量**。先验直接给 `(gen_point, action)`，沿 identity 骨架保证那 1–2 个点各 rollout 一次（成本 O(2)，非 O(b·d)），再用余量预算做耦合探索。
+
+### 决策点 D：先验可迁移性已验（GO）
+
+离线 exhaustive 全量（75 case，`--min-credit 0.05` 砍噪声底假决策）：
+
+| gold | decided | 模态点 | 单点 conc | top-2 覆盖 |
+|---|---|---|---|---|
+| safety | 8 | (gp1, safety) | 0.875 | +inj = 1.00 |
+| graph | 6 | (gp0, injection) | 0.833 | 全 inj = 1.00 |
+| injection | 14 | (gp1, injection) | 0.786 | 全 inj = 1.00 |
+| retrieval | 13 | (gp1, retrieval) | 0.692 | +inj = 0.85 |
+| granularity | 12 | (gp1, granularity) | 0.667 | +inj = 0.83 |
+
+- 单点 conc 0.67–0.875 → **单种子 NO-GO**。
+- **top-2 conc 0.83–1.00，4/5 ≥ 0.85 → GO**。第二点几乎总是 `injection`（重注入 recall = 近乎通用兜底修复）。
+- `decided_acc = 0.72`（阈值后单点 commit 时的命中率）；`--min-credit 0.05` 同时是在线噪声底 abstention 阈值。
+- abstain 22/75（graph 9 / safety 7 领头）= 单点修复救不回（gold 已可答 / 耦合）→ **MCTS 的 `b^d` 地盘**。
+
+**待办（混淆项，非 blocker）**：concentration 按 gold fault type 分组算，是上界；线上按 query 签名取回先验，泛化前提是"query 签名聚类 ≈ fault type 聚类"，靠 skill 自进化迭代补。
+
+### 待后续讨论（pivot 后）
+
+- [x] 在线机制实现路径：已接生产 `FailureMemoryStore` + hop 检索（见 2026-06-19 收尾节）
+- [ ] Phase 2 进化轨迹的度量与展示
+- [ ] query 签名粒度 vs fault type 的泛化证据
+
+---
+
+## 2026-06-19 实验收尾 + 重构裁决（已收敛）
+
+全套实验跑完 + 配对显著性后处理（`experiments/analyze_significance.py`，bootstrap B=10000 seed=0 + 精确 McNemar，纯后处理无 LLM）。逐 claim 裁决落定。
+
+**C4 头条铁实**：`cmd vs llm_judge` diff +0.32，CI[+.20,+.44]，McNemar p=8.4e-6，discordant 27/3；`cmd vs random` p=3e-6。条件于真失败子集（baseline<0.1，n=44）差距更大（cmd 0.614 vs 0.205/0.182）。杀手证据：llm_judge 73/75 全预测 `retrieval_error`，只在 gold 恰好 = retrieval 时"恢复"——label 分类器看不见隐性故障。
+
+**C5 迁移追平 oracle**：bm25/global vs oracle 均 n.s.（p=0.70/0.40，CI 含 0），vs floor 均 p<1e-9。C13 在 300 例跨源复现（vs oracle 全 n.s.）。写法："top-2 迁移先验与单点 oracle 统计无差异"。
+
+**C6 MCTS 出局（已裁决执行）**：Exp16 TRUE_COUPLED 1/30，阈值 0.8，多数 neither 案例 best_combo<best_single。MCTS 树搜索从正文主线删除 → 代码层 `tree.py`/`value.py`/`distill.py` 删除，`mcts/` 包改名 `counterfactual/`，保留 `actions.py`/`rollout.py`/`context.py` 地基 + `search.py` 的 `SinglePointAttributor`。主线 = offline exhaustive single-point oracle + online top-2 directed seed。
+
+**C7 进化未被数据支持**：Exp18 单 seed 流 Cochran-Armitage 趋势 recovery z=+1.34 p=0.18 / seed-hit z=+0.66 p=0.507，seed-hit 对 prior 数量持平 0.42。根因：原 Exp18 自带本地 BM25 query 检索、绕过生产 store，跨故障 query 不相似 → 检索退化全局众数、2 条即饱和。修复方向：接生产 `FailureMemoryStore` + hop 检索（已接线），并造**复发性数据集** `real_recurrent_cases.json`（同 chain query 家族 + family 内锁 label + 改写变体），让 query→hop 检索有信号。120 family 下重测趋势裁决 C7。
+
+**C8 ECS 降级**：full_ecs vs solution n.s.（p=0.625，discordant 3/1）——"结构提升恢复率"不成立。强显著的是任何含 corrected 内容臂 ≫ cause_only（p<0.002）="内容才是修复，解释不是"。confound：full_ecs 重注入全量 `[Wrong Context]`（461 vs 297 token），结构与信息量纠缠；Exp17 改连续 evidence 指标 + Wrong Context 改指针去污染。
+
+**动作空间收窄 4-action**：`graph_error` 砍除（应用恢复 0.125 / gold 恢复 0.067 = floor，砍掉仅损 1 个 cmd-recovered case）；**`safety_error` 保留**（cmd 选中时 0.889 最精准，砍掉损 8 个 = cmd 全部 38 的 21%，会把 C4 从 0.507 砸到 0.400）。live action = retrieval / injection / granularity / safety。
+
+**item 融入反事实（已接线，非预测 label）**：`run_item_gate_for_recall_set → item_signal_hints_from_result → intervention_config["item_signal_hints"]`，由 `counterfactual.actions._order_items_by_signal` 消费做 evidence 排序提示。冲突/过时作信号注入，recovery 裁决，不报 item label。
+
+详细蓝图见 `cmd_innovation_core/plans/build_spec_refactor.md`、`design_ecs_evolution_pivot.md`、`dataset_expansion_spec.md`。
+
+---
+

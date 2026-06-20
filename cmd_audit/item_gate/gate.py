@@ -5,7 +5,7 @@ Implements the three-step cost ladder from DISCUSSION.md decision #4:
 ② Recall-set collision → stale/conflict classification
 ③ LOO reconstruction → wrong/compression_distorted classification
 
-Item gate runs before pipeline MCTS to validate memory content correctness.
+Item gate runs before pipeline attribution to validate memory content correctness.
 """
 from __future__ import annotations
 
@@ -63,15 +63,8 @@ class ItemGateResult:
 
     @property
     def should_skip_tier3(self) -> bool:
-        """True if item-wrong detected, should skip Tier 3 pipeline MCTS."""
-        return self.status in {
-            ItemGateStatus.ITEM_STALE,
-            ItemGateStatus.ITEM_CONFLICT,
-            ItemGateStatus.ITEM_WRONG,
-            ItemGateStatus.ITEM_COMPRESSION_DISTORTED,
-            ItemGateStatus.ITEM_POISONED,
-            ItemGateStatus.HITL_REQUIRED,
-        }
+        """Compatibility flag; item findings no longer skip step attribution."""
+        return False
 
     @property
     def can_auto_update(self) -> bool:
@@ -282,6 +275,54 @@ def run_item_gate_for_recall_set(
         if result.status != ItemGateStatus.PASS:
             return result
     return last_result
+
+
+def item_signal_hints_from_result(
+    result: ItemGateResult | None,
+) -> dict[str, float]:
+    """Convert an item-gate result into ordering hints for step actions.
+
+    Positive scores move an item earlier in reconstructed evidence; negative
+    scores keep the item visible but mark it as downweighted. No item label is
+    emitted as attribution.
+    """
+    if result is None or result.status == ItemGateStatus.PASS:
+        return {}
+
+    hints: dict[str, float] = {}
+    for collision in result.collision_results:
+        if not collision.has_collision:
+            continue
+        if collision.is_stale_collision:
+            if collision.timestamp_direction == "a_newer":
+                hints[collision.item_a.memory_id] = max(
+                    hints.get(collision.item_a.memory_id, 0.0), 1.0
+                )
+                hints[collision.item_b.memory_id] = min(
+                    hints.get(collision.item_b.memory_id, 0.0), -1.0
+                )
+            elif collision.timestamp_direction == "b_newer":
+                hints[collision.item_b.memory_id] = max(
+                    hints.get(collision.item_b.memory_id, 0.0), 1.0
+                )
+                hints[collision.item_a.memory_id] = min(
+                    hints.get(collision.item_a.memory_id, 0.0), -1.0
+                )
+        elif collision.is_conflict_collision:
+            hints[collision.item_a.memory_id] = min(
+                hints.get(collision.item_a.memory_id, 0.0), -0.5
+            )
+            hints[collision.item_b.memory_id] = min(
+                hints.get(collision.item_b.memory_id, 0.0), -0.5
+            )
+
+    if result.loo_result is not None and result.loo_result.item_label is not None:
+        target_id = result.loo_result.original_item.memory_id
+        hints[target_id] = min(hints.get(target_id, 0.0), -1.0)
+
+    if not hints and result.needs_item_treatment:
+        hints[result.target_item.memory_id] = -1.0
+    return hints
 
 
 def _analyze_timestamps(

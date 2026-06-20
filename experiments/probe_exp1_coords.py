@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe Exp1 MCTS coordinates (A+C diagnostic, NOT a runner).
+"""Probe Exp1 step-level attribution coordinates (A+C diagnostic, NOT a runner).
 
 For a few multihop cases, print:
   - main_culprit  (generation_point, action, credit)
@@ -93,20 +93,8 @@ def main() -> None:
         print(f"nodes_explored   : {search.nodes_explored}")
         print(f"early_stops      : {search.early_stops}")
         print(f"terminal_rollouts: {search.terminal_rollouts}")
-        print("tree:")
-        _dump_tree(search.tree.root)
+        print("tree          : <retired; SearchResult is tree-free>")
         print("-" * 60)
-
-def _dump_tree(node, indent: int = 1) -> None:
-    seq = "->".join(getattr(a, "value", str(a)) for a in node.action_sequence) or "ROOT"
-    print(
-        f"{'  ' * indent}gp={node.generation_point} "
-        f"q_max={node.q_max:.3f} visits={node.visit_count} "
-        f"term={node.is_terminal} [{seq}]"
-    )
-    for child in node.children.values():
-        _dump_tree(child, indent + 1)
-
 
 def _run_aggregate(cases, client, verifier, expected_hops, max_iterations) -> None:
     from collections import Counter, defaultdict

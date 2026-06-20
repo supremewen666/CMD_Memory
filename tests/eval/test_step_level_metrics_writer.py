@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from cmd_audit import write_step_level_metrics_table
-from cmd_audit.mcts import PipelineAction
+from cmd_audit.counterfactual import PipelineAction
 
 
 def _mcts(primary, credit: float = 0.7, *, include_identity: bool = True):
@@ -40,7 +40,7 @@ def test_step_level_metrics_writer_uses_mcts_pipeline_denominator(tmp_path: Path
     results = [
         _audit("fix", "retrieval_error", _mcts(PipelineAction.RETRIEVAL_ERROR)),
         _audit("fix", "injection_error", _mcts(PipelineAction.RETRIEVAL_ERROR, 0.2)),
-        _audit("fix", "graph_error", None),
+        _audit("fix", "safety_error", None),
         _audit("fill", "retrieval_error", _mcts(PipelineAction.RETRIEVAL_ERROR)),
         _audit("fix", "item_wrong", _mcts(PipelineAction.RETRIEVAL_ERROR)),
         _audit("fix", None, _mcts(PipelineAction.RETRIEVAL_ERROR)),

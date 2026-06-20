@@ -196,8 +196,6 @@ _LABEL_DESCRIPTIONS: dict[str, str] = {
     "into the agent's reasoning context.",
     "granularity_error": "The memory was represented at a granularity that dropped "
     "or obscured required evidence.",
-    "graph_error": "Graph expansion introduced distractors that masked directly "
-    "matched evidence.",
     "safety_error": "A safety filter blocked valid evidence required for the answer.",
 }
 

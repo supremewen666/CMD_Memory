@@ -1,7 +1,7 @@
-"""Subagent loop orchestrator integrating confidence gate → item gate → MCTS.
+"""Subagent loop orchestrator integrating confidence gate → item gate → attribution.
 
 Implements the V2 subagent loop from DISCUSSION.md:
-Hook confidence gate → Tier 2 item gate → Tier 3 pipeline MCTS
+Hook confidence gate → Tier 2 item gate → Tier 3 pipeline attribution
 """
 from __future__ import annotations
 
@@ -11,12 +11,13 @@ from typing import Any
 
 from ..core.models import GoldEvidence, MemoryItem
 from ..item_gate import (
+    item_signal_hints_from_result,
     run_item_gate,
     order_items_by_experience,
     ItemGateResult,
     ItemGateStatus,
 )
-from ..mcts import run_mcts_attribution, SearchResult
+from ..counterfactual import attribute_single_point, SearchResult
 from .confidence_gate import confidence_gate_hook, ConfidenceGateResult
 
 _logger = logging.getLogger(__name__)
@@ -33,8 +34,8 @@ class SubagentLoopResult:
     item_gate_result: ItemGateResult | None = None
     item_treatment_needed: bool = False
 
-    # MCTS results (only if item passed gate)
-    mcts_result: SearchResult | None = None
+    # Step-level attribution results (item signals may reorder evidence)
+    attribution_result: SearchResult | None = None
     attribution_complete: bool = False
 
     # Final attribution
@@ -66,7 +67,7 @@ class SubagentLoopResult:
     @property
     def pipeline_attribution_available(self) -> bool:
         """True if pipeline-level attribution was performed."""
-        return self.mcts_result is not None and self.attribution_complete
+        return self.attribution_result is not None and self.attribution_complete
 
 
 class SubagentLoopOrchestrator:
@@ -204,42 +205,46 @@ class SubagentLoopOrchestrator:
                 current_item_gate_result.status,
             )
 
-        # Step 3: Tier 3 MCTS (only if item gate passed)
-        mcts_result = None
+        # Step 3: Tier 3 step-level attribution with item signals as hints.
+        attribution_result = None
         attribution_complete = False
+        item_signal_hints = item_signal_hints_from_result(item_gate_result)
 
-        if (item_gate_result is None or
-            item_gate_result.status == ItemGateStatus.PASS):
+        _logger.debug("Running Tier 3 step-level attribution")
 
-            # Item content is valid, proceed to pipeline attribution
-            _logger.debug("Running Tier 3 MCTS attribution")
+        try:
+            attribution_result = attribute_single_point(
+                llm_client,
+                f"Query: {query}",  # Initial context
+                active_recall_set,
+                gold_evidence,
+                gold_answer,
+                max_iterations=self.mcts_max_iterations,
+                max_depth=self.mcts_max_depth,
+                answer_verifier=answer_verifier,
+                intervention_config={"item_signal_hints": item_signal_hints},
+                action_priors=(
+                    {
+                        hop: active_failure_memory_store.get_mcts_action_priors(
+                            query,
+                            hop_index=hop,
+                        )
+                        for hop in range(1, self.mcts_max_depth + 1)
+                    }
+                    if active_failure_memory_store is not None
+                    else None
+                ),
+            )
+            attribution_complete = True
+            _logger.debug("Step-level attribution complete: %s",
+                         attribution_result.primary_attribution_label)
 
-            try:
-                mcts_result = run_mcts_attribution(
-                    llm_client,
-                    f"Query: {query}",  # Initial context
-                    active_recall_set,
-                    gold_evidence,
-                    gold_answer,
-                    max_iterations=self.mcts_max_iterations,
-                    max_depth=self.mcts_max_depth,
-                    answer_verifier=answer_verifier,
-                    action_priors=(
-                        active_failure_memory_store.get_mcts_action_priors(query)
-                        if active_failure_memory_store is not None
-                        else None
-                    ),
-                )
-                attribution_complete = True
-                _logger.debug("MCTS attribution complete: %s",
-                             mcts_result.primary_attribution_label)
-
-            except Exception as exc:
-                _logger.error("MCTS attribution failed: %s", exc)
+        except Exception as exc:
+            _logger.error("Step-level attribution failed: %s", exc)
 
         # Determine final attribution
         primary_label, attribution_confidence = self._determine_final_attribution(
-            item_gate_result, mcts_result
+            item_gate_result, attribution_result
         )
 
         execution_time = time.time() - start_time
@@ -249,7 +254,7 @@ class SubagentLoopOrchestrator:
             entered_loop=True,
             item_gate_result=item_gate_result,
             item_treatment_needed=item_treatment_needed,
-            mcts_result=mcts_result,
+            attribution_result=attribution_result,
             attribution_complete=attribution_complete,
             primary_label=primary_label,
             attribution_confidence=attribution_confidence,
@@ -260,38 +265,22 @@ class SubagentLoopOrchestrator:
     def _determine_final_attribution(
         self,
         item_gate_result: ItemGateResult | None,
-        mcts_result: SearchResult | None,
+        attribution_result: SearchResult | None,
     ) -> tuple[str | None, float]:
-        """Determine final attribution from tier results.
+        """Determine final attribution from the step-level recovery result.
 
-        Priority:
-        1. Item-level issues (Tier 2) override pipeline issues
-        2. Pipeline attribution (Tier 3) when items are clean
-        3. No attribution if both tiers passed
+        Tier 2 item findings are evidence-ordering hints only. They do not
+        produce item-label attribution or override recovered step actions.
 
         Returns:
             Tuple of (primary_label, confidence)
         """
-        # Item-level issues take precedence
-        if (item_gate_result and
-            item_gate_result.status != ItemGateStatus.PASS):
-
-            label_map = {
-                ItemGateStatus.ITEM_STALE: "item_stale",
-                ItemGateStatus.ITEM_CONFLICT: "item_conflict",
-                ItemGateStatus.ITEM_WRONG: "item_wrong",
-                ItemGateStatus.ITEM_COMPRESSION_DISTORTED: "item_compression_distorted",
-            }
-
-            primary_label = label_map.get(item_gate_result.status)
-            confidence = 0.8  # High confidence in item gate decisions
-
-            return primary_label, confidence
+        del item_gate_result
 
         # Pipeline attribution if available
-        if mcts_result and mcts_result.primary_attribution_label:
-            primary_label = mcts_result.primary_attribution_label.value
-            confidence = mcts_result.attribution_confidence
+        if attribution_result and attribution_result.primary_attribution_label:
+            primary_label = attribution_result.primary_attribution_label.value
+            confidence = attribution_result.attribution_confidence
 
             return primary_label, confidence
 

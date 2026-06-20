@@ -1,1 +1,0 @@
-"""Tests for cmd_audit.mcts module."""

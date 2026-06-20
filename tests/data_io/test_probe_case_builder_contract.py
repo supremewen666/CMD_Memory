@@ -55,10 +55,6 @@ class ProbeCaseBuilderContractTest(unittest.TestCase):
                 self.assertEqual(len(case["generation_points"]), 2)
                 self.assertEqual(case["expected_fault"]["label"], label)
 
-                if label == "graph_error":
-                    self.assertTrue(
-                        any(item["is_graph_expanded"] for item in case["extracted_memory"])
-                    )
                 if label == "safety_error":
                     self.assertTrue(case["safety_filter_blocked"])
                     self.assertTrue(

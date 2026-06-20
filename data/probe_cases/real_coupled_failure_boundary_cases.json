@@ -1,12 +1,12 @@
 [
   {
-    "case_id": "longmemeval-coupled-0000-72355e2f03",
+    "case_id": "longmemeval-coupled-0000-00b682872a",
     "source": "longmemeval",
-    "query": "What percentage of leadership positions do women hold in the my company? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "What is the total number of views on my most popular videos on YouTube and TikTok? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: What percentage of leadership positions do women hold in the my company?"
+        "text": "Source query: What is the total number of views on my most popular videos on YouTube and TikTok?"
       },
       {
         "event_id": "e_a",
@@ -14,7 +14,7 @@
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is 20%."
+        "text": "Coupled boundary evidence B: The correct remembered answer is 1,998."
       }
     ],
     "extracted_memory": [
@@ -40,7 +40,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is 20%.",
+        "text": "The correct remembered answer is 1,998.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -60,14 +60,14 @@
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is 20%.",
+        "text": "The correct remembered answer is 1,998.",
         "required_phrases": [
-          "The correct remembered answer is 20%"
+          "The correct remembered answer is 1"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "20%",
+    "gold_answer": "1,998",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -126,13 +126,13 @@
     ]
   },
   {
-    "case_id": "longmemeval-coupled-0001-b38d5afc93",
+    "case_id": "longmemeval-coupled-0001-a18c530600",
     "source": "longmemeval",
-    "query": "How many engineers do I lead when I just started my new role as Senior Software Engineer? How many engineers do I lead now? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "How long had I been watching stand-up comedy specials regularly when I attended the open mic night at the local comedy club? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: How many engineers do I lead when I just started my new role as Senior Software Engineer? How many engineers do I lead now?"
+        "text": "Source query: How long had I been watching stand-up comedy specials regularly when I attended the open mic night at the local comedy club?"
       },
       {
         "event_id": "e_a",
@@ -140,7 +140,7 @@
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is When you just started your new role as Senior Software Engineer, you led 4 engineers. Now, you lead 5 engineers."
+        "text": "Coupled boundary evidence B: The correct remembered answer is 2 months."
       }
     ],
     "extracted_memory": [
@@ -177,7 +177,7 @@
       },
       {
         "memory_id": "m_b_event_gold",
-        "text": "The correct remembered answer is When you just started your new role as Senior Software Engineer, you led 4 engineers. Now, you lead 5 engineers.",
+        "text": "The correct remembered answer is 2 months.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -197,17 +197,15 @@
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is When you just started your new role as Senior Software Engineer, you led 4 engineers. Now, you lead 5 engineers.",
+        "text": "The correct remembered answer is 2 months.",
         "required_phrases": [
-          "The correct remembered answer is When you just started your new role as Senior Software Engineer",
-          "you led 4 engineers",
-          "you lead 5 engineers"
+          "The correct remembered answer is 2 months"
         ],
         "source_memory_id": "m_b_event_gold",
         "granularity_level": "event"
       }
     ],
-    "gold_answer": "When you just started your new role as Senior Software Engineer, you led 4 engineers. Now, you lead 5 engineers",
+    "gold_answer": "2 months",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -275,13 +273,13 @@
     ]
   },
   {
-    "case_id": "longmemeval-coupled-0002-30a3dde2fb",
+    "case_id": "longmemeval-coupled-0002-de40eddb37",
     "source": "longmemeval",
-    "query": "What is the average age of me, my parents, and my grandparents? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "How long had I been taking guitar lessons when I bought the new guitar amp? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: What is the average age of me, my parents, and my grandparents?"
+        "text": "Source query: How long had I been taking guitar lessons when I bought the new guitar amp?"
       },
       {
         "event_id": "e_a",
@@ -289,134 +287,7 @@
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is 59.6."
-      }
-    ],
-    "extracted_memory": [
-      {
-        "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-002.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_a"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is 59.6.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_b"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_graph_distractor",
-        "text": "Graph-expanded component b neighbor claims: not-59.6.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      }
-    ],
-    "gold_evidence": [
-      {
-        "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-002.",
-        "required_phrases": [
-          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-002"
-        ],
-        "source_memory_id": "m_a_gold"
-      },
-      {
-        "evidence_id": "ev_b",
-        "text": "The correct remembered answer is 59.6.",
-        "required_phrases": [
-          "The correct remembered answer is 59"
-        ],
-        "source_memory_id": "m_b_gold"
-      }
-    ],
-    "gold_answer": "59.6",
-    "baseline_outputs": [
-      {
-        "baseline_name": "vector_memory",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [
-          "m_a_gold",
-          "m_b_graph_distractor",
-          "m_b_gold"
-        ],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Component a memory was retrieved, but the injected block was malformed and omitted the deciding value. Graph-expanded component b neighbor claims: not-59.6."
-      },
-      {
-        "baseline_name": "fixed_summary",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
-      }
-    ],
-    "perturbation_label": null,
-    "scoring": {
-      "answer_metric": "casefold_exact_match",
-      "evidence_metric": "gold_evidence_recall"
-    },
-    "default_store": "episodic",
-    "trajectory_kind": "coupled_failure_boundary",
-    "coupled_labels": [
-      "injection_error",
-      "graph_error"
-    ],
-    "coupled_failure": {
-      "labels": [
-        "injection_error",
-        "graph_error"
-      ],
-      "single_point_recoveries": {
-        "injection_error": 0.45,
-        "graph_error": 0.45
-      },
-      "coalition_recovery": 1.0,
-      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
-    },
-    "generation_points": [
-      {
-        "hop_index": 1,
-        "expected_action": "injection_error",
-        "single_point_recovers": false
-      },
-      {
-        "hop_index": 2,
-        "expected_action": "graph_error",
-        "single_point_recovers": false
-      }
-    ]
-  },
-  {
-    "case_id": "longmemeval-coupled-0003-14a2ab64e6",
-    "source": "longmemeval",
-    "query": "Which social media platform did I gain the most followers on over the past month? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
-    "raw_events": [
-      {
-        "event_id": "e_query",
-        "text": "Source query: Which social media platform did I gain the most followers on over the past month?"
-      },
-      {
-        "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-003."
-      },
-      {
-        "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is TikTok."
+        "text": "Coupled boundary evidence B: The correct remembered answer is Four weeks."
       }
     ],
     "extracted_memory": [
@@ -433,7 +304,7 @@
       },
       {
         "memory_id": "m_a_event_gold",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-003.",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-002.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -443,7 +314,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is TikTok.",
+        "text": "The correct remembered answer is Four weeks.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -455,23 +326,23 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-003.",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-002.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-003"
+          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-002"
         ],
         "source_memory_id": "m_a_event_gold",
         "granularity_level": "event"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is TikTok.",
+        "text": "The correct remembered answer is Four weeks.",
         "required_phrases": [
-          "The correct remembered answer is TikTok"
+          "The correct remembered answer is Four weeks"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "TikTok",
+    "gold_answer": "Four weeks",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -540,155 +411,27 @@
     ]
   },
   {
-    "case_id": "longmemeval-coupled-0004-09a90ca9d3",
+    "case_id": "longmemeval-coupled-0003-fb7ebce5e6",
     "source": "longmemeval",
-    "query": "How many weeks have I been accepted into the exchange program when I started attending the pre-departure orientation sessions? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "What was the approximate increase in Instagram followers I experienced in two weeks? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: How many weeks have I been accepted into the exchange program when I started attending the pre-departure orientation sessions?"
+        "text": "Source query: What was the approximate increase in Instagram followers I experienced in two weeks?"
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-004."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-003."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is one week."
-      }
-    ],
-    "extracted_memory": [
-      {
-        "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-004.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_a"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_a_graph_distractor",
-        "text": "Graph-expanded component a neighbor claims: wrong-longmemeval-4.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is one week.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_b"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": true
-      }
-    ],
-    "gold_evidence": [
-      {
-        "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-004.",
-        "required_phrases": [
-          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-004"
-        ],
-        "source_memory_id": "m_a_gold"
-      },
-      {
-        "evidence_id": "ev_b",
-        "text": "The correct remembered answer is one week.",
-        "required_phrases": [
-          "The correct remembered answer is one week"
-        ],
-        "source_memory_id": "m_b_gold"
-      }
-    ],
-    "gold_answer": "one week",
-    "baseline_outputs": [
-      {
-        "baseline_name": "vector_memory",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [
-          "m_a_graph_distractor",
-          "m_a_gold",
-          "m_b_gold"
-        ],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Graph-expanded component a neighbor claims: wrong-longmemeval-4. Component b evidence was redacted by an over-broad safety filter."
-      },
-      {
-        "baseline_name": "fixed_summary",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
-      }
-    ],
-    "perturbation_label": null,
-    "scoring": {
-      "answer_metric": "casefold_exact_match",
-      "evidence_metric": "gold_evidence_recall"
-    },
-    "default_store": "episodic",
-    "trajectory_kind": "coupled_failure_boundary",
-    "coupled_labels": [
-      "graph_error",
-      "safety_error"
-    ],
-    "coupled_failure": {
-      "labels": [
-        "graph_error",
-        "safety_error"
-      ],
-      "single_point_recoveries": {
-        "graph_error": 0.45,
-        "safety_error": 0.45
-      },
-      "coalition_recovery": 1.0,
-      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
-    },
-    "generation_points": [
-      {
-        "hop_index": 1,
-        "expected_action": "graph_error",
-        "single_point_recovers": false
-      },
-      {
-        "hop_index": 2,
-        "expected_action": "safety_error",
-        "single_point_recovers": false
-      }
-    ],
-    "safety_filter_blocked": true
-  },
-  {
-    "case_id": "longmemeval-coupled-0005-c9ab133848",
-    "source": "longmemeval",
-    "query": "What is the order of the sports events I watched in January? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
-    "raw_events": [
-      {
-        "event_id": "e_query",
-        "text": "Source query: What is the order of the sports events I watched in January?"
-      },
-      {
-        "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-005."
-      },
-      {
-        "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is First, I attended a NBA game at the Staples Center, then I watched the College Football National Championship game, and finally, I watched the NFL playoffs.."
+        "text": "Coupled boundary evidence B: The correct remembered answer is 100."
       }
     ],
     "extracted_memory": [
       {
         "memory_id": "m_a_distractor",
-        "text": "Adjacent retrieval candidate for component a: wrong-longmemeval-5.",
+        "text": "Adjacent retrieval candidate for component a: wrong-longmemeval-3.",
         "store": "episodic",
         "source_event_ids": [
           "e_query"
@@ -698,7 +441,7 @@
       },
       {
         "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-005.",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-003.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -708,7 +451,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is First, I attended a NBA game at the Staples Center, then I watched the College Football National Championship game, and finally, I watched the NFL playoffs..",
+        "text": "The correct remembered answer is 100.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -720,24 +463,22 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-005.",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-003.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-005"
+          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-003"
         ],
         "source_memory_id": "m_a_gold"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is First, I attended a NBA game at the Staples Center, then I watched the College Football National Championship game, and finally, I watched the NFL playoffs..",
+        "text": "The correct remembered answer is 100.",
         "required_phrases": [
-          "The correct remembered answer is First",
-          "I attended a NBA game at the Staples Center",
-          "then I watched the College Football National Championship game"
+          "The correct remembered answer is 100"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "First, I attended a NBA game at the Staples Center, then I watched the College Football National Championship game, and finally, I watched the NFL playoffs.",
+    "gold_answer": "100",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -748,7 +489,7 @@
         ],
         "answer_score": 0.0,
         "evidence_score": 0.0,
-        "injected_context": "Adjacent retrieval candidate for component a: wrong-longmemeval-5. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-longmemeval-3. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
       },
       {
         "baseline_name": "fixed_summary",
@@ -796,27 +537,27 @@
     ]
   },
   {
-    "case_id": "longmemeval-coupled-0006-f6a4e60d32",
+    "case_id": "longmemeval-coupled-0004-3f5a962b6e",
     "source": "longmemeval",
-    "query": "Which gift did I buy first, the necklace for my sister or the photo album for my mom? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "Can you recommend some resources where I can learn more about video editing? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: Which gift did I buy first, the necklace for my sister or the photo album for my mom?"
+        "text": "Source query: Can you recommend some resources where I can learn more about video editing?"
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-006."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-004."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is the photo album for my mom."
+        "text": "Coupled boundary evidence B: The correct remembered answer is The user would prefer responses that suggest resources specifically tailored to Adobe Premiere Pro, especially those that delve into its advanced settings. They might not prefer general video editing resources or resources related to other video editing software.."
       }
     ],
     "extracted_memory": [
       {
         "memory_id": "m_a_distractor",
-        "text": "Adjacent retrieval candidate for component a: wrong-longmemeval-6.",
+        "text": "Adjacent retrieval candidate for component a: wrong-longmemeval-4.",
         "store": "episodic",
         "source_event_ids": [
           "e_query"
@@ -826,7 +567,7 @@
       },
       {
         "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-006.",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-004.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -847,7 +588,7 @@
       },
       {
         "memory_id": "m_b_event_gold",
-        "text": "The correct remembered answer is the photo album for my mom.",
+        "text": "The correct remembered answer is The user would prefer responses that suggest resources specifically tailored to Adobe Premiere Pro, especially those that delve into its advanced settings. They might not prefer general video editing resources or resources related to other video editing software..",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -859,23 +600,25 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-006.",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-004.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-006"
+          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-004"
         ],
         "source_memory_id": "m_a_gold"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is the photo album for my mom.",
+        "text": "The correct remembered answer is The user would prefer responses that suggest resources specifically tailored to Adobe Premiere Pro, especially those that delve into its advanced settings. They might not prefer general video editing resources or resources related to other video editing software..",
         "required_phrases": [
-          "The correct remembered answer is the photo album for my mom"
+          "The correct remembered answer is The user would prefer responses that suggest resources specifically tailored to Adobe Premiere Pro",
+          "especially those that delve into its advanced settings",
+          "They might not prefer general video editing resources or resources related to other video editing software"
         ],
         "source_memory_id": "m_b_event_gold",
         "granularity_level": "event"
       }
     ],
-    "gold_answer": "the photo album for my mom",
+    "gold_answer": "The user would prefer responses that suggest resources specifically tailored to Adobe Premiere Pro, especially those that delve into its advanced settings. They might not prefer general video editing resources or resources related to other video editing software.",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -886,7 +629,7 @@
         ],
         "answer_score": 0.0,
         "evidence_score": 0.0,
-        "injected_context": "Adjacent retrieval candidate for component a: wrong-longmemeval-6. Component b session summary mentions the right topic but omits the deciding value."
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-longmemeval-4. Component b session summary mentions the right topic but omits the deciding value."
       },
       {
         "baseline_name": "fixed_summary",
@@ -943,148 +686,21 @@
     ]
   },
   {
-    "case_id": "longmemeval-coupled-0007-f54b483abd",
+    "case_id": "longmemeval-coupled-0005-fd07cc041e",
     "source": "longmemeval",
-    "query": "Which streaming service did I start using most recently? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "What color did I repaint my bedroom walls? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: Which streaming service did I start using most recently?"
+        "text": "Source query: What color did I repaint my bedroom walls?"
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-007."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-005."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Disney+."
-      }
-    ],
-    "extracted_memory": [
-      {
-        "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-007.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_a"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is Disney+.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_b"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_graph_distractor",
-        "text": "Graph-expanded component b neighbor claims: not-Disney.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      }
-    ],
-    "gold_evidence": [
-      {
-        "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-007.",
-        "required_phrases": [
-          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-007"
-        ],
-        "source_memory_id": "m_a_gold"
-      },
-      {
-        "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Disney+.",
-        "required_phrases": [
-          "The correct remembered answer is Disney+"
-        ],
-        "source_memory_id": "m_b_gold"
-      }
-    ],
-    "gold_answer": "Disney+",
-    "baseline_outputs": [
-      {
-        "baseline_name": "vector_memory",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [
-          "m_a_gold",
-          "m_b_graph_distractor",
-          "m_b_gold"
-        ],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Component a memory was retrieved, but the injected block was malformed and omitted the deciding value. Graph-expanded component b neighbor claims: not-Disney."
-      },
-      {
-        "baseline_name": "fixed_summary",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
-      }
-    ],
-    "perturbation_label": null,
-    "scoring": {
-      "answer_metric": "casefold_exact_match",
-      "evidence_metric": "gold_evidence_recall"
-    },
-    "default_store": "episodic",
-    "trajectory_kind": "coupled_failure_boundary",
-    "coupled_labels": [
-      "injection_error",
-      "graph_error"
-    ],
-    "coupled_failure": {
-      "labels": [
-        "injection_error",
-        "graph_error"
-      ],
-      "single_point_recoveries": {
-        "injection_error": 0.45,
-        "graph_error": 0.45
-      },
-      "coalition_recovery": 1.0,
-      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
-    },
-    "generation_points": [
-      {
-        "hop_index": 1,
-        "expected_action": "injection_error",
-        "single_point_recovers": false
-      },
-      {
-        "hop_index": 2,
-        "expected_action": "graph_error",
-        "single_point_recovers": false
-      }
-    ]
-  },
-  {
-    "case_id": "longmemeval-coupled-0008-4e1cae3e78",
-    "source": "longmemeval",
-    "query": "What was the first issue I had with my new car after its first service? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
-    "raw_events": [
-      {
-        "event_id": "e_query",
-        "text": "Source query: What was the first issue I had with my new car after its first service?"
-      },
-      {
-        "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-008."
-      },
-      {
-        "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is GPS system not functioning correctly."
+        "text": "Coupled boundary evidence B: The correct remembered answer is a lighter shade of gray."
       }
     ],
     "extracted_memory": [
@@ -1101,7 +717,7 @@
       },
       {
         "memory_id": "m_a_event_gold",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-008.",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-005.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -1111,7 +727,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is GPS system not functioning correctly.",
+        "text": "The correct remembered answer is a lighter shade of gray.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -1123,23 +739,23 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-008.",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-005.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-008"
+          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-005"
         ],
         "source_memory_id": "m_a_event_gold",
         "granularity_level": "event"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is GPS system not functioning correctly.",
+        "text": "The correct remembered answer is a lighter shade of gray.",
         "required_phrases": [
-          "The correct remembered answer is GPS system not functioning correctly"
+          "The correct remembered answer is a lighter shade of gray"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "GPS system not functioning correctly",
+    "gold_answer": "a lighter shade of gray",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -1208,27 +824,37 @@
     ]
   },
   {
-    "case_id": "longmemeval-coupled-0009-4b632fd193",
+    "case_id": "longmemeval-coupled-0006-a523e1eac5",
     "source": "longmemeval",
-    "query": "Which device did I got first, the Samsung Galaxy S22 or the Dell XPS 13? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "How many weeks have I been taking sculpting classes when I invested in my own set of sculpting tools? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: Which device did I got first, the Samsung Galaxy S22 or the Dell XPS 13?"
+        "text": "Source query: How many weeks have I been taking sculpting classes when I invested in my own set of sculpting tools?"
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-009."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-006."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Samsung Galaxy S22."
+        "text": "Coupled boundary evidence B: The correct remembered answer is 3."
       }
     ],
     "extracted_memory": [
       {
+        "memory_id": "m_a_distractor",
+        "text": "Adjacent retrieval candidate for component a: wrong-longmemeval-6.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
         "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-009.",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-006.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -1237,57 +863,46 @@
         "passed_safety_filter": false
       },
       {
-        "memory_id": "m_a_graph_distractor",
-        "text": "Graph-expanded component a neighbor claims: wrong-longmemeval-9.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      },
-      {
         "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is Samsung Galaxy S22.",
+        "text": "The correct remembered answer is 3.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
         ],
         "is_graph_expanded": false,
-        "passed_safety_filter": true
+        "passed_safety_filter": false
       }
     ],
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-009.",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-006.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-009"
+          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-006"
         ],
         "source_memory_id": "m_a_gold"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Samsung Galaxy S22.",
+        "text": "The correct remembered answer is 3.",
         "required_phrases": [
-          "The correct remembered answer is Samsung Galaxy S22"
+          "The correct remembered answer is 3"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Samsung Galaxy S22",
+    "gold_answer": "3",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
         "answer": "Unknown",
         "retrieved_memory_ids": [
-          "m_a_graph_distractor",
-          "m_a_gold",
+          "m_a_distractor",
           "m_b_gold"
         ],
         "answer_score": 0.0,
         "evidence_score": 0.0,
-        "injected_context": "Graph-expanded component a neighbor claims: wrong-longmemeval-9. Component b evidence was redacted by an over-broad safety filter."
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-longmemeval-6. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
       },
       {
         "baseline_name": "fixed_summary",
@@ -1306,16 +921,291 @@
     "default_store": "episodic",
     "trajectory_kind": "coupled_failure_boundary",
     "coupled_labels": [
-      "graph_error",
+      "retrieval_error",
+      "injection_error"
+    ],
+    "coupled_failure": {
+      "labels": [
+        "retrieval_error",
+        "injection_error"
+      ],
+      "single_point_recoveries": {
+        "retrieval_error": 0.45,
+        "injection_error": 0.45
+      },
+      "coalition_recovery": 1.0,
+      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
+    },
+    "generation_points": [
+      {
+        "hop_index": 1,
+        "expected_action": "retrieval_error",
+        "single_point_recovers": false
+      },
+      {
+        "hop_index": 2,
+        "expected_action": "injection_error",
+        "single_point_recovers": false
+      }
+    ]
+  },
+  {
+    "case_id": "longmemeval-coupled-0007-56edb592cf",
+    "source": "longmemeval",
+    "query": "What did I buy for my sister's birthday gift? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "raw_events": [
+      {
+        "event_id": "e_query",
+        "text": "Source query: What did I buy for my sister's birthday gift?"
+      },
+      {
+        "event_id": "e_a",
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-007."
+      },
+      {
+        "event_id": "e_b",
+        "text": "Coupled boundary evidence B: The correct remembered answer is a yellow dress."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "m_a_distractor",
+        "text": "Adjacent retrieval candidate for component a: wrong-longmemeval-7.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_a_gold",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-007.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_session",
+        "text": "Component b session summary mentions the right topic but omits the deciding value.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query",
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_event_gold",
+        "text": "The correct remembered answer is a yellow dress.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "ev_a",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-007.",
+        "required_phrases": [
+          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-007"
+        ],
+        "source_memory_id": "m_a_gold"
+      },
+      {
+        "evidence_id": "ev_b",
+        "text": "The correct remembered answer is a yellow dress.",
+        "required_phrases": [
+          "The correct remembered answer is a yellow dress"
+        ],
+        "source_memory_id": "m_b_event_gold",
+        "granularity_level": "event"
+      }
+    ],
+    "gold_answer": "a yellow dress",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [
+          "m_a_distractor",
+          "m_b_session"
+        ],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-longmemeval-7. Component b session summary mentions the right topic but omits the deciding value."
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
+      }
+    ],
+    "perturbation_label": null,
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    },
+    "default_store": "episodic",
+    "trajectory_kind": "coupled_failure_boundary",
+    "coupled_labels": [
+      "retrieval_error",
+      "granularity_error"
+    ],
+    "coupled_failure": {
+      "labels": [
+        "retrieval_error",
+        "granularity_error"
+      ],
+      "single_point_recoveries": {
+        "retrieval_error": 0.45,
+        "granularity_error": 0.45
+      },
+      "coalition_recovery": 1.0,
+      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
+    },
+    "generation_points": [
+      {
+        "hop_index": 1,
+        "expected_action": "retrieval_error",
+        "single_point_recovers": false
+      },
+      {
+        "hop_index": 2,
+        "expected_action": "granularity_error",
+        "single_point_recovers": false
+      }
+    ],
+    "current_granularity": "session",
+    "granularity_levels": [
+      "raw",
+      "event",
+      "session",
+      "persona",
+      "procedure",
+      "graph"
+    ]
+  },
+  {
+    "case_id": "longmemeval-coupled-0008-c43eac2b17",
+    "source": "longmemeval",
+    "query": "When did I volunteer at the local animal shelter's fundraising dinner? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "raw_events": [
+      {
+        "event_id": "e_query",
+        "text": "Source query: When did I volunteer at the local animal shelter's fundraising dinner?"
+      },
+      {
+        "event_id": "e_a",
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-008."
+      },
+      {
+        "event_id": "e_b",
+        "text": "Coupled boundary evidence B: The correct remembered answer is February 14th."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "m_a_session",
+        "text": "Component a session summary mentions the right topic but omits the deciding value.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query",
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_a_event_gold",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-008.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_gold",
+        "text": "The correct remembered answer is February 14th.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": true
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "ev_a",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-008.",
+        "required_phrases": [
+          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-008"
+        ],
+        "source_memory_id": "m_a_event_gold",
+        "granularity_level": "event"
+      },
+      {
+        "evidence_id": "ev_b",
+        "text": "The correct remembered answer is February 14th.",
+        "required_phrases": [
+          "The correct remembered answer is February 14th"
+        ],
+        "source_memory_id": "m_b_gold"
+      }
+    ],
+    "gold_answer": "February 14th",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [
+          "m_a_session",
+          "m_b_gold"
+        ],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Component a session summary mentions the right topic but omits the deciding value. Component b evidence was redacted by an over-broad safety filter."
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
+      }
+    ],
+    "perturbation_label": null,
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    },
+    "default_store": "episodic",
+    "trajectory_kind": "coupled_failure_boundary",
+    "coupled_labels": [
+      "granularity_error",
       "safety_error"
     ],
     "coupled_failure": {
       "labels": [
-        "graph_error",
+        "granularity_error",
         "safety_error"
       ],
       "single_point_recoveries": {
-        "graph_error": 0.45,
+        "granularity_error": 0.45,
         "safety_error": 0.45
       },
       "coalition_recovery": 1.0,
@@ -1324,7 +1214,7 @@
     "generation_points": [
       {
         "hop_index": 1,
-        "expected_action": "graph_error",
+        "expected_action": "granularity_error",
         "single_point_recovers": false
       },
       {
@@ -1333,16 +1223,151 @@
         "single_point_recovers": false
       }
     ],
-    "safety_filter_blocked": true
+    "safety_filter_blocked": true,
+    "current_granularity": "session",
+    "granularity_levels": [
+      "raw",
+      "event",
+      "session",
+      "persona",
+      "procedure",
+      "graph"
+    ]
   },
   {
-    "case_id": "memoryarena-coupled-0000-2f0d6081ac",
-    "source": "memoryarena",
-    "query": "What is the first and last name of the person who, by December 2023, was living in a city that was initially settled in the 1700s? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "case_id": "longmemeval-coupled-0009-8b35fcafa1",
+    "source": "longmemeval",
+    "query": "Where did I redeem a $5 coupon on coffee creamer? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: What is the first and last name of the person who, by December 2023, was living in a city that was initially settled in the 1700s?"
+        "text": "Source query: Where did I redeem a $5 coupon on coffee creamer?"
+      },
+      {
+        "event_id": "e_a",
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-009."
+      },
+      {
+        "event_id": "e_b",
+        "text": "Coupled boundary evidence B: The correct remembered answer is Target."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "m_a_distractor",
+        "text": "Adjacent retrieval candidate for component a: wrong-longmemeval-9.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_a_gold",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-009.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_gold",
+        "text": "The correct remembered answer is Target.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "ev_a",
+        "text": "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-009.",
+        "required_phrases": [
+          "The first independent evidence atom is bridge token LONGMEMEVAL-PAIR-009"
+        ],
+        "source_memory_id": "m_a_gold"
+      },
+      {
+        "evidence_id": "ev_b",
+        "text": "The correct remembered answer is Target.",
+        "required_phrases": [
+          "The correct remembered answer is Target"
+        ],
+        "source_memory_id": "m_b_gold"
+      }
+    ],
+    "gold_answer": "Target",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [
+          "m_a_distractor",
+          "m_b_gold"
+        ],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-longmemeval-9. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
+      }
+    ],
+    "perturbation_label": null,
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    },
+    "default_store": "episodic",
+    "trajectory_kind": "coupled_failure_boundary",
+    "coupled_labels": [
+      "retrieval_error",
+      "injection_error"
+    ],
+    "coupled_failure": {
+      "labels": [
+        "retrieval_error",
+        "injection_error"
+      ],
+      "single_point_recoveries": {
+        "retrieval_error": 0.45,
+        "injection_error": 0.45
+      },
+      "coalition_recovery": 1.0,
+      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
+    },
+    "generation_points": [
+      {
+        "hop_index": 1,
+        "expected_action": "retrieval_error",
+        "single_point_recovers": false
+      },
+      {
+        "hop_index": 2,
+        "expected_action": "injection_error",
+        "single_point_recovers": false
+      }
+    ]
+  },
+  {
+    "case_id": "memoryarena-coupled-0000-fdf5b2302d",
+    "source": "memoryarena",
+    "query": "What disorder involves symptoms of pain and swelling in the upper part of the body, with a history of stiffness that developed in youth and was followed by swelling four years later? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "raw_events": [
+      {
+        "event_id": "e_query",
+        "text": "Source query: What disorder involves symptoms of pain and swelling in the upper part of the body, with a history of stiffness that developed in youth and was followed by swelling four years later?"
       },
       {
         "event_id": "e_a",
@@ -1350,7 +1375,7 @@
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Based on my comprehensive search, I have gathered sufficient evidence to answer the question. Let me compile my findings: **Explanation:** The evidence strongly points to **Aaron Strick** as the person matching all the criteria described in the question. **City Settlement in the 1700s:** Aaron...."
+        "text": "Coupled boundary evidence B: The correct remembered answer is Based on the evidence I've collected from my searches, I can now provide a comprehensive answer. The key findings are: 1. **Pakistan** was established in 1947 as \"the largest Muslim state in the world at that time\" (as stated in document 89838) 2. Two FOP case reports from the 2010s have been...."
       }
     ],
     "extracted_memory": [
@@ -1376,7 +1401,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is Based on my comprehensive search, I have gathered sufficient evidence to answer the question. Let me compile my findings: **Explanation:** The evidence strongly points to **Aaron Strick** as the person matching all the criteria described in the question. **City Settlement in the 1700s:** Aaron....",
+        "text": "The correct remembered answer is Based on the evidence I've collected from my searches, I can now provide a comprehensive answer. The key findings are: 1. **Pakistan** was established in 1947 as \"the largest Muslim state in the world at that time\" (as stated in document 89838) 2. Two FOP case reports from the 2010s have been....",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -1396,16 +1421,16 @@
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Based on my comprehensive search, I have gathered sufficient evidence to answer the question. Let me compile my findings: **Explanation:** The evidence strongly points to **Aaron Strick** as the person matching all the criteria described in the question. **City Settlement in the 1700s:** Aaron....",
+        "text": "The correct remembered answer is Based on the evidence I've collected from my searches, I can now provide a comprehensive answer. The key findings are: 1. **Pakistan** was established in 1947 as \"the largest Muslim state in the world at that time\" (as stated in document 89838) 2. Two FOP case reports from the 2010s have been....",
         "required_phrases": [
-          "The correct remembered answer is Based on my comprehensive search",
-          "I have gathered sufficient evidence to answer the question",
-          "Let me compile my findings"
+          "The correct remembered answer is Based on the evidence I've collected from my searches",
+          "I can now provide a comprehensive answer",
+          "The key findings are"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Based on my comprehensive search, I have gathered sufficient evidence to answer the question. Let me compile my findings: **Explanation:** The evidence strongly points to **Aaron Strick** as the person matching all the criteria described in the question. **City Settlement in the 1700s:** Aaron...",
+    "gold_answer": "Based on the evidence I've collected from my searches, I can now provide a comprehensive answer. The key findings are: 1. **Pakistan** was established in 1947 as \"the largest Muslim state in the world at that time\" (as stated in document 89838) 2. Two FOP case reports from the 2010s have been...",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -1464,13 +1489,13 @@
     ]
   },
   {
-    "case_id": "memoryarena-coupled-0001-62b75ff051",
+    "case_id": "memoryarena-coupled-0001-db51ff072c",
     "source": "memoryarena",
-    "query": "Which songwriter is a world traveler? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "What disorder is characterized by a history of pain in different parts of the body, worsening over time and causing difficulty in walking and moving shoulders? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: Which songwriter is a world traveler?"
+        "text": "Source query: What disorder is characterized by a history of pain in different parts of the body, worsening over time and causing difficulty in walking and moving shoulders?"
       },
       {
         "event_id": "e_a",
@@ -1478,7 +1503,7 @@
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Based on all my research, I have strong evidence that the answer is \"Barbizon\". Let me verify the key facts: 1. ✓ Artist from a fishing village: Zoë Lewis is from Rottingdean, a fishing village in England [76944, 69496, 52701] 2. ✓ Mother gave birth in her 50s: Her mother had her at age 51 [76944,...."
+        "text": "Coupled boundary evidence B: The correct remembered answer is Based on the evidence I've gathered, let me now provide my answer. I have found clear information about: 1. Two FOP case reports from the 2010s: - A 2017/2018 case report by Tian et al. about a sixteen-year-old male patient - A 2019 case report by Shah et al. about a case in Dubai 2. Pakistan was...."
       }
     ],
     "extracted_memory": [
@@ -1515,7 +1540,7 @@
       },
       {
         "memory_id": "m_b_event_gold",
-        "text": "The correct remembered answer is Based on all my research, I have strong evidence that the answer is \"Barbizon\". Let me verify the key facts: 1. ✓ Artist from a fishing village: Zoë Lewis is from Rottingdean, a fishing village in England [76944, 69496, 52701] 2. ✓ Mother gave birth in her 50s: Her mother had her at age 51 [76944,....",
+        "text": "The correct remembered answer is Based on the evidence I've gathered, let me now provide my answer. I have found clear information about: 1. Two FOP case reports from the 2010s: - A 2017/2018 case report by Tian et al. about a sixteen-year-old male patient - A 2019 case report by Shah et al. about a case in Dubai 2. Pakistan was....",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -1535,17 +1560,17 @@
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Based on all my research, I have strong evidence that the answer is \"Barbizon\". Let me verify the key facts: 1. ✓ Artist from a fishing village: Zoë Lewis is from Rottingdean, a fishing village in England [76944, 69496, 52701] 2. ✓ Mother gave birth in her 50s: Her mother had her at age 51 [76944,....",
+        "text": "The correct remembered answer is Based on the evidence I've gathered, let me now provide my answer. I have found clear information about: 1. Two FOP case reports from the 2010s: - A 2017/2018 case report by Tian et al. about a sixteen-year-old male patient - A 2019 case report by Shah et al. about a case in Dubai 2. Pakistan was....",
         "required_phrases": [
-          "The correct remembered answer is Based on all my research",
-          "I have strong evidence that the answer is \"Barbizon\"",
-          "Let me verify the key facts"
+          "The correct remembered answer is Based on the evidence I've gathered",
+          "let me now provide my answer",
+          "I have found clear information about"
         ],
         "source_memory_id": "m_b_event_gold",
         "granularity_level": "event"
       }
     ],
-    "gold_answer": "Based on all my research, I have strong evidence that the answer is \"Barbizon\". Let me verify the key facts: 1. ✓ Artist from a fishing village: Zoë Lewis is from Rottingdean, a fishing village in England [76944, 69496, 52701] 2. ✓ Mother gave birth in her 50s: Her mother had her at age 51 [76944,...",
+    "gold_answer": "Based on the evidence I've gathered, let me now provide my answer. I have found clear information about: 1. Two FOP case reports from the 2010s: - A 2017/2018 case report by Tian et al. about a sixteen-year-old male patient - A 2019 case report by Shah et al. about a case in Dubai 2. Pakistan was...",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -1613,13 +1638,13 @@
     ]
   },
   {
-    "case_id": "memoryarena-coupled-0002-9915e56a97",
+    "case_id": "memoryarena-coupled-0002-7ca1d1f856",
     "source": "memoryarena",
-    "query": "Which song's lyrics recount the songwriter's mother's childhood? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "What is the largest country by population of its dominant religion established before the 2010s? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: Which song's lyrics recount the songwriter's mother's childhood?"
+        "text": "Source query: What is the largest country by population of its dominant religion established before the 2010s?"
       },
       {
         "event_id": "e_a",
@@ -1627,136 +1652,7 @@
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Based on all my research, I can see that the question's criteria point to Zoë Lewis and based on the information I have: - \"Barbizon\" is clearly the song about her mother's childhood in France (near Paris) - \"Always a Sixpence\" is the album with a coin in the title that features Kate Wolf and Julie...."
-      }
-    ],
-    "extracted_memory": [
-      {
-        "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-002.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_a"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is Based on all my research, I can see that the question's criteria point to Zoë Lewis and based on the information I have: - \"Barbizon\" is clearly the song about her mother's childhood in France (near Paris) - \"Always a Sixpence\" is the album with a coin in the title that features Kate Wolf and Julie....",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_b"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_graph_distractor",
-        "text": "Graph-expanded component b neighbor claims: not-Based.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      }
-    ],
-    "gold_evidence": [
-      {
-        "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-002.",
-        "required_phrases": [
-          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-002"
-        ],
-        "source_memory_id": "m_a_gold"
-      },
-      {
-        "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Based on all my research, I can see that the question's criteria point to Zoë Lewis and based on the information I have: - \"Barbizon\" is clearly the song about her mother's childhood in France (near Paris) - \"Always a Sixpence\" is the album with a coin in the title that features Kate Wolf and Julie....",
-        "required_phrases": [
-          "The correct remembered answer is Based on all my research",
-          "I can see that the question's criteria point to Zoë Lewis and based on the information I have",
-          "- \"Barbizon\" is clearly the song about her mother's childhood in France (near Paris) - \"Always a Sixpence\" is the album with a coin in the title that features Kate Wolf and Julie"
-        ],
-        "source_memory_id": "m_b_gold"
-      }
-    ],
-    "gold_answer": "Based on all my research, I can see that the question's criteria point to Zoë Lewis and based on the information I have: - \"Barbizon\" is clearly the song about her mother's childhood in France (near Paris) - \"Always a Sixpence\" is the album with a coin in the title that features Kate Wolf and Julie...",
-    "baseline_outputs": [
-      {
-        "baseline_name": "vector_memory",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [
-          "m_a_gold",
-          "m_b_graph_distractor",
-          "m_b_gold"
-        ],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Component a memory was retrieved, but the injected block was malformed and omitted the deciding value. Graph-expanded component b neighbor claims: not-Based."
-      },
-      {
-        "baseline_name": "fixed_summary",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
-      }
-    ],
-    "perturbation_label": null,
-    "scoring": {
-      "answer_metric": "casefold_exact_match",
-      "evidence_metric": "gold_evidence_recall"
-    },
-    "default_store": "episodic",
-    "trajectory_kind": "coupled_failure_boundary",
-    "coupled_labels": [
-      "injection_error",
-      "graph_error"
-    ],
-    "coupled_failure": {
-      "labels": [
-        "injection_error",
-        "graph_error"
-      ],
-      "single_point_recoveries": {
-        "injection_error": 0.45,
-        "graph_error": 0.45
-      },
-      "coalition_recovery": 1.0,
-      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
-    },
-    "generation_points": [
-      {
-        "hop_index": 1,
-        "expected_action": "injection_error",
-        "single_point_recovers": false
-      },
-      {
-        "hop_index": 2,
-        "expected_action": "graph_error",
-        "single_point_recovers": false
-      }
-    ]
-  },
-  {
-    "case_id": "memoryarena-coupled-0003-eca905da8c",
-    "source": "memoryarena",
-    "query": "What is the name of a song written by an artist from a fishing village? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
-    "raw_events": [
-      {
-        "event_id": "e_query",
-        "text": "Source query: What is the name of a song written by an artist from a fishing village?"
-      },
-      {
-        "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-003."
-      },
-      {
-        "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Based on the evidence I have gathered, I have established the key facts. However, I realize I need to verify whether \"Barbizon\" appears on \"Always a Sixpence\" or if I need to reconsider the question's interpretation. The question states all criteria must match, including that the album with the...."
+        "text": "Coupled boundary evidence B: The correct remembered answer is Good! I've confirmed that Pakistan became the largest Muslim state in the world when it was established in 1947. Now I have identified the key information about FOP. Based on my searches, I have found: 1. Document 4198: A 2017 case from China of a 16-year-old male with FOP who had pain and swelling...."
       }
     ],
     "extracted_memory": [
@@ -1773,7 +1669,7 @@
       },
       {
         "memory_id": "m_a_event_gold",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-003.",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-002.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -1783,7 +1679,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is Based on the evidence I have gathered, I have established the key facts. However, I realize I need to verify whether \"Barbizon\" appears on \"Always a Sixpence\" or if I need to reconsider the question's interpretation. The question states all criteria must match, including that the album with the....",
+        "text": "The correct remembered answer is Good! I've confirmed that Pakistan became the largest Muslim state in the world when it was established in 1947. Now I have identified the key information about FOP. Based on my searches, I have found: 1. Document 4198: A 2017 case from China of a 16-year-old male with FOP who had pain and swelling....",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -1795,25 +1691,25 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-003.",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-002.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-003"
+          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-002"
         ],
         "source_memory_id": "m_a_event_gold",
         "granularity_level": "event"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Based on the evidence I have gathered, I have established the key facts. However, I realize I need to verify whether \"Barbizon\" appears on \"Always a Sixpence\" or if I need to reconsider the question's interpretation. The question states all criteria must match, including that the album with the....",
+        "text": "The correct remembered answer is Good! I've confirmed that Pakistan became the largest Muslim state in the world when it was established in 1947. Now I have identified the key information about FOP. Based on my searches, I have found: 1. Document 4198: A 2017 case from China of a 16-year-old male with FOP who had pain and swelling....",
         "required_phrases": [
-          "The correct remembered answer is Based on the evidence I have gathered",
-          "I have established the key facts",
-          "However"
+          "The correct remembered answer is Good! I've confirmed that Pakistan became the largest Muslim state in the world when it was established in 1947",
+          "Now I have identified the key information about FOP",
+          "Based on my searches"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Based on the evidence I have gathered, I have established the key facts. However, I realize I need to verify whether \"Barbizon\" appears on \"Always a Sixpence\" or if I need to reconsider the question's interpretation. The question states all criteria must match, including that the album with the...",
+    "gold_answer": "Good! I've confirmed that Pakistan became the largest Muslim state in the world when it was established in 1947. Now I have identified the key information about FOP. Based on my searches, I have found: 1. Document 4198: A 2017 case from China of a 16-year-old male with FOP who had pain and swelling...",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -1882,157 +1778,27 @@
     ]
   },
   {
-    "case_id": "memoryarena-coupled-0004-b5099a32fe",
+    "case_id": "memoryarena-coupled-0003-f92c8cdb23",
     "source": "memoryarena",
-    "query": "What is the scientific name of the animal that is the focus of the book written by the author who also wrote a two-part article about depression research? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "What is the title of the solo album released by the founding member identified in the third subquery that has a cover depicting an individual behind bars, and was released less than five years after their first solo album? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: What is the scientific name of the animal that is the focus of the book written by the author who also wrote a two-part article about depression research?"
+        "text": "Source query: What is the title of the solo album released by the founding member identified in the third subquery that has a cover depicting an individual behind bars, and was released less than five years after their first solo album?"
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-004."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-003."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Excellent! I have all the information I need to answer the question. Let me verify the timeline once more and compile my answer: 1. Alvin Powell wrote the book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" - published in 2008 [81826, 22967] 2. Two years after...."
-      }
-    ],
-    "extracted_memory": [
-      {
-        "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-004.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_a"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_a_graph_distractor",
-        "text": "Graph-expanded component a neighbor claims: wrong-memoryarena-4.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is Excellent! I have all the information I need to answer the question. Let me verify the timeline once more and compile my answer: 1. Alvin Powell wrote the book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" - published in 2008 [81826, 22967] 2. Two years after....",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_b"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": true
-      }
-    ],
-    "gold_evidence": [
-      {
-        "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-004.",
-        "required_phrases": [
-          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-004"
-        ],
-        "source_memory_id": "m_a_gold"
-      },
-      {
-        "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Excellent! I have all the information I need to answer the question. Let me verify the timeline once more and compile my answer: 1. Alvin Powell wrote the book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" - published in 2008 [81826, 22967] 2. Two years after....",
-        "required_phrases": [
-          "The correct remembered answer is Excellent! I have all the information I need to answer the question",
-          "Let me verify the timeline once more and compile my answer",
-          "Alvin Powell wrote the book \"The Race to Save the World's Rarest Bird"
-        ],
-        "source_memory_id": "m_b_gold"
-      }
-    ],
-    "gold_answer": "Excellent! I have all the information I need to answer the question. Let me verify the timeline once more and compile my answer: 1. Alvin Powell wrote the book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" - published in 2008 [81826, 22967] 2. Two years after...",
-    "baseline_outputs": [
-      {
-        "baseline_name": "vector_memory",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [
-          "m_a_graph_distractor",
-          "m_a_gold",
-          "m_b_gold"
-        ],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Graph-expanded component a neighbor claims: wrong-memoryarena-4. Component b evidence was redacted by an over-broad safety filter."
-      },
-      {
-        "baseline_name": "fixed_summary",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
-      }
-    ],
-    "perturbation_label": null,
-    "scoring": {
-      "answer_metric": "casefold_exact_match",
-      "evidence_metric": "gold_evidence_recall"
-    },
-    "default_store": "episodic",
-    "trajectory_kind": "coupled_failure_boundary",
-    "coupled_labels": [
-      "graph_error",
-      "safety_error"
-    ],
-    "coupled_failure": {
-      "labels": [
-        "graph_error",
-        "safety_error"
-      ],
-      "single_point_recoveries": {
-        "graph_error": 0.45,
-        "safety_error": 0.45
-      },
-      "coalition_recovery": 1.0,
-      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
-    },
-    "generation_points": [
-      {
-        "hop_index": 1,
-        "expected_action": "graph_error",
-        "single_point_recovers": false
-      },
-      {
-        "hop_index": 2,
-        "expected_action": "safety_error",
-        "single_point_recovers": false
-      }
-    ],
-    "safety_filter_blocked": true
-  },
-  {
-    "case_id": "memoryarena-coupled-0005-3d72c05c11",
-    "source": "memoryarena",
-    "query": "What is the focus of the book that was written by the author who also wrote a two-part article about depression research? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
-    "raw_events": [
-      {
-        "event_id": "e_query",
-        "text": "Source query: What is the focus of the book that was written by the author who also wrote a two-part article about depression research?"
-      },
-      {
-        "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-005."
-      },
-      {
-        "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Perfect! I have confirmed all the details. Let me now compile the complete answer: **Timeline verification:** - 2008: Alvin Powell published the book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" - 2010: Eric VanderWerf wrote an article (book review) about...."
+        "text": "Coupled boundary evidence B: The correct remembered answer is Based on the information I have gathered from my searches, I can now provide a comprehensive answer. The key findings are: 1. **Band**: Musi-O-Tunya - debut album \"Wings of Africa\" recorded in a single day and released in 1975 [56869] 2. **Founding member**: Rikki Ililonga - released his first solo...."
       }
     ],
     "extracted_memory": [
       {
         "memory_id": "m_a_distractor",
-        "text": "Adjacent retrieval candidate for component a: wrong-memoryarena-5.",
+        "text": "Adjacent retrieval candidate for component a: wrong-memoryarena-3.",
         "store": "episodic",
         "source_event_ids": [
           "e_query"
@@ -2042,7 +1808,7 @@
       },
       {
         "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-005.",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-003.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -2052,7 +1818,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is Perfect! I have confirmed all the details. Let me now compile the complete answer: **Timeline verification:** - 2008: Alvin Powell published the book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" - 2010: Eric VanderWerf wrote an article (book review) about....",
+        "text": "The correct remembered answer is Based on the information I have gathered from my searches, I can now provide a comprehensive answer. The key findings are: 1. **Band**: Musi-O-Tunya - debut album \"Wings of Africa\" recorded in a single day and released in 1975 [56869] 2. **Founding member**: Rikki Ililonga - released his first solo....",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -2064,24 +1830,24 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-005.",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-003.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-005"
+          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-003"
         ],
         "source_memory_id": "m_a_gold"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Perfect! I have confirmed all the details. Let me now compile the complete answer: **Timeline verification:** - 2008: Alvin Powell published the book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" - 2010: Eric VanderWerf wrote an article (book review) about....",
+        "text": "The correct remembered answer is Based on the information I have gathered from my searches, I can now provide a comprehensive answer. The key findings are: 1. **Band**: Musi-O-Tunya - debut album \"Wings of Africa\" recorded in a single day and released in 1975 [56869] 2. **Founding member**: Rikki Ililonga - released his first solo....",
         "required_phrases": [
-          "The correct remembered answer is Perfect! I have confirmed all the details",
-          "Let me now compile the complete answer",
-          "**Timeline verification"
+          "The correct remembered answer is Based on the information I have gathered from my searches",
+          "I can now provide a comprehensive answer",
+          "The key findings are"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Perfect! I have confirmed all the details. Let me now compile the complete answer: **Timeline verification:** - 2008: Alvin Powell published the book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" - 2010: Eric VanderWerf wrote an article (book review) about...",
+    "gold_answer": "Based on the information I have gathered from my searches, I can now provide a comprehensive answer. The key findings are: 1. **Band**: Musi-O-Tunya - debut album \"Wings of Africa\" recorded in a single day and released in 1975 [56869] 2. **Founding member**: Rikki Ililonga - released his first solo...",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -2092,7 +1858,7 @@
         ],
         "answer_score": 0.0,
         "evidence_score": 0.0,
-        "injected_context": "Adjacent retrieval candidate for component a: wrong-memoryarena-5. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-memoryarena-3. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
       },
       {
         "baseline_name": "fixed_summary",
@@ -2140,27 +1906,27 @@
     ]
   },
   {
-    "case_id": "memoryarena-coupled-0006-8376b3b375",
+    "case_id": "memoryarena-coupled-0004-1d1e977128",
     "source": "memoryarena",
-    "query": "When was the book written by the author who also wrote a two-part article about depression research published? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "Which founding member of the band identified in the first subquery released their first solo album the same year as the band's debut album? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: When was the book written by the author who also wrote a two-part article about depression research published?"
+        "text": "Source query: Which founding member of the band identified in the first subquery released their first solo album the same year as the band's debut album?"
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-006."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-004."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Perfect! Now I have all the information I need to answer the question. Let me trace through the timeline: 1. Alvin Powell wrote a book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" published in 2008 2. Two years after the book was published (2010), Eric...."
+        "text": "Coupled boundary evidence B: The correct remembered answer is Based on all my searches, I have found solid evidence that: 1. The band Musi-O-Tunya's debut album \"Wings of Africa\" was recorded in a single day and released in 1975 2. Rikki Ililonga was a founding member who released his first solo album \"Zambia\" also in 1975 3. Less than 5 years later (1977),...."
       }
     ],
     "extracted_memory": [
       {
         "memory_id": "m_a_distractor",
-        "text": "Adjacent retrieval candidate for component a: wrong-memoryarena-6.",
+        "text": "Adjacent retrieval candidate for component a: wrong-memoryarena-4.",
         "store": "episodic",
         "source_event_ids": [
           "e_query"
@@ -2170,7 +1936,7 @@
       },
       {
         "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-006.",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-004.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -2191,7 +1957,7 @@
       },
       {
         "memory_id": "m_b_event_gold",
-        "text": "The correct remembered answer is Perfect! Now I have all the information I need to answer the question. Let me trace through the timeline: 1. Alvin Powell wrote a book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" published in 2008 2. Two years after the book was published (2010), Eric....",
+        "text": "The correct remembered answer is Based on all my searches, I have found solid evidence that: 1. The band Musi-O-Tunya's debut album \"Wings of Africa\" was recorded in a single day and released in 1975 2. Rikki Ililonga was a founding member who released his first solo album \"Zambia\" also in 1975 3. Less than 5 years later (1977),....",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -2203,25 +1969,25 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-006.",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-004.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-006"
+          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-004"
         ],
         "source_memory_id": "m_a_gold"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Perfect! Now I have all the information I need to answer the question. Let me trace through the timeline: 1. Alvin Powell wrote a book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" published in 2008 2. Two years after the book was published (2010), Eric....",
+        "text": "The correct remembered answer is Based on all my searches, I have found solid evidence that: 1. The band Musi-O-Tunya's debut album \"Wings of Africa\" was recorded in a single day and released in 1975 2. Rikki Ililonga was a founding member who released his first solo album \"Zambia\" also in 1975 3. Less than 5 years later (1977),....",
         "required_phrases": [
-          "The correct remembered answer is Perfect! Now I have all the information I need to answer the question",
-          "Let me trace through the timeline",
-          "Alvin Powell wrote a book \"The Race to Save the World's Rarest Bird"
+          "The correct remembered answer is Based on all my searches",
+          "I have found solid evidence that",
+          "The band Musi-O-Tunya's debut album \"Wings of Africa\" was recorded in a single day and released in 1975 2"
         ],
         "source_memory_id": "m_b_event_gold",
         "granularity_level": "event"
       }
     ],
-    "gold_answer": "Perfect! Now I have all the information I need to answer the question. Let me trace through the timeline: 1. Alvin Powell wrote a book \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" published in 2008 2. Two years after the book was published (2010), Eric...",
+    "gold_answer": "Based on all my searches, I have found solid evidence that: 1. The band Musi-O-Tunya's debut album \"Wings of Africa\" was recorded in a single day and released in 1975 2. Rikki Ililonga was a founding member who released his first solo album \"Zambia\" also in 1975 3. Less than 5 years later (1977),...",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -2232,7 +1998,7 @@
         ],
         "answer_score": 0.0,
         "evidence_score": 0.0,
-        "injected_context": "Adjacent retrieval candidate for component a: wrong-memoryarena-6. Component b session summary mentions the right topic but omits the deciding value."
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-memoryarena-4. Component b session summary mentions the right topic but omits the deciding value."
       },
       {
         "baseline_name": "fixed_summary",
@@ -2289,150 +2055,21 @@
     ]
   },
   {
-    "case_id": "memoryarena-coupled-0007-0c134c298f",
+    "case_id": "memoryarena-coupled-0005-6522755e33",
     "source": "memoryarena",
-    "query": "What is the title of the book that was written by the author who also wrote a two-part article about depression research? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "Who are the founding members of the band identified in the previous subquery? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: What is the title of the book that was written by the author who also wrote a two-part article about depression research?"
+        "text": "Source query: Who are the founding members of the band identified in the previous subquery?"
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-007."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-005."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Perfect! I now have all the information needed to answer the question. Let me summarize what I found: 1. **Alvin Powell** wrote a book called \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" published in **2008**. 2. **Ten years after the book was published...."
-      }
-    ],
-    "extracted_memory": [
-      {
-        "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-007.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_a"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is Perfect! I now have all the information needed to answer the question. Let me summarize what I found: 1. **Alvin Powell** wrote a book called \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" published in **2008**. 2. **Ten years after the book was published....",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_b"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_graph_distractor",
-        "text": "Graph-expanded component b neighbor claims: not-Perfect.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      }
-    ],
-    "gold_evidence": [
-      {
-        "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-007.",
-        "required_phrases": [
-          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-007"
-        ],
-        "source_memory_id": "m_a_gold"
-      },
-      {
-        "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Perfect! I now have all the information needed to answer the question. Let me summarize what I found: 1. **Alvin Powell** wrote a book called \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" published in **2008**. 2. **Ten years after the book was published....",
-        "required_phrases": [
-          "The correct remembered answer is Perfect! I now have all the information needed to answer the question",
-          "Let me summarize what I found",
-          "**Alvin Powell** wrote a book called \"The Race to Save the World's Rarest Bird"
-        ],
-        "source_memory_id": "m_b_gold"
-      }
-    ],
-    "gold_answer": "Perfect! I now have all the information needed to answer the question. Let me summarize what I found: 1. **Alvin Powell** wrote a book called \"The Race to Save the World's Rarest Bird: The Discovery and Death of the Po'ouli\" published in **2008**. 2. **Ten years after the book was published...",
-    "baseline_outputs": [
-      {
-        "baseline_name": "vector_memory",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [
-          "m_a_gold",
-          "m_b_graph_distractor",
-          "m_b_gold"
-        ],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Component a memory was retrieved, but the injected block was malformed and omitted the deciding value. Graph-expanded component b neighbor claims: not-Perfect."
-      },
-      {
-        "baseline_name": "fixed_summary",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
-      }
-    ],
-    "perturbation_label": null,
-    "scoring": {
-      "answer_metric": "casefold_exact_match",
-      "evidence_metric": "gold_evidence_recall"
-    },
-    "default_store": "episodic",
-    "trajectory_kind": "coupled_failure_boundary",
-    "coupled_labels": [
-      "injection_error",
-      "graph_error"
-    ],
-    "coupled_failure": {
-      "labels": [
-        "injection_error",
-        "graph_error"
-      ],
-      "single_point_recoveries": {
-        "injection_error": 0.45,
-        "graph_error": 0.45
-      },
-      "coalition_recovery": 1.0,
-      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
-    },
-    "generation_points": [
-      {
-        "hop_index": 1,
-        "expected_action": "injection_error",
-        "single_point_recovers": false
-      },
-      {
-        "hop_index": 2,
-        "expected_action": "graph_error",
-        "single_point_recovers": false
-      }
-    ]
-  },
-  {
-    "case_id": "memoryarena-coupled-0008-b1514b7911",
-    "source": "memoryarena",
-    "query": "Which director born in the last six months of the year 1971 won a national award in 2015 for writing for a movie? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
-    "raw_events": [
-      {
-        "event_id": "e_query",
-        "text": "Source query: Which director born in the last six months of the year 1971 won a national award in 2015 for writing for a movie?"
-      },
-      {
-        "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-008."
-      },
-      {
-        "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Based on all the evidence gathered from my searches, I can piece together the answer. The date April 26, 2023 appears for Urza Acharya, which is 12 days after the film's release (April 14, 2023), well within the first six months of 2023. All the pieces fit together pointing to Urza Acharya as the...."
+        "text": "Coupled boundary evidence B: The correct remembered answer is Based on the available information in the documents, the cover designer's name is listed as \"Choko M'hango\" in document 69505. This appears to be the full name as it appears in the album credits. The liner notes section shows that words from Choko M'hango were indeed included in the album's liner...."
       }
     ],
     "extracted_memory": [
@@ -2449,7 +2086,7 @@
       },
       {
         "memory_id": "m_a_event_gold",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-008.",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-005.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -2459,7 +2096,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is Based on all the evidence gathered from my searches, I can piece together the answer. The date April 26, 2023 appears for Urza Acharya, which is 12 days after the film's release (April 14, 2023), well within the first six months of 2023. All the pieces fit together pointing to Urza Acharya as the....",
+        "text": "The correct remembered answer is Based on the available information in the documents, the cover designer's name is listed as \"Choko M'hango\" in document 69505. This appears to be the full name as it appears in the album credits. The liner notes section shows that words from Choko M'hango were indeed included in the album's liner....",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -2471,25 +2108,25 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-008.",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-005.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-008"
+          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-005"
         ],
         "source_memory_id": "m_a_event_gold",
         "granularity_level": "event"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Based on all the evidence gathered from my searches, I can piece together the answer. The date April 26, 2023 appears for Urza Acharya, which is 12 days after the film's release (April 14, 2023), well within the first six months of 2023. All the pieces fit together pointing to Urza Acharya as the....",
+        "text": "The correct remembered answer is Based on the available information in the documents, the cover designer's name is listed as \"Choko M'hango\" in document 69505. This appears to be the full name as it appears in the album credits. The liner notes section shows that words from Choko M'hango were indeed included in the album's liner....",
         "required_phrases": [
-          "The correct remembered answer is Based on all the evidence gathered from my searches",
-          "I can piece together the answer",
-          "The date April 26"
+          "The correct remembered answer is Based on the available information in the documents",
+          "the cover designer's name is listed as \"Choko M'hango\" in document 69505",
+          "This appears to be the full name as it appears in the album credits"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Based on all the evidence gathered from my searches, I can piece together the answer. The date April 26, 2023 appears for Urza Acharya, which is 12 days after the film's release (April 14, 2023), well within the first six months of 2023. All the pieces fit together pointing to Urza Acharya as the...",
+    "gold_answer": "Based on the available information in the documents, the cover designer's name is listed as \"Choko M'hango\" in document 69505. This appears to be the full name as it appears in the album credits. The liner notes section shows that words from Choko M'hango were indeed included in the album's liner...",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -2558,27 +2195,37 @@
     ]
   },
   {
-    "case_id": "memoryarena-coupled-0009-80a6ced667",
+    "case_id": "memoryarena-coupled-0006-e5c958adae",
     "source": "memoryarena",
-    "query": "Which directors born in the last six months of the year 1971 are also known poets? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "What is the name of the band whose debut album was recorded in a single day and released in the 1970s? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: Which directors born in the last six months of the year 1971 are also known poets?"
+        "text": "Source query: What is the name of the band whose debut album was recorded in a single day and released in the 1970s?"
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-009."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-006."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The correct remembered answer is Explanation: Based on the clues provided and the search results, the answer is **Urza Acharya**. Here's how the clues align: 1. The movie is \"Jaari,\" which was released on April 14, 2023, and follows the story of a married couple (Namsang and Hangma) [78818]. 2. The director and writer are the same...."
+        "text": "Coupled boundary evidence B: The correct remembered answer is Based on my research, I have found key information from document [69505] which clearly states that for Rikki Ililonga's first solo album \"Zambia\" (1975): - Cover Design: Choko M'hango - The liner notes include words from Choko M'hango: \"If you want to listen to African sound with a difference, this...."
       }
     ],
     "extracted_memory": [
       {
+        "memory_id": "m_a_distractor",
+        "text": "Adjacent retrieval candidate for component a: wrong-memoryarena-6.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
         "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-009.",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-006.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -2587,59 +2234,48 @@
         "passed_safety_filter": false
       },
       {
-        "memory_id": "m_a_graph_distractor",
-        "text": "Graph-expanded component a neighbor claims: wrong-memoryarena-9.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      },
-      {
         "memory_id": "m_b_gold",
-        "text": "The correct remembered answer is Explanation: Based on the clues provided and the search results, the answer is **Urza Acharya**. Here's how the clues align: 1. The movie is \"Jaari,\" which was released on April 14, 2023, and follows the story of a married couple (Namsang and Hangma) [78818]. 2. The director and writer are the same....",
+        "text": "The correct remembered answer is Based on my research, I have found key information from document [69505] which clearly states that for Rikki Ililonga's first solo album \"Zambia\" (1975): - Cover Design: Choko M'hango - The liner notes include words from Choko M'hango: \"If you want to listen to African sound with a difference, this....",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
         ],
         "is_graph_expanded": false,
-        "passed_safety_filter": true
+        "passed_safety_filter": false
       }
     ],
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-009.",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-006.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-009"
+          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-006"
         ],
         "source_memory_id": "m_a_gold"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The correct remembered answer is Explanation: Based on the clues provided and the search results, the answer is **Urza Acharya**. Here's how the clues align: 1. The movie is \"Jaari,\" which was released on April 14, 2023, and follows the story of a married couple (Namsang and Hangma) [78818]. 2. The director and writer are the same....",
+        "text": "The correct remembered answer is Based on my research, I have found key information from document [69505] which clearly states that for Rikki Ililonga's first solo album \"Zambia\" (1975): - Cover Design: Choko M'hango - The liner notes include words from Choko M'hango: \"If you want to listen to African sound with a difference, this....",
         "required_phrases": [
-          "The correct remembered answer is Explanation",
-          "Based on the clues provided and the search results",
-          "the answer is **Urza Acharya**"
+          "The correct remembered answer is Based on my research",
+          "I have found key information from document [69505] which clearly states that for Rikki Ililonga's first solo album \"Zambia\" (1975)",
+          "- Cover Design"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Explanation: Based on the clues provided and the search results, the answer is **Urza Acharya**. Here's how the clues align: 1. The movie is \"Jaari,\" which was released on April 14, 2023, and follows the story of a married couple (Namsang and Hangma) [78818]. 2. The director and writer are the same...",
+    "gold_answer": "Based on my research, I have found key information from document [69505] which clearly states that for Rikki Ililonga's first solo album \"Zambia\" (1975): - Cover Design: Choko M'hango - The liner notes include words from Choko M'hango: \"If you want to listen to African sound with a difference, this...",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
         "answer": "Unknown",
         "retrieved_memory_ids": [
-          "m_a_graph_distractor",
-          "m_a_gold",
+          "m_a_distractor",
           "m_b_gold"
         ],
         "answer_score": 0.0,
         "evidence_score": 0.0,
-        "injected_context": "Graph-expanded component a neighbor claims: wrong-memoryarena-9. Component b evidence was redacted by an over-broad safety filter."
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-memoryarena-6. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
       },
       {
         "baseline_name": "fixed_summary",
@@ -2658,16 +2294,295 @@
     "default_store": "episodic",
     "trajectory_kind": "coupled_failure_boundary",
     "coupled_labels": [
-      "graph_error",
+      "retrieval_error",
+      "injection_error"
+    ],
+    "coupled_failure": {
+      "labels": [
+        "retrieval_error",
+        "injection_error"
+      ],
+      "single_point_recoveries": {
+        "retrieval_error": 0.45,
+        "injection_error": 0.45
+      },
+      "coalition_recovery": 1.0,
+      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
+    },
+    "generation_points": [
+      {
+        "hop_index": 1,
+        "expected_action": "retrieval_error",
+        "single_point_recovers": false
+      },
+      {
+        "hop_index": 2,
+        "expected_action": "injection_error",
+        "single_point_recovers": false
+      }
+    ]
+  },
+  {
+    "case_id": "memoryarena-coupled-0007-ffab8ed7e0",
+    "source": "memoryarena",
+    "query": "What is the name of the author who had a recurring nightmare about a wolf creature and whose books have been translated into more than twenty languages? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "raw_events": [
+      {
+        "event_id": "e_query",
+        "text": "Source query: What is the name of the author who had a recurring nightmare about a wolf creature and whose books have been translated into more than twenty languages?"
+      },
+      {
+        "event_id": "e_a",
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-007."
+      },
+      {
+        "event_id": "e_b",
+        "text": "Coupled boundary evidence B: The correct remembered answer is Based on my searches, I have confirmed that Melissa Marr meets most of the criteria mentioned in the question. While I haven't found explicit documentation in my search results about her parents being NRA members or the specific recurring wolf nightmare, I have confirmed the following key facts...."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "m_a_distractor",
+        "text": "Adjacent retrieval candidate for component a: wrong-memoryarena-7.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_a_gold",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-007.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_session",
+        "text": "Component b session summary mentions the right topic but omits the deciding value.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query",
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_event_gold",
+        "text": "The correct remembered answer is Based on my searches, I have confirmed that Melissa Marr meets most of the criteria mentioned in the question. While I haven't found explicit documentation in my search results about her parents being NRA members or the specific recurring wolf nightmare, I have confirmed the following key facts....",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "ev_a",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-007.",
+        "required_phrases": [
+          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-007"
+        ],
+        "source_memory_id": "m_a_gold"
+      },
+      {
+        "evidence_id": "ev_b",
+        "text": "The correct remembered answer is Based on my searches, I have confirmed that Melissa Marr meets most of the criteria mentioned in the question. While I haven't found explicit documentation in my search results about her parents being NRA members or the specific recurring wolf nightmare, I have confirmed the following key facts....",
+        "required_phrases": [
+          "The correct remembered answer is Based on my searches",
+          "I have confirmed that Melissa Marr meets most of the criteria mentioned in the question",
+          "While I haven't found explicit documentation in my search results about her parents being NRA members or the specific recurring wolf nightmare"
+        ],
+        "source_memory_id": "m_b_event_gold",
+        "granularity_level": "event"
+      }
+    ],
+    "gold_answer": "Based on my searches, I have confirmed that Melissa Marr meets most of the criteria mentioned in the question. While I haven't found explicit documentation in my search results about her parents being NRA members or the specific recurring wolf nightmare, I have confirmed the following key facts...",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [
+          "m_a_distractor",
+          "m_b_session"
+        ],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-memoryarena-7. Component b session summary mentions the right topic but omits the deciding value."
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
+      }
+    ],
+    "perturbation_label": null,
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    },
+    "default_store": "episodic",
+    "trajectory_kind": "coupled_failure_boundary",
+    "coupled_labels": [
+      "retrieval_error",
+      "granularity_error"
+    ],
+    "coupled_failure": {
+      "labels": [
+        "retrieval_error",
+        "granularity_error"
+      ],
+      "single_point_recoveries": {
+        "retrieval_error": 0.45,
+        "granularity_error": 0.45
+      },
+      "coalition_recovery": 1.0,
+      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
+    },
+    "generation_points": [
+      {
+        "hop_index": 1,
+        "expected_action": "retrieval_error",
+        "single_point_recovers": false
+      },
+      {
+        "hop_index": 2,
+        "expected_action": "granularity_error",
+        "single_point_recovers": false
+      }
+    ],
+    "current_granularity": "session",
+    "granularity_levels": [
+      "raw",
+      "event",
+      "session",
+      "persona",
+      "procedure",
+      "graph"
+    ]
+  },
+  {
+    "case_id": "memoryarena-coupled-0008-bcd973f36d",
+    "source": "memoryarena",
+    "query": "What is the name of the author whose parents were members of the NRA and who has authored books that have been translated into more than twenty languages? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "raw_events": [
+      {
+        "event_id": "e_query",
+        "text": "Source query: What is the name of the author whose parents were members of the NRA and who has authored books that have been translated into more than twenty languages?"
+      },
+      {
+        "event_id": "e_a",
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-008."
+      },
+      {
+        "event_id": "e_b",
+        "text": "Coupled boundary evidence B: The correct remembered answer is Based on all the search results I've gathered, I have found strong evidence for most of the criteria. Let me verify all the details about Melissa Marr: 1. **University instructor**: Confirmed - she is described as \"a former university literature instructor\" [772] 2. **Books translated into...."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "m_a_session",
+        "text": "Component a session summary mentions the right topic but omits the deciding value.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query",
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_a_event_gold",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-008.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_gold",
+        "text": "The correct remembered answer is Based on all the search results I've gathered, I have found strong evidence for most of the criteria. Let me verify all the details about Melissa Marr: 1. **University instructor**: Confirmed - she is described as \"a former university literature instructor\" [772] 2. **Books translated into....",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": true
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "ev_a",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-008.",
+        "required_phrases": [
+          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-008"
+        ],
+        "source_memory_id": "m_a_event_gold",
+        "granularity_level": "event"
+      },
+      {
+        "evidence_id": "ev_b",
+        "text": "The correct remembered answer is Based on all the search results I've gathered, I have found strong evidence for most of the criteria. Let me verify all the details about Melissa Marr: 1. **University instructor**: Confirmed - she is described as \"a former university literature instructor\" [772] 2. **Books translated into....",
+        "required_phrases": [
+          "The correct remembered answer is Based on all the search results I've gathered",
+          "I have found strong evidence for most of the criteria",
+          "Let me verify all the details about Melissa Marr"
+        ],
+        "source_memory_id": "m_b_gold"
+      }
+    ],
+    "gold_answer": "Based on all the search results I've gathered, I have found strong evidence for most of the criteria. Let me verify all the details about Melissa Marr: 1. **University instructor**: Confirmed - she is described as \"a former university literature instructor\" [772] 2. **Books translated into...",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [
+          "m_a_session",
+          "m_b_gold"
+        ],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Component a session summary mentions the right topic but omits the deciding value. Component b evidence was redacted by an over-broad safety filter."
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
+      }
+    ],
+    "perturbation_label": null,
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    },
+    "default_store": "episodic",
+    "trajectory_kind": "coupled_failure_boundary",
+    "coupled_labels": [
+      "granularity_error",
       "safety_error"
     ],
     "coupled_failure": {
       "labels": [
-        "graph_error",
+        "granularity_error",
         "safety_error"
       ],
       "single_point_recoveries": {
-        "graph_error": 0.45,
+        "granularity_error": 0.45,
         "safety_error": 0.45
       },
       "coalition_recovery": 1.0,
@@ -2676,7 +2591,7 @@
     "generation_points": [
       {
         "hop_index": 1,
-        "expected_action": "graph_error",
+        "expected_action": "granularity_error",
         "single_point_recovers": false
       },
       {
@@ -2685,16 +2600,153 @@
         "single_point_recovers": false
       }
     ],
-    "safety_filter_blocked": true
+    "safety_filter_blocked": true,
+    "current_granularity": "session",
+    "granularity_levels": [
+      "raw",
+      "event",
+      "session",
+      "persona",
+      "procedure",
+      "graph"
+    ]
   },
   {
-    "case_id": "toolbench-coupled-0000-1f0780add3",
-    "source": "toolbench",
-    "query": "I need information about a specific person. Can you provide me with details on the actor with the ID '7110004'? I want to know their full name, date of birth, place of birth, and main profession. Additionally, fetch the basic information about the cast member with the ID 'nm0000375' to learn more about their profession and known titles. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "case_id": "memoryarena-coupled-0009-3e10c14ac5",
+    "source": "memoryarena",
+    "query": "What is the name of the author who has worked as an editor and whose books have been translated into more than twenty languages? This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: I need information about a specific person. Can you provide me with details on the actor with the ID '7110004'? I want to know their full name, date of birth, place of birth, and main profession. Additionally, fetch the basic information about the cast member with the ID 'nm0000375' to learn more about their profession and known titles."
+        "text": "Source query: What is the name of the author who has worked as an editor and whose books have been translated into more than twenty languages?"
+      },
+      {
+        "event_id": "e_a",
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token MEMORYARENA-PAIR-009."
+      },
+      {
+        "event_id": "e_b",
+        "text": "Coupled boundary evidence B: The correct remembered answer is Based on my searches, I have found extensive information about Melissa Marr that matches most of the criteria mentioned in the question. Let me verify what I've found: 1. **University instructor**: Yes - described as \"a former university literature instructor\" [772] 2. **Books translated into 20+...."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "m_a_distractor",
+        "text": "Adjacent retrieval candidate for component a: wrong-memoryarena-9.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_a_gold",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-009.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_gold",
+        "text": "The correct remembered answer is Based on my searches, I have found extensive information about Melissa Marr that matches most of the criteria mentioned in the question. Let me verify what I've found: 1. **University instructor**: Yes - described as \"a former university literature instructor\" [772] 2. **Books translated into 20+....",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "ev_a",
+        "text": "The first independent evidence atom is bridge token MEMORYARENA-PAIR-009.",
+        "required_phrases": [
+          "The first independent evidence atom is bridge token MEMORYARENA-PAIR-009"
+        ],
+        "source_memory_id": "m_a_gold"
+      },
+      {
+        "evidence_id": "ev_b",
+        "text": "The correct remembered answer is Based on my searches, I have found extensive information about Melissa Marr that matches most of the criteria mentioned in the question. Let me verify what I've found: 1. **University instructor**: Yes - described as \"a former university literature instructor\" [772] 2. **Books translated into 20+....",
+        "required_phrases": [
+          "The correct remembered answer is Based on my searches",
+          "I have found extensive information about Melissa Marr that matches most of the criteria mentioned in the question",
+          "Let me verify what I've found"
+        ],
+        "source_memory_id": "m_b_gold"
+      }
+    ],
+    "gold_answer": "Based on my searches, I have found extensive information about Melissa Marr that matches most of the criteria mentioned in the question. Let me verify what I've found: 1. **University instructor**: Yes - described as \"a former university literature instructor\" [772] 2. **Books translated into 20+...",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [
+          "m_a_distractor",
+          "m_b_gold"
+        ],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-memoryarena-9. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
+      }
+    ],
+    "perturbation_label": null,
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    },
+    "default_store": "episodic",
+    "trajectory_kind": "coupled_failure_boundary",
+    "coupled_labels": [
+      "retrieval_error",
+      "injection_error"
+    ],
+    "coupled_failure": {
+      "labels": [
+        "retrieval_error",
+        "injection_error"
+      ],
+      "single_point_recoveries": {
+        "retrieval_error": 0.45,
+        "injection_error": 0.45
+      },
+      "coalition_recovery": 1.0,
+      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
+    },
+    "generation_points": [
+      {
+        "hop_index": 1,
+        "expected_action": "retrieval_error",
+        "single_point_recovers": false
+      },
+      {
+        "hop_index": 2,
+        "expected_action": "injection_error",
+        "single_point_recovers": false
+      }
+    ]
+  },
+  {
+    "case_id": "toolbench-coupled-0000-b703d4c4c0",
+    "source": "toolbench",
+    "query": "I need to check the status of my recent scan with the scan ID e04d3e18-bda7-420b-b240-894fd3d4992d. Can you provide me with the results once the scan is completed? Also, I would like to detect and prevent any XSS attacks in my input data, specifically for the name John Doe. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "raw_events": [
+      {
+        "event_id": "e_query",
+        "text": "Source query: I need to check the status of my recent scan with the scan ID e04d3e18-bda7-420b-b240-894fd3d4992d. Can you provide me with the results once the scan is completed? Also, I would like to detect and prevent any XSS attacks in my input data, specifically for the name John Doe."
       },
       {
         "event_id": "e_a",
@@ -2702,7 +2754,7 @@
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Watchmode/Person, OTT details/Basic Info."
+        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: WebLasso/Get Scan Status, WebLasso/Get Scan Results, XSS Shield/GET Detect."
       }
     ],
     "extracted_memory": [
@@ -2728,7 +2780,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The required ToolBench API evidence is Use APIs: Watchmode/Person, OTT details/Basic Info.",
+        "text": "The required ToolBench API evidence is Use APIs: WebLasso/Get Scan Status, WebLasso/Get Scan Results, XSS Shield/GET Detect.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -2748,16 +2800,16 @@
       },
       {
         "evidence_id": "ev_b",
-        "text": "The required ToolBench API evidence is Use APIs: Watchmode/Person, OTT details/Basic Info.",
+        "text": "The required ToolBench API evidence is Use APIs: WebLasso/Get Scan Status, WebLasso/Get Scan Results, XSS Shield/GET Detect.",
         "required_phrases": [
           "The required ToolBench API evidence is Use APIs",
-          "Watchmode/Person",
-          "OTT details/Basic Info"
+          "WebLasso/Get Scan Status",
+          "WebLasso/Get Scan Results"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Use APIs: Watchmode/Person, OTT details/Basic Info",
+    "gold_answer": "Use APIs: WebLasso/Get Scan Status, WebLasso/Get Scan Results, XSS Shield/GET Detect",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -2816,13 +2868,13 @@
     ]
   },
   {
-    "case_id": "toolbench-coupled-0001-6e0076bc3a",
+    "case_id": "toolbench-coupled-0001-b74b6972d1",
     "source": "toolbench",
-    "query": "I want to share an interesting article with my friends on social media, but the URL is too long. Can you help me shorten the URL using the bitly API? The long URL is 'https://example.com/article/12345'. Additionally, I would like to create a new link using the URL Link Shortener API with the destination set to 'https://example.com/article/12345'. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "I am organizing a community event and I want to ensure the safety of our attendees. Can you help me detect and prevent any potential XSS attacks in the event registration form? Additionally, I need to query information about the IP address of the event venue to ensure its security. Moreover, provide me with the latest phone validation for the contact numbers of the event participants to ensure smooth communication. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: I want to share an interesting article with my friends on social media, but the URL is too long. Can you help me shorten the URL using the bitly API? The long URL is 'https://example.com/article/12345'. Additionally, I would like to create a new link using the URL Link Shortener API with the destination set to 'https://example.com/article/12345'."
+        "text": "Source query: I am organizing a community event and I want to ensure the safety of our attendees. Can you help me detect and prevent any potential XSS attacks in the event registration form? Additionally, I need to query information about the IP address of the event venue to ensure its security. Moreover, provide me with the latest phone validation for the contact numbers of the event participants to ensure smooth communication."
       },
       {
         "event_id": "e_a",
@@ -2830,7 +2882,7 @@
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: bitly/shorten, URL Link Shortener/Create a new link."
+        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: XSS Shield/GET Detect, NetDetective//query, Greip//validatePhone."
       }
     ],
     "extracted_memory": [
@@ -2867,7 +2919,7 @@
       },
       {
         "memory_id": "m_b_event_gold",
-        "text": "The required ToolBench API evidence is Use APIs: bitly/shorten, URL Link Shortener/Create a new link.",
+        "text": "The required ToolBench API evidence is Use APIs: XSS Shield/GET Detect, NetDetective//query, Greip//validatePhone.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -2887,17 +2939,17 @@
       },
       {
         "evidence_id": "ev_b",
-        "text": "The required ToolBench API evidence is Use APIs: bitly/shorten, URL Link Shortener/Create a new link.",
+        "text": "The required ToolBench API evidence is Use APIs: XSS Shield/GET Detect, NetDetective//query, Greip//validatePhone.",
         "required_phrases": [
           "The required ToolBench API evidence is Use APIs",
-          "bitly/shorten",
-          "URL Link Shortener/Create a new link"
+          "XSS Shield/GET Detect",
+          "NetDetective//query"
         ],
         "source_memory_id": "m_b_event_gold",
         "granularity_level": "event"
       }
     ],
-    "gold_answer": "Use APIs: bitly/shorten, URL Link Shortener/Create a new link",
+    "gold_answer": "Use APIs: XSS Shield/GET Detect, NetDetective//query, Greip//validatePhone",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -2965,13 +3017,13 @@
     ]
   },
   {
-    "case_id": "toolbench-coupled-0002-049ffb8f44",
+    "case_id": "toolbench-coupled-0002-fc7ba69303",
     "source": "toolbench",
-    "query": "I am starting a new fitness routine and I want to incorporate exercises that target specific muscle groups. Can you provide me with a list of exercises that target the quadriceps and hamstrings? Additionally, I would like to know the BMI based on my height and weight in metric units. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "I'm planning a surprise anniversary party for my parents and want to send out digital invitations. Before sending, I want to validate the email addresses of all the guests to ensure they are correct. Additionally, I need to find a caterer for the event and check their availability. Finally, I would like a random quote about love to include in the party decorations. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: I am starting a new fitness routine and I want to incorporate exercises that target specific muscle groups. Can you provide me with a list of exercises that target the quadriceps and hamstrings? Additionally, I would like to know the BMI based on my height and weight in metric units."
+        "text": "Source query: I'm planning a surprise anniversary party for my parents and want to send out digital invitations. Before sending, I want to validate the email addresses of all the guests to ensure they are correct. Additionally, I need to find a caterer for the event and check their availability. Finally, I would like a random quote about love to include in the party decorations."
       },
       {
         "event_id": "e_a",
@@ -2979,136 +3031,7 @@
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Exercises by API-Ninjas//v1/exercises, BMI_v2/Gives the BMI when you Input values in Metric units."
-      }
-    ],
-    "extracted_memory": [
-      {
-        "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-002.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_a"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_gold",
-        "text": "The required ToolBench API evidence is Use APIs: Exercises by API-Ninjas//v1/exercises, BMI_v2/Gives the BMI when you Input values in Metric units.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_b"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_graph_distractor",
-        "text": "Graph-expanded component b neighbor claims: Use APIs: unrelated_tool/lookup.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      }
-    ],
-    "gold_evidence": [
-      {
-        "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-002.",
-        "required_phrases": [
-          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-002"
-        ],
-        "source_memory_id": "m_a_gold"
-      },
-      {
-        "evidence_id": "ev_b",
-        "text": "The required ToolBench API evidence is Use APIs: Exercises by API-Ninjas//v1/exercises, BMI_v2/Gives the BMI when you Input values in Metric units.",
-        "required_phrases": [
-          "The required ToolBench API evidence is Use APIs",
-          "Exercises by API-Ninjas//v1/exercises",
-          "BMI_v2/Gives the BMI when you Input values in Metric units"
-        ],
-        "source_memory_id": "m_b_gold"
-      }
-    ],
-    "gold_answer": "Use APIs: Exercises by API-Ninjas//v1/exercises, BMI_v2/Gives the BMI when you Input values in Metric units",
-    "baseline_outputs": [
-      {
-        "baseline_name": "vector_memory",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [
-          "m_a_gold",
-          "m_b_graph_distractor",
-          "m_b_gold"
-        ],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Component a memory was retrieved, but the injected block was malformed and omitted the deciding value. Graph-expanded component b neighbor claims: Use APIs: unrelated_tool/lookup."
-      },
-      {
-        "baseline_name": "fixed_summary",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
-      }
-    ],
-    "perturbation_label": null,
-    "scoring": {
-      "answer_metric": "casefold_exact_match",
-      "evidence_metric": "gold_evidence_recall"
-    },
-    "default_store": "episodic",
-    "trajectory_kind": "coupled_failure_boundary",
-    "coupled_labels": [
-      "injection_error",
-      "graph_error"
-    ],
-    "coupled_failure": {
-      "labels": [
-        "injection_error",
-        "graph_error"
-      ],
-      "single_point_recoveries": {
-        "injection_error": 0.45,
-        "graph_error": 0.45
-      },
-      "coalition_recovery": 1.0,
-      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
-    },
-    "generation_points": [
-      {
-        "hop_index": 1,
-        "expected_action": "injection_error",
-        "single_point_recovers": false
-      },
-      {
-        "hop_index": 2,
-        "expected_action": "graph_error",
-        "single_point_recovers": false
-      }
-    ]
-  },
-  {
-    "case_id": "toolbench-coupled-0003-0eeddabc12",
-    "source": "toolbench",
-    "query": "I am organizing a company event and need to book some items. Can you help me find the list of bookable items available? Also, provide me with a command to retrieve the list of friends attending the event. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
-    "raw_events": [
-      {
-        "event_id": "e_query",
-        "text": "Source query: I am organizing a company event and need to book some items. Can you help me find the list of bookable items available? Also, provide me with a command to retrieve the list of friends attending the event."
-      },
-      {
-        "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-003."
-      },
-      {
-        "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Sagenda Free Booking System//Events/GetBookableItemList, Dudu/Command."
+        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Email Validator_v2//email/validate, Email Validator_v9/check, EmailQualityPlus/Validação de Email."
       }
     ],
     "extracted_memory": [
@@ -3125,7 +3048,7 @@
       },
       {
         "memory_id": "m_a_event_gold",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-003.",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-002.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -3135,7 +3058,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The required ToolBench API evidence is Use APIs: Sagenda Free Booking System//Events/GetBookableItemList, Dudu/Command.",
+        "text": "The required ToolBench API evidence is Use APIs: Email Validator_v2//email/validate, Email Validator_v9/check, EmailQualityPlus/Validação de Email.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -3147,25 +3070,25 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-003.",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-002.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-003"
+          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-002"
         ],
         "source_memory_id": "m_a_event_gold",
         "granularity_level": "event"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The required ToolBench API evidence is Use APIs: Sagenda Free Booking System//Events/GetBookableItemList, Dudu/Command.",
+        "text": "The required ToolBench API evidence is Use APIs: Email Validator_v2//email/validate, Email Validator_v9/check, EmailQualityPlus/Validação de Email.",
         "required_phrases": [
           "The required ToolBench API evidence is Use APIs",
-          "Sagenda Free Booking System//Events/GetBookableItemList",
-          "Dudu/Command"
+          "Email Validator_v2//email/validate",
+          "Email Validator_v9/check"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Use APIs: Sagenda Free Booking System//Events/GetBookableItemList, Dudu/Command",
+    "gold_answer": "Use APIs: Email Validator_v2//email/validate, Email Validator_v9/check, EmailQualityPlus/Validação de Email",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -3234,157 +3157,27 @@
     ]
   },
   {
-    "case_id": "toolbench-coupled-0004-4b1fcf9475",
+    "case_id": "toolbench-coupled-0003-8d44bff236",
     "source": "toolbench",
-    "query": "Please analyze the given text 'This is a great product.' I want to know the toxicity score of this text. Additionally, fetch the details of the job with the task ID '68bbb910-da9b-4d8a-9a1d-4bd878b19846' from Midjourney best experience. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "I'm a movie enthusiast and I want to explore the world of independent films. Can you search for independent movies playing in theaters near me? It would be great if you could provide me with the user ratings and tomato ratings for these movies. Additionally, fetch some individual source news about artificial intelligence to keep me updated on the latest advancements. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: Please analyze the given text 'This is a great product.' I want to know the toxicity score of this text. Additionally, fetch the details of the job with the task ID '68bbb910-da9b-4d8a-9a1d-4bd878b19846' from Midjourney best experience."
+        "text": "Source query: I'm a movie enthusiast and I want to explore the world of independent films. Can you search for independent movies playing in theaters near me? It would be great if you could provide me with the user ratings and tomato ratings for these movies. Additionally, fetch some individual source news about artificial intelligence to keep me updated on the latest advancements."
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-004."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-003."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: ToxDetectAI - AI Powered Toxic Comment Detector /🔥 ToxDetectAI API, Midjourney best experience/get job by task id."
-      }
-    ],
-    "extracted_memory": [
-      {
-        "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-004.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_a"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_a_graph_distractor",
-        "text": "Graph-expanded component a neighbor claims: wrong-toolbench-4.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_gold",
-        "text": "The required ToolBench API evidence is Use APIs: ToxDetectAI - AI Powered Toxic Comment Detector /🔥 ToxDetectAI API, Midjourney best experience/get job by task id.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_b"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": true
-      }
-    ],
-    "gold_evidence": [
-      {
-        "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-004.",
-        "required_phrases": [
-          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-004"
-        ],
-        "source_memory_id": "m_a_gold"
-      },
-      {
-        "evidence_id": "ev_b",
-        "text": "The required ToolBench API evidence is Use APIs: ToxDetectAI - AI Powered Toxic Comment Detector /🔥 ToxDetectAI API, Midjourney best experience/get job by task id.",
-        "required_phrases": [
-          "The required ToolBench API evidence is Use APIs",
-          "ToxDetectAI - AI Powered Toxic Comment Detector /🔥 ToxDetectAI API",
-          "Midjourney best experience/get job by task id"
-        ],
-        "source_memory_id": "m_b_gold"
-      }
-    ],
-    "gold_answer": "Use APIs: ToxDetectAI - AI Powered Toxic Comment Detector /🔥 ToxDetectAI API, Midjourney best experience/get job by task id",
-    "baseline_outputs": [
-      {
-        "baseline_name": "vector_memory",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [
-          "m_a_graph_distractor",
-          "m_a_gold",
-          "m_b_gold"
-        ],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Graph-expanded component a neighbor claims: wrong-toolbench-4. Component b evidence was redacted by an over-broad safety filter."
-      },
-      {
-        "baseline_name": "fixed_summary",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
-      }
-    ],
-    "perturbation_label": null,
-    "scoring": {
-      "answer_metric": "casefold_exact_match",
-      "evidence_metric": "gold_evidence_recall"
-    },
-    "default_store": "episodic",
-    "trajectory_kind": "coupled_failure_boundary",
-    "coupled_labels": [
-      "graph_error",
-      "safety_error"
-    ],
-    "coupled_failure": {
-      "labels": [
-        "graph_error",
-        "safety_error"
-      ],
-      "single_point_recoveries": {
-        "graph_error": 0.45,
-        "safety_error": 0.45
-      },
-      "coalition_recovery": 1.0,
-      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
-    },
-    "generation_points": [
-      {
-        "hop_index": 1,
-        "expected_action": "graph_error",
-        "single_point_recovers": false
-      },
-      {
-        "hop_index": 2,
-        "expected_action": "safety_error",
-        "single_point_recovers": false
-      }
-    ],
-    "safety_filter_blocked": true
-  },
-  {
-    "case_id": "toolbench-coupled-0005-070e021353",
-    "source": "toolbench",
-    "query": "Can you help me validate the VAT number of my friend's company? The VAT number is DE123456789. I would also like to know the language details for the language code 'de'. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
-    "raw_events": [
-      {
-        "event_id": "e_query",
-        "text": "Source query: Can you help me validate the VAT number of my friend's company? The VAT number is DE123456789. I would also like to know the language details for the language code 'de'."
-      },
-      {
-        "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-005."
-      },
-      {
-        "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Validate VAT/Validate VAT, TEXTKING Translation/Get language."
+        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Flixster/movies/get-popularity, Flixster/search, AI News_v2/Get Individual Source News."
       }
     ],
     "extracted_memory": [
       {
         "memory_id": "m_a_distractor",
-        "text": "Adjacent retrieval candidate for component a: wrong-toolbench-5.",
+        "text": "Adjacent retrieval candidate for component a: wrong-toolbench-3.",
         "store": "episodic",
         "source_event_ids": [
           "e_query"
@@ -3394,7 +3187,7 @@
       },
       {
         "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-005.",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-003.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -3404,7 +3197,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The required ToolBench API evidence is Use APIs: Validate VAT/Validate VAT, TEXTKING Translation/Get language.",
+        "text": "The required ToolBench API evidence is Use APIs: Flixster/movies/get-popularity, Flixster/search, AI News_v2/Get Individual Source News.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -3416,24 +3209,24 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-005.",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-003.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-005"
+          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-003"
         ],
         "source_memory_id": "m_a_gold"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The required ToolBench API evidence is Use APIs: Validate VAT/Validate VAT, TEXTKING Translation/Get language.",
+        "text": "The required ToolBench API evidence is Use APIs: Flixster/movies/get-popularity, Flixster/search, AI News_v2/Get Individual Source News.",
         "required_phrases": [
           "The required ToolBench API evidence is Use APIs",
-          "Validate VAT/Validate VAT",
-          "TEXTKING Translation/Get language"
+          "Flixster/movies/get-popularity",
+          "Flixster/search"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Use APIs: Validate VAT/Validate VAT, TEXTKING Translation/Get language",
+    "gold_answer": "Use APIs: Flixster/movies/get-popularity, Flixster/search, AI News_v2/Get Individual Source News",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -3444,7 +3237,7 @@
         ],
         "answer_score": 0.0,
         "evidence_score": 0.0,
-        "injected_context": "Adjacent retrieval candidate for component a: wrong-toolbench-5. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-toolbench-3. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
       },
       {
         "baseline_name": "fixed_summary",
@@ -3492,27 +3285,27 @@
     ]
   },
   {
-    "case_id": "toolbench-coupled-0006-e7b98e4bff",
+    "case_id": "toolbench-coupled-0004-6a7bb186a7",
     "source": "toolbench",
-    "query": "I'm planning a family trip and I want to create a memorable vacation video. Can you retrieve a file hosted by the server with the path 'ABCDEF'? Moreover, I need information on the most viewed YouTube music videos during the 21st week of 2019. This will help me choose the perfect background music for my video. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "I'm organizing a family reunion in my backyard this weekend. Can you help me find the most suitable date and time for the event based on the weather forecast? Additionally, provide me with the historical weather data for the past five weekends to help me decide on the best activities for the reunion. Lastly, suggest some outdoor games and decorations for the occasion. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: I'm planning a family trip and I want to create a memorable vacation video. Can you retrieve a file hosted by the server with the path 'ABCDEF'? Moreover, I need information on the most viewed YouTube music videos during the 21st week of 2019. This will help me choose the perfect background music for my video."
+        "text": "Source query: I'm organizing a family reunion in my backyard this weekend. Can you help me find the most suitable date and time for the event based on the weather forecast? Additionally, provide me with the historical weather data for the past five weekends to help me decide on the best activities for the reunion. Lastly, suggest some outdoor games and decorations for the occasion."
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-006."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-004."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Miza/Retrieve file, MusicData API/​/youtube/weekly/{year}/{nthweek}."
+        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: RapidWeather/One Call API, RapidWeather/Historical air pollution data, MagicMirror/endpoint."
       }
     ],
     "extracted_memory": [
       {
         "memory_id": "m_a_distractor",
-        "text": "Adjacent retrieval candidate for component a: wrong-toolbench-6.",
+        "text": "Adjacent retrieval candidate for component a: wrong-toolbench-4.",
         "store": "episodic",
         "source_event_ids": [
           "e_query"
@@ -3522,7 +3315,7 @@
       },
       {
         "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-006.",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-004.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -3543,7 +3336,7 @@
       },
       {
         "memory_id": "m_b_event_gold",
-        "text": "The required ToolBench API evidence is Use APIs: Miza/Retrieve file, MusicData API/​/youtube/weekly/{year}/{nthweek}.",
+        "text": "The required ToolBench API evidence is Use APIs: RapidWeather/One Call API, RapidWeather/Historical air pollution data, MagicMirror/endpoint.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -3555,25 +3348,25 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-006.",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-004.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-006"
+          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-004"
         ],
         "source_memory_id": "m_a_gold"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The required ToolBench API evidence is Use APIs: Miza/Retrieve file, MusicData API/​/youtube/weekly/{year}/{nthweek}.",
+        "text": "The required ToolBench API evidence is Use APIs: RapidWeather/One Call API, RapidWeather/Historical air pollution data, MagicMirror/endpoint.",
         "required_phrases": [
           "The required ToolBench API evidence is Use APIs",
-          "Miza/Retrieve file",
-          "MusicData API/​/youtube/weekly/{year}/{nthweek}"
+          "RapidWeather/One Call API",
+          "RapidWeather/Historical air pollution data"
         ],
         "source_memory_id": "m_b_event_gold",
         "granularity_level": "event"
       }
     ],
-    "gold_answer": "Use APIs: Miza/Retrieve file, MusicData API/​/youtube/weekly/{year}/{nthweek}",
+    "gold_answer": "Use APIs: RapidWeather/One Call API, RapidWeather/Historical air pollution data, MagicMirror/endpoint",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -3584,7 +3377,7 @@
         ],
         "answer_score": 0.0,
         "evidence_score": 0.0,
-        "injected_context": "Adjacent retrieval candidate for component a: wrong-toolbench-6. Component b session summary mentions the right topic but omits the deciding value."
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-toolbench-4. Component b session summary mentions the right topic but omits the deciding value."
       },
       {
         "baseline_name": "fixed_summary",
@@ -3641,150 +3434,21 @@
     ]
   },
   {
-    "case_id": "toolbench-coupled-0007-ac3094cb15",
+    "case_id": "toolbench-coupled-0005-afd3eea8c6",
     "source": "toolbench",
-    "query": "I'm planning a family vacation and I need to gather information about the COVID-19 situation in Italy. Can you provide me with the COVID-19 cases and deaths data for Italy? Moreover, fetch the adverse event information by reaction, sex, and age group for Ibuprofen. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "My friends and I are planning a hiking trip to the Swiss Alps. Can you fetch the climate data for the location based on the given latitude and longitude coordinates? It would also be helpful to know the moonrise and moonset times during our trip. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: I'm planning a family vacation and I need to gather information about the COVID-19 situation in Italy. Can you provide me with the COVID-19 cases and deaths data for Italy? Moreover, fetch the adverse event information by reaction, sex, and age group for Ibuprofen."
+        "text": "Source query: My friends and I are planning a hiking trip to the Swiss Alps. Can you fetch the climate data for the location based on the given latitude and longitude coordinates? It would also be helpful to know the moonrise and moonset times during our trip."
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-007."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-005."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Covid-19 by API-Ninjas//v1/covid19, Konviere DrugsAPI/Get Adverse Event Info by Reaction, Sex & Age Group."
-      }
-    ],
-    "extracted_memory": [
-      {
-        "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-007.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_a"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_gold",
-        "text": "The required ToolBench API evidence is Use APIs: Covid-19 by API-Ninjas//v1/covid19, Konviere DrugsAPI/Get Adverse Event Info by Reaction, Sex & Age Group.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_b"
-        ],
-        "is_graph_expanded": false,
-        "passed_safety_filter": false
-      },
-      {
-        "memory_id": "m_b_graph_distractor",
-        "text": "Graph-expanded component b neighbor claims: Use APIs: unrelated_tool/lookup.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      }
-    ],
-    "gold_evidence": [
-      {
-        "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-007.",
-        "required_phrases": [
-          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-007"
-        ],
-        "source_memory_id": "m_a_gold"
-      },
-      {
-        "evidence_id": "ev_b",
-        "text": "The required ToolBench API evidence is Use APIs: Covid-19 by API-Ninjas//v1/covid19, Konviere DrugsAPI/Get Adverse Event Info by Reaction, Sex & Age Group.",
-        "required_phrases": [
-          "The required ToolBench API evidence is Use APIs",
-          "Covid-19 by API-Ninjas//v1/covid19",
-          "Konviere DrugsAPI/Get Adverse Event Info by Reaction"
-        ],
-        "source_memory_id": "m_b_gold"
-      }
-    ],
-    "gold_answer": "Use APIs: Covid-19 by API-Ninjas//v1/covid19, Konviere DrugsAPI/Get Adverse Event Info by Reaction, Sex & Age Group",
-    "baseline_outputs": [
-      {
-        "baseline_name": "vector_memory",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [
-          "m_a_gold",
-          "m_b_graph_distractor",
-          "m_b_gold"
-        ],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Component a memory was retrieved, but the injected block was malformed and omitted the deciding value. Graph-expanded component b neighbor claims: Use APIs: unrelated_tool/lookup."
-      },
-      {
-        "baseline_name": "fixed_summary",
-        "answer": "Unknown",
-        "retrieved_memory_ids": [],
-        "answer_score": 0.0,
-        "evidence_score": 0.0,
-        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
-      }
-    ],
-    "perturbation_label": null,
-    "scoring": {
-      "answer_metric": "casefold_exact_match",
-      "evidence_metric": "gold_evidence_recall"
-    },
-    "default_store": "episodic",
-    "trajectory_kind": "coupled_failure_boundary",
-    "coupled_labels": [
-      "injection_error",
-      "graph_error"
-    ],
-    "coupled_failure": {
-      "labels": [
-        "injection_error",
-        "graph_error"
-      ],
-      "single_point_recoveries": {
-        "injection_error": 0.45,
-        "graph_error": 0.45
-      },
-      "coalition_recovery": 1.0,
-      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
-    },
-    "generation_points": [
-      {
-        "hop_index": 1,
-        "expected_action": "injection_error",
-        "single_point_recovers": false
-      },
-      {
-        "hop_index": 2,
-        "expected_action": "graph_error",
-        "single_point_recovers": false
-      }
-    ]
-  },
-  {
-    "case_id": "toolbench-coupled-0008-addba0dbe3",
-    "source": "toolbench",
-    "query": "I am searching for the generic name of a drug. Can you help me with that? Also, I would like to access the Zomi Dictionary for some language translations. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
-    "raw_events": [
-      {
-        "event_id": "e_query",
-        "text": "Source query: I am searching for the generic name of a drug. Can you help me with that? Also, I would like to access the Zomi Dictionary for some language translations."
-      },
-      {
-        "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-008."
-      },
-      {
-        "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Drug Info and Price History/genericname, ZomiDictionary/ZomiDictionary."
+        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: climate data/Get climate data by lat/lon or Key, Stormglass Complete/GET Astronomy Data, climate data/List of all Countries."
       }
     ],
     "extracted_memory": [
@@ -3801,7 +3465,7 @@
       },
       {
         "memory_id": "m_a_event_gold",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-008.",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-005.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -3811,7 +3475,7 @@
       },
       {
         "memory_id": "m_b_gold",
-        "text": "The required ToolBench API evidence is Use APIs: Drug Info and Price History/genericname, ZomiDictionary/ZomiDictionary.",
+        "text": "The required ToolBench API evidence is Use APIs: climate data/Get climate data by lat/lon or Key, Stormglass Complete/GET Astronomy Data, climate data/List of all Countries.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
@@ -3823,25 +3487,25 @@
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-008.",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-005.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-008"
+          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-005"
         ],
         "source_memory_id": "m_a_event_gold",
         "granularity_level": "event"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The required ToolBench API evidence is Use APIs: Drug Info and Price History/genericname, ZomiDictionary/ZomiDictionary.",
+        "text": "The required ToolBench API evidence is Use APIs: climate data/Get climate data by lat/lon or Key, Stormglass Complete/GET Astronomy Data, climate data/List of all Countries.",
         "required_phrases": [
           "The required ToolBench API evidence is Use APIs",
-          "Drug Info and Price History/genericname",
-          "ZomiDictionary/ZomiDictionary"
+          "climate data/Get climate data by lat/lon or Key",
+          "Stormglass Complete/GET Astronomy Data"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Use APIs: Drug Info and Price History/genericname, ZomiDictionary/ZomiDictionary",
+    "gold_answer": "Use APIs: climate data/Get climate data by lat/lon or Key, Stormglass Complete/GET Astronomy Data, climate data/List of all Countries",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
@@ -3910,27 +3574,37 @@
     ]
   },
   {
-    "case_id": "toolbench-coupled-0009-aa3fca7548",
+    "case_id": "toolbench-coupled-0006-0ebd48c7f7",
     "source": "toolbench",
-    "query": "I'm planning a sustainable wedding and I want to calculate the carbon footprint of our energy usage. Can you provide me with the CO2 emissions per kilowatt-hour for electricity in Germany? Additionally, I would like to know the fuel prices for diesel and gasoline in Germany to estimate the emissions from transportation. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "query": "My friends and I are going on a road trip from New York to Chicago. Could you please give us the current weather conditions for both cities? Additionally, we would like to know the high and low tide timings for the nearest coastal areas along our route. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
     "raw_events": [
       {
         "event_id": "e_query",
-        "text": "Source query: I'm planning a sustainable wedding and I want to calculate the carbon footprint of our energy usage. Can you provide me with the CO2 emissions per kilowatt-hour for electricity in Germany? Additionally, I would like to know the fuel prices for diesel and gasoline in Germany to estimate the emissions from transportation."
+        "text": "Source query: My friends and I are going on a road trip from New York to Chicago. Could you please give us the current weather conditions for both cities? Additionally, we would like to know the high and low tide timings for the nearest coastal areas along our route."
       },
       {
         "event_id": "e_a",
-        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-009."
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-006."
       },
       {
         "event_id": "e_b",
-        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Electricity Carbon Footprint Germany/CO2 Emission, Europe Fuel Prices/Get specific country."
+        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: OpenWeather/getCurrentWeather, The Weather API/weather report, Stormglass Complete/Get Tide Extreme Data."
       }
     ],
     "extracted_memory": [
       {
+        "memory_id": "m_a_distractor",
+        "text": "Adjacent retrieval candidate for component a: wrong-toolbench-6.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
         "memory_id": "m_a_gold",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-009.",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-006.",
         "store": "episodic",
         "source_event_ids": [
           "e_a"
@@ -3939,59 +3613,48 @@
         "passed_safety_filter": false
       },
       {
-        "memory_id": "m_a_graph_distractor",
-        "text": "Graph-expanded component a neighbor claims: wrong-toolbench-9.",
-        "store": "episodic",
-        "source_event_ids": [
-          "e_query"
-        ],
-        "is_graph_expanded": true,
-        "passed_safety_filter": false
-      },
-      {
         "memory_id": "m_b_gold",
-        "text": "The required ToolBench API evidence is Use APIs: Electricity Carbon Footprint Germany/CO2 Emission, Europe Fuel Prices/Get specific country.",
+        "text": "The required ToolBench API evidence is Use APIs: OpenWeather/getCurrentWeather, The Weather API/weather report, Stormglass Complete/Get Tide Extreme Data.",
         "store": "episodic",
         "source_event_ids": [
           "e_b"
         ],
         "is_graph_expanded": false,
-        "passed_safety_filter": true
+        "passed_safety_filter": false
       }
     ],
     "gold_evidence": [
       {
         "evidence_id": "ev_a",
-        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-009.",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-006.",
         "required_phrases": [
-          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-009"
+          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-006"
         ],
         "source_memory_id": "m_a_gold"
       },
       {
         "evidence_id": "ev_b",
-        "text": "The required ToolBench API evidence is Use APIs: Electricity Carbon Footprint Germany/CO2 Emission, Europe Fuel Prices/Get specific country.",
+        "text": "The required ToolBench API evidence is Use APIs: OpenWeather/getCurrentWeather, The Weather API/weather report, Stormglass Complete/Get Tide Extreme Data.",
         "required_phrases": [
           "The required ToolBench API evidence is Use APIs",
-          "Electricity Carbon Footprint Germany/CO2 Emission",
-          "Europe Fuel Prices/Get specific country"
+          "OpenWeather/getCurrentWeather",
+          "The Weather API/weather report"
         ],
         "source_memory_id": "m_b_gold"
       }
     ],
-    "gold_answer": "Use APIs: Electricity Carbon Footprint Germany/CO2 Emission, Europe Fuel Prices/Get specific country",
+    "gold_answer": "Use APIs: OpenWeather/getCurrentWeather, The Weather API/weather report, Stormglass Complete/Get Tide Extreme Data",
     "baseline_outputs": [
       {
         "baseline_name": "vector_memory",
         "answer": "Unknown",
         "retrieved_memory_ids": [
-          "m_a_graph_distractor",
-          "m_a_gold",
+          "m_a_distractor",
           "m_b_gold"
         ],
         "answer_score": 0.0,
         "evidence_score": 0.0,
-        "injected_context": "Graph-expanded component a neighbor claims: wrong-toolbench-9. Component b evidence was redacted by an over-broad safety filter."
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-toolbench-6. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
       },
       {
         "baseline_name": "fixed_summary",
@@ -4010,16 +3673,295 @@
     "default_store": "episodic",
     "trajectory_kind": "coupled_failure_boundary",
     "coupled_labels": [
-      "graph_error",
+      "retrieval_error",
+      "injection_error"
+    ],
+    "coupled_failure": {
+      "labels": [
+        "retrieval_error",
+        "injection_error"
+      ],
+      "single_point_recoveries": {
+        "retrieval_error": 0.45,
+        "injection_error": 0.45
+      },
+      "coalition_recovery": 1.0,
+      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
+    },
+    "generation_points": [
+      {
+        "hop_index": 1,
+        "expected_action": "retrieval_error",
+        "single_point_recovers": false
+      },
+      {
+        "hop_index": 2,
+        "expected_action": "injection_error",
+        "single_point_recovers": false
+      }
+    ]
+  },
+  {
+    "case_id": "toolbench-coupled-0007-1299a0da02",
+    "source": "toolbench",
+    "query": "My best friend is getting married, and I want to plan a surprise bachelor party for him. Can you suggest some thrilling activities in the Central region? Fetch the details of these activities and provide me with their rough locations and coordinates. It would be great if you could also fetch the boundaries of these activities using their postal codes. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "raw_events": [
+      {
+        "event_id": "e_query",
+        "text": "Source query: My best friend is getting married, and I want to plan a surprise bachelor party for him. Can you suggest some thrilling activities in the Central region? Fetch the details of these activities and provide me with their rough locations and coordinates. It would be great if you could also fetch the boundaries of these activities using their postal codes."
+      },
+      {
+        "event_id": "e_a",
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-007."
+      },
+      {
+        "event_id": "e_b",
+        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Magical Taske/Fetch by region, Magical Taske/Fetch details of multiple records, uk.boundaries.io/Query for Postal Code Unit Boundary( H3 Geo Boundary )."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "m_a_distractor",
+        "text": "Adjacent retrieval candidate for component a: wrong-toolbench-7.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_a_gold",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-007.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_session",
+        "text": "Component b session summary mentions the right topic but omits the deciding value.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query",
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_event_gold",
+        "text": "The required ToolBench API evidence is Use APIs: Magical Taske/Fetch by region, Magical Taske/Fetch details of multiple records, uk.boundaries.io/Query for Postal Code Unit Boundary( H3 Geo Boundary ).",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "ev_a",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-007.",
+        "required_phrases": [
+          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-007"
+        ],
+        "source_memory_id": "m_a_gold"
+      },
+      {
+        "evidence_id": "ev_b",
+        "text": "The required ToolBench API evidence is Use APIs: Magical Taske/Fetch by region, Magical Taske/Fetch details of multiple records, uk.boundaries.io/Query for Postal Code Unit Boundary( H3 Geo Boundary ).",
+        "required_phrases": [
+          "The required ToolBench API evidence is Use APIs",
+          "Magical Taske/Fetch by region",
+          "Magical Taske/Fetch details of multiple records"
+        ],
+        "source_memory_id": "m_b_event_gold",
+        "granularity_level": "event"
+      }
+    ],
+    "gold_answer": "Use APIs: Magical Taske/Fetch by region, Magical Taske/Fetch details of multiple records, uk.boundaries.io/Query for Postal Code Unit Boundary( H3 Geo Boundary )",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [
+          "m_a_distractor",
+          "m_b_session"
+        ],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-toolbench-7. Component b session summary mentions the right topic but omits the deciding value."
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
+      }
+    ],
+    "perturbation_label": null,
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    },
+    "default_store": "episodic",
+    "trajectory_kind": "coupled_failure_boundary",
+    "coupled_labels": [
+      "retrieval_error",
+      "granularity_error"
+    ],
+    "coupled_failure": {
+      "labels": [
+        "retrieval_error",
+        "granularity_error"
+      ],
+      "single_point_recoveries": {
+        "retrieval_error": 0.45,
+        "granularity_error": 0.45
+      },
+      "coalition_recovery": 1.0,
+      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
+    },
+    "generation_points": [
+      {
+        "hop_index": 1,
+        "expected_action": "retrieval_error",
+        "single_point_recovers": false
+      },
+      {
+        "hop_index": 2,
+        "expected_action": "granularity_error",
+        "single_point_recovers": false
+      }
+    ],
+    "current_granularity": "session",
+    "granularity_levels": [
+      "raw",
+      "event",
+      "session",
+      "persona",
+      "procedure",
+      "graph"
+    ]
+  },
+  {
+    "case_id": "toolbench-coupled-0008-33040829e5",
+    "source": "toolbench",
+    "query": "I'm planning a family picnic and need to validate the email addresses of all the attendees. Please validate the emails 'john.doe@gmail.com', 'jane.smith@yahoo.com', and 'mike.williams@hotmail.com'. Also, provide the normalized forms of these email addresses. Additionally, check the status of the Mailcheap API to ensure smooth communication for the event. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "raw_events": [
+      {
+        "event_id": "e_query",
+        "text": "Source query: I'm planning a family picnic and need to validate the email addresses of all the attendees. Please validate the emails 'john.doe@gmail.com', 'jane.smith@yahoo.com', and 'mike.williams@hotmail.com'. Also, provide the normalized forms of these email addresses. Additionally, check the status of the Mailcheap API to ensure smooth communication for the event."
+      },
+      {
+        "event_id": "e_a",
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-008."
+      },
+      {
+        "event_id": "e_b",
+        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Easy Email Validation/Validate Email, Email Utilities//normalize, Mailcheap/Get status."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "m_a_session",
+        "text": "Component a session summary mentions the right topic but omits the deciding value.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query",
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_a_event_gold",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-008.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_gold",
+        "text": "The required ToolBench API evidence is Use APIs: Easy Email Validation/Validate Email, Email Utilities//normalize, Mailcheap/Get status.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": true
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "ev_a",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-008.",
+        "required_phrases": [
+          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-008"
+        ],
+        "source_memory_id": "m_a_event_gold",
+        "granularity_level": "event"
+      },
+      {
+        "evidence_id": "ev_b",
+        "text": "The required ToolBench API evidence is Use APIs: Easy Email Validation/Validate Email, Email Utilities//normalize, Mailcheap/Get status.",
+        "required_phrases": [
+          "The required ToolBench API evidence is Use APIs",
+          "Easy Email Validation/Validate Email",
+          "Email Utilities//normalize"
+        ],
+        "source_memory_id": "m_b_gold"
+      }
+    ],
+    "gold_answer": "Use APIs: Easy Email Validation/Validate Email, Email Utilities//normalize, Mailcheap/Get status",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [
+          "m_a_session",
+          "m_b_gold"
+        ],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Component a session summary mentions the right topic but omits the deciding value. Component b evidence was redacted by an over-broad safety filter."
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
+      }
+    ],
+    "perturbation_label": null,
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    },
+    "default_store": "episodic",
+    "trajectory_kind": "coupled_failure_boundary",
+    "coupled_labels": [
+      "granularity_error",
       "safety_error"
     ],
     "coupled_failure": {
       "labels": [
-        "graph_error",
+        "granularity_error",
         "safety_error"
       ],
       "single_point_recoveries": {
-        "graph_error": 0.45,
+        "granularity_error": 0.45,
         "safety_error": 0.45
       },
       "coalition_recovery": 1.0,
@@ -4028,7 +3970,7 @@
     "generation_points": [
       {
         "hop_index": 1,
-        "expected_action": "graph_error",
+        "expected_action": "granularity_error",
         "single_point_recovers": false
       },
       {
@@ -4037,6 +3979,143 @@
         "single_point_recovers": false
       }
     ],
-    "safety_filter_blocked": true
+    "safety_filter_blocked": true,
+    "current_granularity": "session",
+    "granularity_levels": [
+      "raw",
+      "event",
+      "session",
+      "persona",
+      "procedure",
+      "graph"
+    ]
+  },
+  {
+    "case_id": "toolbench-coupled-0009-942957f9f3",
+    "source": "toolbench",
+    "query": "I'm planning a surprise birthday party for my friend and I need to find some products for the party. Search for party decorations, balloons, and cake toppers in the Pricer API. Also, check the availability and prices of these products in my area using the Weee grocery API. Make sure to include the product descriptions and images in the response. This boundary case requires both independent memory atoms; repairing only one atom must still leave the answer unrecovered.",
+    "raw_events": [
+      {
+        "event_id": "e_query",
+        "text": "Source query: I'm planning a surprise birthday party for my friend and I need to find some products for the party. Search for party decorations, balloons, and cake toppers in the Pricer API. Also, check the availability and prices of these products in my area using the Weee grocery API. Make sure to include the product descriptions and images in the response."
+      },
+      {
+        "event_id": "e_a",
+        "text": "Coupled boundary evidence A: The first independent evidence atom is bridge token TOOLBENCH-PAIR-009."
+      },
+      {
+        "event_id": "e_b",
+        "text": "Coupled boundary evidence B: The required ToolBench API evidence is Use APIs: Pricer/Search for a product, Weee grocery API (sayweee.com) - browsing/searching/details/product search (zipcode, keyword), Weee grocery API (sayweee.com) - browsing/searching/details/product details (zipcode, product_id)."
+      }
+    ],
+    "extracted_memory": [
+      {
+        "memory_id": "m_a_distractor",
+        "text": "Adjacent retrieval candidate for component a: wrong-toolbench-9.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_query"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_a_gold",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-009.",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_a"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      },
+      {
+        "memory_id": "m_b_gold",
+        "text": "The required ToolBench API evidence is Use APIs: Pricer/Search for a product, Weee grocery API (sayweee.com) - browsing/searching/details/product search (zipcode, keyword), Weee grocery API (sayweee.com) - browsing/searching/details/product details (zipcode, product_id).",
+        "store": "episodic",
+        "source_event_ids": [
+          "e_b"
+        ],
+        "is_graph_expanded": false,
+        "passed_safety_filter": false
+      }
+    ],
+    "gold_evidence": [
+      {
+        "evidence_id": "ev_a",
+        "text": "The first independent evidence atom is bridge token TOOLBENCH-PAIR-009.",
+        "required_phrases": [
+          "The first independent evidence atom is bridge token TOOLBENCH-PAIR-009"
+        ],
+        "source_memory_id": "m_a_gold"
+      },
+      {
+        "evidence_id": "ev_b",
+        "text": "The required ToolBench API evidence is Use APIs: Pricer/Search for a product, Weee grocery API (sayweee.com) - browsing/searching/details/product search (zipcode, keyword), Weee grocery API (sayweee.com) - browsing/searching/details/product details (zipcode, product_id).",
+        "required_phrases": [
+          "The required ToolBench API evidence is Use APIs",
+          "Pricer/Search for a product",
+          "Weee grocery API (sayweee"
+        ],
+        "source_memory_id": "m_b_gold"
+      }
+    ],
+    "gold_answer": "Use APIs: Pricer/Search for a product, Weee grocery API (sayweee.com) - browsing/searching/details/product search (zipcode, keyword), Weee grocery API (sayweee.com) - browsing/searching/details/product details (zipcode, product_id)",
+    "baseline_outputs": [
+      {
+        "baseline_name": "vector_memory",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [
+          "m_a_distractor",
+          "m_b_gold"
+        ],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Adjacent retrieval candidate for component a: wrong-toolbench-9. Component b memory was retrieved, but the injected block was malformed and omitted the deciding value."
+      },
+      {
+        "baseline_name": "fixed_summary",
+        "answer": "Unknown",
+        "retrieved_memory_ids": [],
+        "answer_score": 0.0,
+        "evidence_score": 0.0,
+        "injected_context": "Fixed-window summary preserved the topic but dropped the deciding value."
+      }
+    ],
+    "perturbation_label": null,
+    "scoring": {
+      "answer_metric": "casefold_exact_match",
+      "evidence_metric": "gold_evidence_recall"
+    },
+    "default_store": "episodic",
+    "trajectory_kind": "coupled_failure_boundary",
+    "coupled_labels": [
+      "retrieval_error",
+      "injection_error"
+    ],
+    "coupled_failure": {
+      "labels": [
+        "retrieval_error",
+        "injection_error"
+      ],
+      "single_point_recoveries": {
+        "retrieval_error": 0.45,
+        "injection_error": 0.45
+      },
+      "coalition_recovery": 1.0,
+      "boundary": "CMD single-operation Recovery Gain should flag this as a coupled boundary rather than force a unique live label."
+    },
+    "generation_points": [
+      {
+        "hop_index": 1,
+        "expected_action": "retrieval_error",
+        "single_point_recovers": false
+      },
+      {
+        "hop_index": 2,
+        "expected_action": "injection_error",
+        "single_point_recovers": false
+      }
+    ]
   }
 ]

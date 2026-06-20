@@ -111,7 +111,7 @@ def check_attribution_release_gate(
     # Criterion 4: Repair assessment distribution
     criteria.append(_check_repair_distribution(sandbox_dir / "post_repair_table.csv"))
 
-    # Criterion 5: Step-level MCTS attribution metrics
+    # Criterion 5: Step-level attribution metrics
     criteria.append(_check_step_level_metrics(artifacts_dir / "step_level_metrics.csv"))
 
     all_passed = all(c.passed for c in criteria)
@@ -359,7 +359,7 @@ def _read_repair_csv(path: Path) -> list[str]:
 
 
 def _read_step_level_metrics_csv(path: Path) -> dict[str, float]:
-    """Read step-level MCTS metrics from a narrow or single-row wide CSV."""
+    """Read step-level attribution metrics from a narrow or single-row wide CSV."""
     if not path.exists():
         raise FileNotFoundError(f"Required artifact not found: {path}")
     with open(path, newline="", encoding="utf-8") as handle:
@@ -588,7 +588,7 @@ def _check_repair_distribution(repair_path: Path) -> GateCriterion:
 
 
 def _check_step_level_metrics(metrics_path: Path) -> GateCriterion:
-    description = "Step-level MCTS attribution metrics support generation-point diagnosis"
+    description = "Step-level attribution metrics support generation-point diagnosis"
     threshold = " AND ".join(
         f"{metric} >= {required:g}"
         for metric, required in STEP_LEVEL_METRIC_THRESHOLDS.items()

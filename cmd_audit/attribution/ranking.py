@@ -1,13 +1,13 @@
 """Offline replay-baseline attribution for current step actions.
 
 The live CMD runtime does not use replay-portfolio ranking. ``run_case`` routes
-through the hook's Fill/Fix branch, then Tier 2 item gate and Tier 3 MCTS.
+through the hook's Fill/Fix branch, then Tier 2 item gate and Tier 3 attribution.
 
 This module remains only for offline replay baselines and migration experiments.
 It assigns labels for the five current pipeline step actions when a supported
 counterfactual replay is the best positive-gain intervention. Formation,
 reasoning, and route replays are intentionally out of scope: formation failures
-route to Fill, reasoning faults emerge as no recovering MCTS intervention, and
+route to Fill, reasoning faults emerge as no recovering step intervention, and
 route is absorbed by ``retrieval_error`` in the live action set.
 """
 

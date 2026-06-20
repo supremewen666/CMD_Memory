@@ -1,99 +1,83 @@
-"""Repair-efficacy four-arm executor (Phase 1, E2/E3).
+"""Gold-free repair execution core (CMD diagnosis -> repair -> recovery).
 
-All four arms share one **gold-free** context constructor: the repaired context
-is a pure function of ``(recall_set, pipeline_action)`` via
-``apply_pipeline_action`` and never reads ``case.gold_evidence`` or
-``case.gold_answer``. The arms differ only in HOW the action label is selected:
-
-  - ``no_repair``    : no action (identity) — the floor.
-  - ``random``       : case_id-seeded pick over legal step actions — noise floor.
-  - ``llm_judge``    : LLM names the fault, mapped to its action — E3 competitor.
-  - ``cmd``          : recovery-gain pick (caller supplies the label).
+The repair loop's executable spine: given a CMD-predicted step-action label,
+map it to its ``(generation_point, PipelineAction)``, construct a repaired
+context that is a pure function of ``(recall_set, action)`` via
+``apply_pipeline_action`` (never reading ``case.gold_evidence`` /
+``case.gold_answer``), roll out to a terminal answer, and return the absolute
+recovery gain.
 
 Scoring (answer/evidence) legitimately uses gold; only *construction* is
-gold-free. This keeps E2 (loop vs no-repair) and E3 (CMD selection vs random /
-llm-judge selection) honest by construction — a recovered answer cannot come
-from copying gold into the context.
+gold-free — a recovered answer cannot come from copying gold into the context.
+
+This module holds only what the production repair path needs. Experiment-only
+scaffolding (random/no-repair comparison arms, multi-arm scheduling, net-gain
+bookkeeping) lives in ``experiments/run_experiment_14_repair_efficacy.py``.
 """
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from ..core.models import MemoryItem, ProbeCase
-from ..mcts.actions import (
+from ..counterfactual.actions import (
     PipelineAction,
     apply_pipeline_action,
     get_legal_actions,
 )
-from ..mcts.rollout import rollout_to_terminal
-
-REPAIR_ARMS = ("no_repair", "random", "llm_judge", "cmd")
+from ..counterfactual.rollout import rollout_to_terminal
 
 # label string <-> PipelineAction: the 5 step actions share the enum's values.
 LABEL_TO_ACTION = {action.value: action for action in PipelineAction}
 
 
 @dataclass(frozen=True)
-class RepairArmResult:
-    """Outcome of one repair arm on one case."""
+class RepairResult:
+    """Outcome of one gold-free repair execution on one case.
+
+    ``recovery_gain`` is the ABSOLUTE terminal answer score (rollout does not
+    subtract any baseline — see ``rollout._compute_recovery_gain``). Baseline
+    subtraction / net-gain bookkeeping is the caller's concern.
+    """
 
     case_id: str
-    arm: str
-    selected_label: str | None  # None for no_repair
+    selected_label: str | None  # None when no action was applied
     selected_action: str | None
     generation_point: int | None
-    recovery_gain: float
-    recovered: bool
-
-
-def _legal_actions_all_points(
-    recall_set: tuple[MemoryItem, ...], max_depth: int
-) -> list[tuple[int, PipelineAction]]:
-    """Enumerate (gen_point, action) pairs legal along the trajectory."""
-    pairs: list[tuple[int, PipelineAction]] = []
-    for gp in range(max_depth):
-        for action in get_legal_actions(recall_set, gp):
-            if action == PipelineAction.IDENTITY:
-                continue
-            pairs.append((gp, action))
-    return pairs
-
-
-def select_label_random(
-    case: ProbeCase,
-    recall_set: tuple[MemoryItem, ...],
-    max_depth: int,
-) -> tuple[int, PipelineAction] | None:
-    """case_id-seeded pick over legal (gen_point, action) pairs. Deterministic."""
-    pairs = _legal_actions_all_points(recall_set, max_depth)
-    if not pairs:
-        return None
-    rng = random.Random(case.case_id)
-    return rng.choice(pairs)
+    recovery_gain: float  # absolute terminal score
 
 
 def select_label_cmd(
     label: str,
     recall_set: tuple[MemoryItem, ...],
     max_depth: int,
+    *,
+    gen_point: int | None = None,
 ) -> tuple[int, PipelineAction] | None:
-    """Map a CMD-predicted label to its (gen_point, action). Picks the first
-    generation point where the action is legal."""
+    """Map a CMD-predicted label to its ``(generation_point, action)``.
+
+    When ``gen_point`` is given (``main_culprit`` locates the generation
+    point, not just the action), honor it — dropping it and re-picking gp=0
+    structurally cripples the repair, since the same action only recovers at
+    the hop that owns the failure. Falls back to the first legal generation
+    point when no gen_point is supplied or it is illegal there.
+    """
     action = LABEL_TO_ACTION.get(label)
     if action is None or action == PipelineAction.IDENTITY:
         return None
+    if gen_point is not None and 0 <= gen_point < max_depth:
+        if action in get_legal_actions(recall_set, gen_point):
+            return (gen_point, action)
     for gp in range(max_depth):
         if action in get_legal_actions(recall_set, gp):
             return (gp, action)
     return None
 
 
-def run_repair_arm(
+def run_single_repair(
     case: ProbeCase,
-    arm: str,
+    choice: tuple[int, PipelineAction] | None,
     *,
     client: Any,
     answer_verifier: Any,
@@ -101,42 +85,26 @@ def run_repair_arm(
     recall_set: tuple[MemoryItem, ...],
     max_depth: int,
     intervention_config: dict[str, Any] | None = None,
-    cmd_label: str | None = None,
-    llm_label_selector: Callable[[ProbeCase], str | None] | None = None,
-    recovered_threshold: float = 0.1,
-) -> RepairArmResult:
-    """Run one arm: select an action (per arm), construct gold-free context,
-    roll out to a terminal answer, score recovery.
+) -> RepairResult:
+    """Execute one repair: construct gold-free context for ``choice``, roll out,
+    score the absolute recovery gain.
 
-    no_repair applies no action (identity rollout from the base context).
+    ``choice`` is a ``(generation_point, action)`` pair (e.g. from
+    ``select_label_cmd``), or ``None`` to roll out the base context unchanged
+    (the identity backbone — no repair applied).
     """
-    if arm not in REPAIR_ARMS:
-        raise ValueError(f"unknown repair arm: {arm!r} (expected one of {REPAIR_ARMS})")
-
     baseline = case.primary_baseline.answer_score
 
-    choice: tuple[int, PipelineAction] | None
-    if arm == "no_repair":
-        choice = None
-    elif arm == "random":
-        choice = select_label_random(case, recall_set, max_depth)
-    elif arm == "cmd":
-        choice = select_label_cmd(cmd_label or "", recall_set, max_depth)
-    else:  # llm_judge
-        label = llm_label_selector(case) if llm_label_selector else None
-        choice = select_label_cmd(label or "", recall_set, max_depth)
-
     if choice is None:
-        # No action: roll out the base context unchanged (identity backbone).
         result = rollout_to_terminal(
             client, base_context, 0, max_depth, recall_set, case.gold_answer,
             answer_verifier=answer_verifier, baseline_answer_score=baseline,
         )
         gain = result.recovery_gain if result.rollout_successful else 0.0
-        return RepairArmResult(
-            case_id=case.case_id, arm=arm, selected_label=None,
+        return RepairResult(
+            case_id=case.case_id, selected_label=None,
             selected_action=None, generation_point=None,
-            recovery_gain=gain, recovered=gain > recovered_threshold,
+            recovery_gain=gain,
         )
 
     gen_point, action = choice
@@ -150,8 +118,8 @@ def run_repair_arm(
         answer_verifier=answer_verifier, baseline_answer_score=baseline,
     )
     gain = result.recovery_gain if result.rollout_successful else 0.0
-    return RepairArmResult(
-        case_id=case.case_id, arm=arm, selected_label=action.value,
+    return RepairResult(
+        case_id=case.case_id, selected_label=action.value,
         selected_action=action.value, generation_point=gen_point,
-        recovery_gain=gain, recovered=gain > recovered_threshold,
+        recovery_gain=gain,
     )

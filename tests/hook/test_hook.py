@@ -2,6 +2,7 @@
 
 import unittest
 from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 from cmd_audit.core.models import MemoryItem, RetrievedItem
 from cmd_audit.hook import (
@@ -16,6 +17,7 @@ from cmd_audit.hook.confidence_gate import confidence_gate_hook
 from cmd_audit.hook.router import route_fix_branch
 from cmd_audit.hook.subagent_loop import SubagentLoopOrchestrator
 from cmd_audit.item_gate import ItemGateResult, ItemGateStatus
+from cmd_audit.counterfactual import PipelineAction
 
 
 def _items(*texts: str) -> tuple[RetrievedItem, ...]:
@@ -164,7 +166,7 @@ class TestRouter(unittest.TestCase):
 
 
 class TestSubagentLoop(unittest.TestCase):
-    def test_item_gate_runs_each_recalled_item_before_mcts(self) -> None:
+    def test_item_gate_signals_feed_mcts_without_item_label_attribution(self) -> None:
         recall_set = (
             MemoryItem("clean", "Kai chose Madrid for the workshop"),
             MemoryItem("wrong", "Kai chose Berlin for the workshop"),
@@ -197,8 +199,12 @@ class TestSubagentLoop(unittest.TestCase):
                 "cmd_audit.hook.subagent_loop.run_item_gate",
                 side_effect=[pass_result, wrong_result],
             ) as mock_item_gate,
-            patch("cmd_audit.hook.subagent_loop.run_mcts_attribution") as mock_mcts,
+            patch("cmd_audit.hook.subagent_loop.attribute_single_point") as mock_mcts,
         ):
+            mock_mcts.return_value = SimpleNamespace(
+                primary_attribution_label=PipelineAction.RETRIEVAL_ERROR,
+                attribution_confidence=0.7,
+            )
             result = SubagentLoopOrchestrator().run_subagent_loop(
                 "Kai workshop city",
                 recall_set,
@@ -206,9 +212,13 @@ class TestSubagentLoop(unittest.TestCase):
             )
 
         self.assertEqual(mock_item_gate.call_count, 2)
-        mock_mcts.assert_not_called()
+        mock_mcts.assert_called_once()
+        self.assertEqual(
+            mock_mcts.call_args.kwargs["intervention_config"]["item_signal_hints"],
+            {"wrong": -1.0},
+        )
         self.assertTrue(result.item_treatment_needed)
-        self.assertEqual(result.primary_label, "item_wrong")
+        self.assertEqual(result.primary_label, "retrieval_error")
 
 
 class TestThreshold(unittest.TestCase):

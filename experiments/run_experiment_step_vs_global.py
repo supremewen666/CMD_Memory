@@ -7,7 +7,7 @@ vs hop2 inherited failure from hop1," which global-label systems cannot
 
 Runs multi-hop cases with per-hop gold fault annotations. Three systems:
   (a) Global-label baselines: evidence_recall, random_label, llm_judge
-  (b) CMD step-level (MCTS): per-hop credit → primary_label + hop_index
+  (b) CMD step-level attribution: per-hop credit → primary_label + hop_index
 
 Primary metrics:
   - Label correctness (predicted label vs gold step label)
@@ -89,10 +89,10 @@ def main() -> None:
     expected_hops = _load_expected_hops(args.cases)
     print(f"Loaded {len(cases)} multihop pipeline-action cases from {args.cases}")
 
-    # Run CMD step-level attribution by calling MCTS directly, bypassing the
+    # Run CMD step-level attribution directly, bypassing the
     # hook's Fill/Fix gate. The hook routes retrieval_error cases to Fill (no
-    # diagnosis) by design, but this experiment measures MCTS attribution over
-    # all 5 step actions, so it must reach MCTS for every case.
+    # diagnosis) by design, but this experiment measures attribution over
+    # all live step actions, so it must reach Tier 3 for every case.
     cmd_label_correct = 0
     cmd_hop_correct = 0
     # Per-case baseline predictions, keyed by comparator name.
@@ -113,14 +113,14 @@ def main() -> None:
             pred_label = getattr(action, "value", str(action))
             if pred_label == case.perturbation_label:
                 cmd_label_correct += 1
-            # MCTS generation_point is 0-based node depth; the data's
+            # generation_point is 0-based; the data's
             # expected_fault.hop_index is 1-based. The convention in
             # get_legal_actions (actions.py) is hop == generation_point + 1.
             expected_hop = expected_hops.get(case.case_id)
             if expected_hop is not None and generation_point + 1 == expected_hop:
                 cmd_hop_correct += 1
 
-        # Global-label baselines run independently of the hook/MCTS path.
+        # Global-label baselines run independently of the hook/attribution path.
         suite = run_baseline_suite(case, llm_client=agent_client)
         for comparator in suite.comparator_results:
             name = comparator.comparator_name

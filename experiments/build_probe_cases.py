@@ -1,6 +1,6 @@
 """Build current CMD probe cases from the three approved raw sources.
 
-This builder follows PROBE_CASE_GUIDELINE.md: 5 pipeline step actions, 4
+This builder follows PROBE_CASE_GUIDELINE.md: 4 live pipeline step actions, 4
 automatic item labels, Fill/null formation cases, plus a separate HITL-only
 poisoned set.
 """
@@ -28,7 +28,6 @@ AUTO_LABEL_CYCLE = (
     "retrieval_error",
     "injection_error",
     "granularity_error",
-    "graph_error",
     "safety_error",
     "item_stale",
     "item_conflict",
@@ -41,23 +40,19 @@ PIPELINE_LABEL_CYCLE = (
     "retrieval_error",
     "injection_error",
     "granularity_error",
-    "graph_error",
     "safety_error",
 )
 
 COUPLED_LABEL_PAIRS = (
     ("retrieval_error", "injection_error"),
     ("retrieval_error", "granularity_error"),
-    ("injection_error", "graph_error"),
     ("granularity_error", "safety_error"),
-    ("graph_error", "safety_error"),
 )
 
 LABEL_TO_REPLAY = {
     "retrieval_error": "oracle_retrieval",
     "injection_error": "injection_oracle",
     "granularity_error": "oracle_granularity",
-    "graph_error": "graph_off",
     "safety_error": "safety_off",
 }
 
@@ -75,6 +70,8 @@ def build_all(
     poisoned_per_source: int = 3,
     multihop_per_source: int = 25,
     coupled_per_source: int = 10,
+    recurrent_families_per_source: int = 8,
+    recurrent_variants_per_family: int = 5,
 ) -> dict[str, Any]:
     """Build source-specific and aggregate probe-case JSON files."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -82,6 +79,7 @@ def build_all(
     all_poisoned: list[dict[str, Any]] = []
     all_multihop: list[dict[str, Any]] = []
     all_coupled: list[dict[str, Any]] = []
+    all_recurrent: list[dict[str, Any]] = []
     summary: dict[str, Any] = {"sources": {}}
 
     for source_name, rel_path in RAW_FILES.items():
@@ -92,7 +90,8 @@ def build_all(
             target_per_source
             + poisoned_per_source
             + multihop_per_source
-            + coupled_per_source,
+            + coupled_per_source
+            + recurrent_families_per_source,
         )
 
         auto_cases: list[dict[str, Any]] = []
@@ -137,11 +136,23 @@ def build_all(
             )
         ]
 
+        recurrent_start = coupled_start + coupled_per_source
+        recurrent_rows = selected[
+            recurrent_start : recurrent_start + recurrent_families_per_source
+        ]
+        recurrent_cases = build_recurrent_families(
+            source_name,
+            recurrent_rows,
+            families=recurrent_families_per_source,
+            variants_per_family=recurrent_variants_per_family,
+        )
+
         _write_json(output_dir / f"real_{source_name}_cases.json", auto_cases)
         all_auto.extend(auto_cases)
         all_poisoned.extend(poisoned_cases)
         all_multihop.extend(multihop_cases)
         all_coupled.extend(coupled_cases)
+        all_recurrent.extend(recurrent_cases)
 
         summary["sources"][source_name] = {
             "raw_cases": len(rows),
@@ -149,6 +160,7 @@ def build_all(
             "hitl_poisoned_cases": len(poisoned_cases),
             "multihop_cases": len(multihop_cases),
             "coupled_boundary_cases": len(coupled_cases),
+            "recurrent_cases": len(recurrent_cases),
             "auto_label_counts": dict(Counter(_stored_label(c) for c in auto_cases)),
             "multihop_label_counts": dict(
                 Counter(c["perturbation_label"] for c in multihop_cases)
@@ -165,6 +177,7 @@ def build_all(
     _write_json(output_dir / "real_item_poisoned_hitl_cases.json", all_poisoned)
     _write_json(output_dir / "real_multihop_cases.json", all_multihop)
     _write_json(output_dir / "real_coupled_failure_boundary_cases.json", all_coupled)
+    _write_json(output_dir / "real_recurrent_cases.json", all_recurrent)
     _write_inspection_payload(
         output_dir / "coupled_failure_inspected_subset.json",
         all_coupled,
@@ -174,6 +187,13 @@ def build_all(
     summary["total_hitl_poisoned_cases"] = len(all_poisoned)
     summary["total_multihop_cases"] = len(all_multihop)
     summary["total_coupled_boundary_cases"] = len(all_coupled)
+    summary["total_recurrent_cases"] = len(all_recurrent)
+    summary["recurrent_label_counts"] = dict(
+        Counter(c["perturbation_label"] for c in all_recurrent)
+    )
+    summary["recurrent_family_counts"] = len(
+        {c["recurrent_family_id"] for c in all_recurrent}
+    )
     summary["auto_label_counts"] = dict(Counter(_stored_label(c) for c in all_auto))
     summary["multihop_label_counts"] = dict(
         Counter(c["perturbation_label"] for c in all_multihop)
@@ -243,24 +263,6 @@ def _build_case(source_name: str, idx: int, row: dict[str, Any], label: str) -> 
             "current_granularity": "session",
             "granularity_levels": ["raw", "event", "session", "persona", "procedure", "graph"],
         }
-
-    elif label == "graph_error":
-        extracted_memory = [
-            _memory("m_gold", _memory_text(query, fact), ["e_gold"]),
-            _memory(
-                "m_graph_distractor",
-                f"Graph-expanded neighbor claims the answer is {wrong}.",
-                ["e_query"],
-                is_graph_expanded=True,
-            ),
-        ]
-        gold_evidence = [_evidence("ev_gold", fact, "m_gold")]
-        baseline = _baseline(
-            answer=wrong,
-            retrieved_memory_ids=["m_graph_distractor", "m_gold"],
-            injected_context=extracted_memory[1]["text"],
-        )
-        extra = {}
 
     elif label == "safety_error":
         extracted_memory = [
@@ -529,44 +531,6 @@ def _build_multihop_case(
             }
         )
 
-    elif label == "graph_error":
-        # Borrow another multihop row's real gold as the competing claim: it is
-        # a genuine memory ("correct" for some other query) that the graph
-        # expansion wrongly pulled in here. A credible rival, not a not-X token.
-        distractor_claim = _sibling_gold(distractor_gold_pool, idx, gold_answer, wrong)
-        # Both memories use IDENTICAL neutral framing ("resolves to: X"). The
-        # model gets no textual cue to which is authoritative — it must decide.
-        # The intruder is marked only by is_graph_expanded metadata, never by
-        # wording. If gold self-labelled "the correct remembered answer is X",
-        # the model would trust it and ignore the distractor, so the case would
-        # never exercise graph distraction (identity would already recover).
-        graph_gold = _memory(
-            "m_hop2_gold",
-            f"Bridge key {bridge_key} resolves to: {gold_answer}",
-            ["e_gold"],
-        )
-        graph_distractor = _memory(
-            "m_hop2_graph_distractor",
-            f"Bridge key {bridge_key} resolves to: {distractor_claim}",
-            ["e_query"],
-            is_graph_expanded=True,
-        )
-        extracted_memory = [bridge_memory, graph_gold, graph_distractor]
-        retrieved = ["m_hop1_bridge", "m_hop2_graph_distractor", "m_hop2_gold"]
-        # A true graph failure: the direct gold evidence IS present in context,
-        # but a graph-expanded neighbor injects a competing distractor that
-        # misleads generation. Removing the distractor (pure-subtractive graph
-        # repair) recovers; re-injecting recall (injection) leaves the conflict.
-        # Gold must therefore be in the base context, not absent — otherwise the
-        # case is injection-shaped (gold dropped) rather than graph-shaped.
-        injected = (
-            f"{bridge_memory['text']}\n"
-            f"{graph_gold['text']}\n"
-            f"{graph_distractor['text']}"
-        )
-        answer = distractor_claim
-        gold_source_id = "m_hop2_gold"
-
     elif label == "safety_error":
         safe_gold = _memory(
             "m_hop2_gold",
@@ -604,11 +568,7 @@ def _build_multihop_case(
         answer=answer,
         retrieved_memory_ids=retrieved,
         injected_context=injected,
-        # graph_error renders gold + a full-length sibling-gold distractor in
-        # one context; both can be ~300 chars, so the default 700 cap would
-        # truncate the distractor away and dissolve the conflict. Other labels
-        # stay well under 700.
-        max_context=900 if label == "graph_error" else 700,
+        max_context=700,
     )
     return {
         "case_id": case_id,
@@ -645,6 +605,64 @@ def _build_multihop_case(
         },
         **extra,
     }
+
+
+# Surface paraphrase templates for recurrent query families. Deterministic (no
+# LLM): each keeps the row's entities/topic verbatim so BM25 query-similarity
+# still clusters the family, while varying surface form so cases are distinct
+# stream events rather than literal duplicates.
+_RECURRENT_PARAPHRASES = (
+    "{q}",
+    "Following up on an earlier request: {q}",
+    "Again I need to know — {q}",
+    "Revisiting this: {q}",
+    "Once more, {q}",
+    "As asked before, {q}",
+)
+
+
+def build_recurrent_families(
+    source_name: str,
+    rows: list[dict[str, Any]],
+    *,
+    families: int,
+    variants_per_family: int,
+    start_idx: int = 0,
+) -> list[dict[str, Any]]:
+    """Build recurrent query families for the online self-evolution stream.
+
+    A *family* reuses ONE raw row under a fixed step-action label, emitting
+    ``variants_per_family`` cases whose queries are surface paraphrases of the
+    same underlying chain. Within a family the query signature and the
+    recovering ``(hop, action)`` are stable, so an online prior learned from an
+    early variant should seed later variants — the structure C7 (FailureMemory
+    self-evolution) needs and that the cross-fault 75-case suite lacks.
+
+    Families cycle the 4 step-action labels so the stream stays balanced. The
+    underlying chain construction is delegated to ``_build_multihop_case`` (no
+    duplicate repair logic); only the query is varied per variant.
+    """
+    cases: list[dict[str, Any]] = []
+    usable = [r for r in rows if _query(r)]
+    for f in range(families):
+        if not usable:
+            break
+        row = usable[f % len(usable)]
+        label = PIPELINE_LABEL_CYCLE[f % len(PIPELINE_LABEL_CYCLE)]
+        base_query = _query(row)
+        family_id = f"{source_name}-fam{start_idx + f:03d}"
+        for v in range(variants_per_family):
+            template = _RECURRENT_PARAPHRASES[v % len(_RECURRENT_PARAPHRASES)]
+            variant_row = dict(row)
+            variant_row["query"] = template.format(q=base_query)
+            # Unique idx per (family, variant) -> distinct bridge_key/case_id,
+            # while the paraphrase keeps the family's entity keywords intact.
+            variant_idx = (start_idx + f) * 1000 + v
+            case = _build_multihop_case(source_name, variant_idx, variant_row, label)
+            case["recurrent_family_id"] = family_id
+            case["recurrent_variant_index"] = v
+            cases.append(case)
+    return cases
 
 
 def _build_coupled_case(
@@ -888,21 +906,6 @@ def _fault_component(
             event_gold_id,
             granularity_level="event",
         )
-
-    elif label == "graph_error":
-        graph_id = f"m_{prefix}_graph_distractor"
-        memory = [
-            _memory(gold_id, fact, [event_id]),
-            _memory(
-                graph_id,
-                f"Graph-expanded component {prefix} neighbor claims: {wrong}.",
-                ["e_query"],
-                is_graph_expanded=True,
-            ),
-        ]
-        retrieved = [graph_id, gold_id]
-        injected_context = memory[1]["text"]
-        evidence = _evidence(evidence_id, fact, gold_id)
 
     elif label == "safety_error":
         memory = [
@@ -1305,6 +1308,8 @@ def main() -> None:
     parser.add_argument("--poisoned-per-source", type=int, default=3)
     parser.add_argument("--multihop-per-source", type=int, default=25)
     parser.add_argument("--coupled-per-source", type=int, default=10)
+    parser.add_argument("--recurrent-families-per-source", type=int, default=8)
+    parser.add_argument("--recurrent-variants-per-family", type=int, default=5)
     args = parser.parse_args()
 
     summary = build_all(
@@ -1314,6 +1319,8 @@ def main() -> None:
         poisoned_per_source=args.poisoned_per_source,
         multihop_per_source=args.multihop_per_source,
         coupled_per_source=args.coupled_per_source,
+        recurrent_families_per_source=args.recurrent_families_per_source,
+        recurrent_variants_per_family=args.recurrent_variants_per_family,
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 

@@ -76,14 +76,14 @@ retrieval recall
   -> hook (6 confidence factors -> evidence present in recall?)
        ├─ NO  (missing) -> FILL: generate this turn, async re-extract. No diagnosis, no label.
        └─ YES (present) -> FIX: lightweight correction (de-conflict / re-rank) -> generate
-                              -> Tier 2 item gate (5 item labels, reference-contrast divergence)
-                              -> Tier 3 step-level MCTS (5 pipeline step actions, generation-point search)
+                              -> Tier 2 item gate (item signals folded into counterfactual, not predicted labels)
+                              -> Tier 3 step-level single-point counterfactual scan (4 pipeline step actions, generation-point search)
                               -> ECS draft -> RepairExecutor / RepairOrchestrator
                               -> Post-Repair Context Replay (quality gate)
                               -> Failure Memory for future similar failures
 ```
 
-The deliverable is a standalone **CMD-Audit** harness that produces step-level attribution and repair-validation evidence. The live attribution surface is **5 pipeline step actions** (`retrieval_error`, `injection_error`, `granularity_error`, `graph_error`, `safety_error`) + **5 item labels** (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`). Formation failures (write / compression / premature_extraction / ingestion) are absorbed by the Fill branch, not labeled; reasoning faults emerge through MCTS back-prop, not labeled. `CONTEXT.md` is the authority on the target design; `TASK.md` lists the migration from the current code to that design.
+The deliverable is a standalone **CMD-Audit** harness whose headline is **counterfactual repair efficacy** — a self-repair + self-evolution loop, not a fault classifier reporting label macro-F1. The **4 live pipeline step actions** (`retrieval_error`, `injection_error`, `granularity_error`, `safety_error`) and **5 item labels** (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) are an internal action space for repair search, not prediction targets scored against gold; recovery gain Δk is the fitness signal. Construction of repaired context is gold-free by structure — a pure function of `(recall_set, pipeline_action)` that never reads `case.gold_*` (scoring uses gold, construction does not). Online attribution is offline-oracle / online-student: an offline exhaustive single-point scan distills transferable `(gen_point, action)` priors, online search is a budgeted top-2 directed seed plus single-point remainder (MCTS tree search retired from the mainline per C6: TRUE_COUPLED 1/30; the `counterfactual/` package keeps the historical import path). Formation failures (write / compression / premature_extraction / ingestion) are absorbed by the Fill branch, not labeled; reasoning faults emerge through back-prop, not labeled. `CONTEXT.md` is the authority on the target design; `TASK.md` lists the migration from the current code to that design.
 
 ## Required Reading
 
@@ -128,7 +128,7 @@ data/probe_cases/*.json
     -> hook/ two-branch confidence gate (Fill vs Fix)
     -> baselines/ comparators and memory-probe baseline
     -> item_gate/ Tier 2 item labels (reference-contrast divergence)   [target]
-    -> mcts/ Tier 3 step-level search over generation points            [target]
+    -> counterfactual/ Tier 3 step-level single-point scan over generation points 
     -> scoring/ LLM SubagentScorer + AnswerRubricScorer (G-Eval logprob)
     -> attribution/ recovery-gain / credit-based label assignment
     -> repair/ ECS + RepairExecutor / RepairOrchestrator + failure_memory
@@ -138,15 +138,17 @@ cmd_audit/adapters/
   -> mem0.py / letta.py recorded-trace adapters
 ```
 
-`replays/` currently holds a flat portfolio; `TASK.md` migrates the live attribution path to `item_gate/` (Tier 2) + `mcts/` (Tier 3). The formation oracle replays and `reasoning` / `route` replays are removed from the live path.
+`replays/` currently holds a flat portfolio; `TASK.md` migrates the live attribution path to `item_gate/` (Tier 2) + `counterfactual/` (Tier 3, was `mcts/`). The formation oracle replays and `reasoning` / `route` replays are removed from the live path.
+
+Probe datasets (`data/probe_cases/`, built by `experiments/build_probe_cases.py`): `real_multihop_cases.json` (4-action single-fault chains, C4/C5), `real_recurrent_cases.json` (same-chain query families with fixed label across paraphrased variants — the recurrence structure C7 self-evolution needs), `real_three_source_cases.json` (cross-source, item labels retained), `real_coupled_failure_boundary_cases.json` (C6). 
 
 | Subpackage / Module | Role |
 |---------------------|------|
 | `core/models.py` | `ProbeCase`, `MemoryItem`, `GoldEvidence`, `BaselineOutput` dataclasses |
-| `core/labels.py` | `PIPELINE_LABEL_ORDER` (target: 5 step actions), `ITEM_LABELS` (5), `REPLAY_TO_LABEL`, `validate_label` |
+| `core/labels.py` | `PIPELINE_LABEL_ORDER` (4 live step actions), `ITEM_LABELS` (5), `REPLAY_TO_LABEL`, `validate_label` |
 | `core/llm_client.py` | Provider-agnostic LLM API client (`generate(prompt, *, system=None) -> str`) |
 | `data_io/` | `load_probe_cases`, `load_all_real_cases`, `load_real_cases_by_source` |
-| `replays/` | Intervention implementations + portfolio; being migrated to `mcts/` step actions |
+| `replays/` | Intervention implementations + portfolio; being migrated to `counterfactual/` step actions |
 | `attribution/` | `assign_attribution` — recovery-gain / credit ranking over step actions |
 | `scoring/phrase.py` | `answer_score`, `evidence_recall_from_text` (phrase-matching fallback) |
 | `scoring/llm.py` | `SubagentScorer`, `EvidenceVerifier`, `AnswerVerifier`; `AnswerRubricScorer` (continuous answer-axis G-Eval) |
@@ -155,7 +157,7 @@ cmd_audit/adapters/
 | `adapters/` | CMD-Skill Adapter package: `base.py`, `harness.py`, `mem0.py` (2 cut points), `letta.py` (3 cut points) |
 | `hook/` | Two-branch confidence gate: `post_retrieve_hook.py`, `constants.py` (6-factor schema) |
 | `item_gate/` | Tier 2 item gate (target): `divergence.py`, `collision.py`, `loo.py`, `gate.py` |
-| `mcts/` | Tier 3 step-level search (target): `tree.py`, `actions.py`, `value.py`, `rollout.py`, `search.py` |
+| `counterfactual/` | Tier 3 step-level single-point scan: `actions.py`, `rollout.py`, `context.py`, `search.py` (`SinglePointAttributor`; tree.py/value.py/distill.py deleted per C6) |
 | `repair/post_repair.py` | `ECSDraft`, `RepairedContext`, `PostRepairResult`; `draft_ecs`, `run_post_repair_context_replay` |
 | `repair/executor.py` | `RepairExecutor`, `RepairExecutorResult`; single-repair execution |
 | `repair/orchestrator.py` | Iterative repair loop over `close_deltas` |
@@ -183,7 +185,7 @@ Tests are organized by subpackage under `tests/`:
 | `tests/attribution/` | Label validation, coupled failure, shadow replay |
 | `tests/hook/` | Two-branch confidence gate |
 | `tests/item_gate/` | Tier 2 item gate: collision, LOO, divergence, cost ladder (target) |
-| `tests/mcts/` | Tier 3 step-level search: tree, actions, value, rollout, stop rule (target) |
+| `tests/counterfactual/` | Tier 3 step-level single-point scan: actions, rollout, attribution (tree/value/distill tests deleted per C6) |
 | `tests/adapters/` | mem0 adapter, Letta adapter |
 | `tests/data_io/` | Real data integration |
 
