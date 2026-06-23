@@ -82,6 +82,57 @@ def _build_trigger_signature(query: str, label: str) -> str:
     return f"{label}|{' '.join(keywords)}"
 
 
+# Structural scaffold words shared by every multihop chain (role names, hop
+# markers). They carry no chain-specific identity, so they must be stripped
+# before fingerprinting or they inflate cross-family similarity (the 27.6%
+# floor measured during fingerprint validation).
+_FINGERPRINT_SCAFFOLD = frozenset(
+    {
+        "bridge",
+        "key",
+        "chain",
+        "hop",
+        "first",
+        "second",
+        "third",
+        "gold",
+        "distractor",
+        "session",
+        "event",
+        "memory",
+        "item",
+        "store",
+        "resolve",
+        "two",
+    }
+)
+
+
+def _memory_fingerprint(texts: tuple[str, ...], *, top_k: int = 12) -> str:
+    """Content fingerprint of the memory items a failure hinged on.
+
+    The recurrence identity of a memory failure is the *content* of the items
+    that were (mis)retrieved, not the query wording: paraphrased queries in the
+    same failure family hit the same items, so a fingerprint over item text is
+    paraphrase-invariant where a query-keyword signature is not (validated:
+    91.6% intra-family vs 27.6% cross-family similarity).
+
+    Returns a space-joined string of the ``top_k`` most frequent content words
+    so the existing Jaccard similarity (``_query_signature_similarity``) applies
+    unchanged. Scaffold words shared by all chains are stripped first.
+    """
+    words: list[str] = []
+    for text in texts:
+        for word in re.findall(r"[a-z0-9][\w-]{2,}", text.casefold()):
+            if word in _STOP_WORDS or word in _FINGERPRINT_SCAFFOLD:
+                continue
+            words.append(word)
+    if not words:
+        return ""
+    ranked = [word for word, _count in Counter(words).most_common(top_k)]
+    return " ".join(sorted(ranked))
+
+
 # ── Data types ──────────────────────────────────────────────────────────
 
 
@@ -874,9 +925,13 @@ class FailureMemoryPatternRecord:
 class FailureMemorySkillLoop:
     """Case ledger -> reusable pattern loop for two-tier Failure Memory.
 
-    The loop stores concrete recovered cases first. Once enough cases share the
-    same recovered action, it formats and validates a markdown pattern, then
-    exposes the pattern as a ``(generation_point, action)`` seed hint.
+    The loop stores concrete recovered cases first, clustering them online by
+    the content fingerprint of the memory items each failure hinged on. Once a
+    cluster holds enough cases it formats and validates a markdown pattern, then
+    exposes the pattern as a ``(generation_point, action)`` seed hint. Clustering
+    by content (not by action label) keeps each pattern's signature short and
+    chain-specific, so a later paraphrased query in the same failure family
+    actually matches it.
     """
 
     def __init__(
@@ -884,14 +939,18 @@ class FailureMemorySkillLoop:
         markdown_store: MarkdownFailureMemoryStore,
         *,
         threshold: int = 3,
+        cluster_threshold: float = 0.5,
         skill: FailureMemorySkill | None = None,
     ) -> None:
         if threshold < 1:
             raise ValueError("threshold must be >= 1")
+        if not 0.0 <= cluster_threshold <= 1.0:
+            raise ValueError("cluster_threshold must be in [0, 1]")
         self.markdown_store = markdown_store
         self.threshold = threshold
+        self.cluster_threshold = cluster_threshold
         self.skill = skill or FailureMemorySkill()
-        self._cases_by_label: dict[str, list[tuple[str, str, str, int]]] = {}
+        self._clusters: list[dict] = []
         self._patterns: dict[str, FailureMemoryPatternRecord] = {}
 
     @property
@@ -909,10 +968,17 @@ class FailureMemorySkillLoop:
         corrected_memory: str,
         repair_guidance: str,
         retrieved_items: tuple[str, ...] = (),
+        memory_texts: tuple[str, ...] = (),
         recovery_gain: float = 0.0,
         llm_client=None,
     ) -> FailureMemoryPatternRecord | None:
-        """Write a recovered case and update its action-level pattern."""
+        """Write a recovered case and update its content-cluster pattern.
+
+        ``memory_texts`` are the texts of the memory items the failure hinged on;
+        their content fingerprint is the recurrence identity used to cluster
+        cases into reusable patterns. When omitted (e.g. unit tests), the query
+        text is used as the fingerprint source so the call still works.
+        """
         validate_label(label)
         diagnosis = FailureMemoryDiagnosis(
             query=query,
@@ -934,11 +1000,46 @@ class FailureMemorySkillLoop:
             summary=f"{label} at hop {hop_index}",
         )
 
-        bucket = self._cases_by_label.setdefault(label, [])
-        bucket.append((case_id, case_markdown, query, hop_index))
-        if len(bucket) < self.threshold:
+        fingerprint = _memory_fingerprint(memory_texts or (query,))
+        cluster = self._assign_cluster(label, fingerprint)
+        cluster["cases"].append((case_id, case_markdown, hop_index))
+        cluster["texts"].extend(memory_texts or (query,))
+        # Recompute the cluster signature from pooled text, capped at top_k so a
+        # growing cluster does not blow the signature up into a near-universal
+        # word set (the failure mode of the old per-label bucketing).
+        cluster["fingerprint"] = _memory_fingerprint(tuple(cluster["texts"]))
+        if len(cluster["cases"]) < self.threshold:
             return None
-        return self._write_pattern(label, bucket, llm_client=llm_client)
+        return self._write_pattern(label, cluster, llm_client=llm_client)
+
+    def _assign_cluster(self, label: str, fingerprint: str) -> dict:
+        """Find the best same-label content cluster, or open a new one.
+
+        A cluster is a failure family discovered online: cases whose memory
+        fingerprints are similar (Jaccard >= ``cluster_threshold``) share a
+        cluster and thus a pattern. This is what makes a pattern's signature
+        short and chain-specific instead of a union over every same-action case.
+        """
+        best: dict | None = None
+        best_sim = 0.0
+        for cluster in self._clusters:
+            if cluster["label"] != label:
+                continue
+            sim = _query_signature_similarity(cluster["fingerprint"], fingerprint)
+            if sim > best_sim:
+                best_sim = sim
+                best = cluster
+        if best is not None and best_sim >= self.cluster_threshold:
+            return best
+        cluster = {
+            "label": label,
+            "fingerprint": fingerprint,
+            "cases": [],
+            "texts": [],
+            "pattern_id": f"pattern_{label}_{len(self._clusters)}",
+        }
+        self._clusters.append(cluster)
+        return cluster
 
     def retrieve_seed_pairs(
         self,
@@ -946,14 +1047,20 @@ class FailureMemorySkillLoop:
         *,
         max_depth: int,
         top_k: int = 2,
+        memory_texts: tuple[str, ...] = (),
     ) -> tuple[list[tuple[int, str]], int]:
-        """Return pattern-derived ``(generation_point, action)`` seed pairs."""
-        query_signature = " ".join(_extract_keywords(query)[:10])
+        """Return pattern-derived ``(generation_point, action)`` seed pairs.
+
+        Matching is by memory content fingerprint (paraphrase-invariant), with
+        the query text used as the fingerprint source when ``memory_texts`` is
+        omitted.
+        """
+        signature = _memory_fingerprint(memory_texts or (query,))
         scored: list[tuple[float, FailureMemoryPatternRecord]] = []
         for record in self._patterns.values():
             if record.review_required:
                 continue
-            score = _query_signature_similarity(record.query_signature, query_signature)
+            score = _query_signature_similarity(record.query_signature, signature)
             if score > 0.0:
                 scored.append((score, record))
         scored.sort(key=lambda item: item[0], reverse=True)
@@ -976,14 +1083,14 @@ class FailureMemorySkillLoop:
     def _write_pattern(
         self,
         label: str,
-        bucket: list[tuple[str, str, str, int]],
+        cluster: dict,
         *,
         llm_client=None,
     ) -> FailureMemoryPatternRecord:
-        case_ids = tuple(case_id for case_id, _case_md, _query, _hop in bucket)
-        case_markdowns = tuple(case_md for _case_id, case_md, _query, _hop in bucket)
-        queries = " ".join(query for _case_id, _case_md, query, _hop in bucket)
-        hop_index = Counter(hop for _case_id, _case_md, _query, hop in bucket).most_common(1)[0][0]
+        bucket = cluster["cases"]
+        case_ids = tuple(case_id for case_id, _case_md, _hop in bucket)
+        case_markdowns = tuple(case_md for _case_id, case_md, _hop in bucket)
+        hop_index = Counter(hop for _case_id, _case_md, hop in bucket).most_common(1)[0][0]
 
         pattern_markdown = self.skill.format_pattern(
             case_markdowns,
@@ -1004,7 +1111,7 @@ class FailureMemorySkillLoop:
                 "",
             ))
 
-        pattern_id = f"pattern_{label}"
+        pattern_id = cluster["pattern_id"]
         self.markdown_store.write_pattern(
             pattern_id,
             pattern_markdown,
@@ -1018,11 +1125,11 @@ class FailureMemorySkillLoop:
             label=label,
             hop_index=hop_index,
             source_case_ids=case_ids,
-            query_signature=" ".join(_extract_keywords(queries)[:10]),
+            query_signature=cluster["fingerprint"],
             valid=validation.valid,
             review_required=not validation.valid,
         )
-        self._patterns[label] = record
+        self._patterns[pattern_id] = record
         return record
 
 

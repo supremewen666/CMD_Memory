@@ -147,4 +147,6 @@ def test_skill_loop_writes_valid_pattern_and_returns_seed() -> None:
     assert pattern.valid
     assert pairs == [(1, "retrieval_error")]
     assert source_count == 1
-    assert "patterns/pattern_retrieval_error.md" in index
+    # Patterns are now keyed by content cluster, so the id carries a cluster
+    # suffix (one retrieval_error family here -> cluster 0).
+    assert "patterns/pattern_retrieval_error_0.md" in index
