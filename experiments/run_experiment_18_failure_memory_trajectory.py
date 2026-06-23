@@ -70,6 +70,7 @@ def main() -> None:
     )
     for case_index, case in enumerate(cases, start=1):
         recall_set = _retrieved_memory_items(case)
+        memory_texts = tuple(getattr(it, "text", str(it)) for it in recall_set)
         max_depth = max(1, min(3, len(recall_set) or 1))
         base_ctx = _initial_mcts_context(case, recall_set)
         cfg = {"candidate_items": case.extracted_memory, "raw_events": case.raw_events}
@@ -90,6 +91,7 @@ def main() -> None:
             max_depth=max_depth,
             topk=args.topk,
             neighbors=args.neighbors,
+            memory_texts=memory_texts,
         )
         seed_choices = _pairs_to_choices(seed_pairs, recall_set, max_depth)
 
@@ -157,6 +159,7 @@ def main() -> None:
                 ),
                 recovery_success=True,
                 recovery_gain=recovered_net,
+                memory_texts=memory_texts,
             )
             active_priors.add_if_recovered(record, "recovered")
             active_prior_written = True
@@ -233,26 +236,41 @@ def _retrieve_seed_pairs(
     max_depth: int,
     topk: int,
     neighbors: int,
+    memory_texts: tuple[str, ...] = (),
 ) -> tuple[list[tuple[int, str]], int]:
-    """Return top-K (gen_point, action) pairs from prior cases only."""
+    """Return top-K (gen_point, action) pairs from prior cases only.
+
+    Seeds are the (gen_point, action) of the most fingerprint-similar prior
+    failures, retrieved nearest-first. We deliberately do NOT gate on
+    ``get_label_prior`` success rate: in a recurrent stream every stored case
+    recovered, so every label's success rate saturates at ~1.0 and the >0.5
+    gate passes all four actions, washing out the fingerprint signal (the
+    structural cause of the flat Exp18 curve). Ranking the seed by recall
+    fingerprint similarity instead mirrors the tier-2 ``retrieve_seed_pairs``
+    and lets a recurring chain reuse its own prior repair point.
+
+    ``memory_texts`` keys retrieval by the recall content fingerprint
+    (paraphrase-invariant) instead of query keywords when supplied.
+    """
     if len(active_priors) == 0:
         return [], 0
 
-    near = active_priors.retrieve(query=query, top_k=neighbors)
+    near = active_priors.retrieve(
+        query=query, top_k=neighbors, memory_texts=memory_texts
+    )
     if not near:
         return [], 0
 
-    scored: list[tuple[float, tuple[int, str]]] = []
-    for hop in range(1, max_depth + 1):
-        priors = active_priors.get_mcts_action_priors(query, hop_index=hop)
-        for action, score in priors.items():
-            if score > 0.5:
-                scored.append((score, (hop - 1, action)))
-    scored.sort(key=lambda item: item[0], reverse=True)
-
     pairs: list[tuple[int, str]] = []
     seen = set()
-    for _score, pair in scored:
+    for record in near:  # already ordered nearest-first by fingerprint similarity
+        key = getattr(record, "key", None)
+        if key is None:
+            continue
+        gen_point = key.hop_index - 1
+        if not (0 <= gen_point < max_depth):
+            continue
+        pair = (gen_point, record.error_type)
         if pair in seen:
             continue
         pairs.append(pair)

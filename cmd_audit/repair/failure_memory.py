@@ -133,6 +133,21 @@ def _memory_fingerprint(texts: tuple[str, ...], *, top_k: int = 12) -> str:
     return " ".join(sorted(ranked))
 
 
+def _signature_from(query: str, memory_texts: tuple[str, ...]) -> str:
+    """Retrieval signature for a step-level key.
+
+    Prefers the paraphrase-invariant content fingerprint of the recall set when
+    ``memory_texts`` is supplied; falls back to the query-keyword signature
+    otherwise, preserving the original behaviour for callers that pass no recall
+    content (unit tests, legacy online paths).
+    """
+    if memory_texts:
+        fingerprint = _memory_fingerprint(memory_texts)
+        if fingerprint:
+            return fingerprint
+    return " ".join(_extract_keywords(query)[:10])
+
+
 # ── Data types ──────────────────────────────────────────────────────────
 
 
@@ -1158,10 +1173,19 @@ class StepLevelKey:
         validate_label(self.label)
 
     @classmethod
-    def from_components(cls, query: str, hop_index: int, label: str) -> "StepLevelKey":
-        keywords = _extract_keywords(query)
-        signature = " ".join(keywords[:10])  # Cap at 10 keywords
-        return cls(query_signature=signature, hop_index=hop_index, label=label)
+    def from_components(
+        cls,
+        query: str,
+        hop_index: int,
+        label: str,
+        *,
+        memory_texts: tuple[str, ...] = (),
+    ) -> "StepLevelKey":
+        return cls(
+            query_signature=_signature_from(query, memory_texts),
+            hop_index=hop_index,
+            label=label,
+        )
 
     def similarity(self, other: "StepLevelKey") -> float:
         """Compute similarity score between two keys."""
@@ -1204,8 +1228,12 @@ class StepLevelRecord:
         repair_guidance: str,
         recovery_success: bool,
         recovery_gain: float,
+        *,
+        memory_texts: tuple[str, ...] = (),
     ) -> "StepLevelRecord":
-        key = StepLevelKey.from_components(query, hop_index, label)
+        key = StepLevelKey.from_components(
+            query, hop_index, label, memory_texts=memory_texts
+        )
         return cls(
             key=key,
             error_type=label,
@@ -1314,19 +1342,26 @@ class FailureMemoryStore:
         hop_index: int | str | None = None,
         label: str | None = None,
         top_k: int = 3,
+        *,
+        memory_texts: tuple[str, ...] = (),
     ) -> list[StepLevelRecord | FailureMemoryRecord]:
-        """Retrieve similar records by step-level key."""
+        """Retrieve similar records by step-level key.
+
+        ``memory_texts`` keys similarity by the recall content fingerprint
+        instead of query keywords when supplied.
+        """
         if isinstance(hop_index, str) and label is None:
             label = hop_index
             hop_index = None
 
         if hop_index is None:
+            probe_signature = _signature_from(query, memory_texts)
             scored: list[tuple[float, StepLevelRecord | FailureMemoryRecord]] = []
             for record in self._records:
                 if isinstance(record, FailureMemoryRecord):
                     score = float(_score_composite_key(record, query, label or ""))
                 else:
-                    probe_keywords = set(_extract_keywords(query)[:10])
+                    probe_keywords = set(probe_signature.split())
                     record_keywords = set(record.key.query_signature.split())
                     score = (
                         len(probe_keywords & record_keywords)
@@ -1342,7 +1377,9 @@ class FailureMemoryStore:
             return [record for _, record in scored[:top_k]]
 
         if label:
-            probe_key = StepLevelKey.from_components(query, hop_index, label)
+            probe_key = StepLevelKey.from_components(
+                query, hop_index, label, memory_texts=memory_texts
+            )
             scored = [
                 (probe_key.similarity(r.key), r)
                 for r in self._records
@@ -1350,7 +1387,12 @@ class FailureMemoryStore:
             ]
         else:
             scored = [
-                (_step_record_similarity(r, query, int(hop_index)), r)
+                (
+                    _step_record_similarity(
+                        r, query, int(hop_index), memory_texts=memory_texts
+                    ),
+                    r,
+                )
                 for r in self._records
                 if isinstance(r, StepLevelRecord)
             ]
@@ -1364,12 +1406,14 @@ class FailureMemoryStore:
         *,
         query: str | None = None,
         hop_index: int | None = None,
+        memory_texts: tuple[str, ...] = (),
     ) -> float:
         """Get historical success rate for a label.
 
         With no query, this returns the global success rate used by older
         callers. With a query/hop, it returns the similar-case weighted prior
-        used by online action ordering.
+        used by online action ordering. ``memory_texts`` keys similarity by the
+        recall content fingerprint instead of query keywords when supplied.
         """
         if query is not None:
             weighted_success = 0.0
@@ -1379,7 +1423,9 @@ class FailureMemoryStore:
                     continue
                 if record.error_type != label:
                     continue
-                weight = _step_record_similarity(record, query, hop_index)
+                weight = _step_record_similarity(
+                    record, query, hop_index, memory_texts=memory_texts
+                )
                 if weight <= 0.0:
                     continue
                 weighted_success += weight * (1.0 if record.recovery_success else 0.0)
@@ -1403,14 +1449,18 @@ class FailureMemoryStore:
         *,
         hop_index: int | None = None,
         labels: tuple[str, ...] = PIPELINE_STEP_ACTIONS,
+        memory_texts: tuple[str, ...] = (),
     ) -> dict[str, float]:
         """Return query-aware action priors for step-level attribution.
 
         Priors are soft hints only: callers should use them for ordering/bonus,
-        never as hard pruning.
+        never as hard pruning. ``memory_texts`` keys similarity by the recall
+        content fingerprint instead of query keywords when supplied.
         """
         return {
-            label: self.get_label_prior(label, query=query, hop_index=hop_index)
+            label: self.get_label_prior(
+                label, query=query, hop_index=hop_index, memory_texts=memory_texts
+            )
             for label in labels
         }
 
@@ -1513,9 +1563,11 @@ def _step_record_similarity(
     record: StepLevelRecord,
     query: str,
     hop_index: int | None = None,
+    *,
+    memory_texts: tuple[str, ...] = (),
 ) -> float:
-    query_signature = " ".join(_extract_keywords(query)[:10])
-    query_score = _query_signature_similarity(record.key.query_signature, query_signature)
+    probe_signature = _signature_from(query, memory_texts)
+    query_score = _query_signature_similarity(record.key.query_signature, probe_signature)
     if hop_index is None:
         return query_score
     hop_score = 1.0 / (1.0 + abs(record.key.hop_index - hop_index))
