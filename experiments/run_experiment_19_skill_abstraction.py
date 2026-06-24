@@ -88,6 +88,7 @@ def main() -> None:
     )
     for case_index, case in enumerate(cases, start=1):
         recall_set = _retrieved_memory_items(case)
+        memory_texts = tuple(getattr(it, "text", str(it)) for it in recall_set)
         max_depth = max(1, min(3, len(recall_set) or 1))
         base_ctx = _initial_mcts_context(case, recall_set)
         cfg = {"candidate_items": case.extracted_memory, "raw_events": case.raw_events}
@@ -106,6 +107,7 @@ def main() -> None:
             case.query,
             max_depth=max_depth,
             top_k=args.topk,
+            memory_texts=memory_texts,
         )
         pattern_count_before = skill_loop.pattern_count
         store_pairs, store_source_count = _retrieve_store_seed_pairs(
@@ -114,6 +116,7 @@ def main() -> None:
             max_depth=max_depth,
             topk=args.topk,
             neighbors=args.neighbors,
+            memory_texts=memory_texts,
         )
         seed_pairs = _merge_pairs(pattern_pairs, store_pairs, top_k=args.topk)
         source_by_pair = {
@@ -198,6 +201,7 @@ def main() -> None:
                 corrected_memory=record.corrected_memory,
                 repair_guidance=record.repair_guidance,
                 retrieved_items=tuple(item.text for item in recall_set),
+                memory_texts=memory_texts,
                 recovery_gain=recovered_net,
             )
             pattern_written = pattern_record is not None
