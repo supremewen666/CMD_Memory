@@ -26,6 +26,43 @@ ECS 是机制层，不是 Exp14 的证据路径。Exp14 只使用 `run_single_re
 
 论文头条是 C4：**LLM 命名故障并自定位 hop 后，恢复率仍等于随机；只有反事实验证能把恢复率抬到 0.5067。** 这回答“为什么需要复杂归因”：不是归因本身要复杂，而是隐性故障下 LLM 自选修复点不可靠。
 
+## 最新结论汇总 (2026-06 重跑 + 新实验，supersedes 下方旧规模表)
+
+**规模已变**：multihop 重建为 **4 标签×60=240 平衡集（`graph_error` 删除）**，recurrent 流 **600**，three-source **72/150**。本节是当前权威数字；下方各实验小节的表是 75/35/30 旧规模，已被本节取代。
+
+| Claim | 当前裁决（240/600 规模） | 关键数字 |
+|---|---|---|
+| **C4**（头条，最强） | ✅✅ 更强 | cmd 0.596 vs llm_judge 0.192 vs random 0.208 vs no_repair 0；配对 **cmd vs llm 115/18 p=1.7e-18**、vs random 106/13、vs no_repair 143/0。per-label：injection 0.70/0.00、granularity 0.62/0.03、safety 0.63/0.02、retrieval 0.43/0.72（llm_judge 塌缩到只会 retrieval 43/60）。 |
+| **C1** | ✅ | 隐性故障(injection/granularity/safety)上 llm_judge≈0，cmd 高；retrieval 上 llm 反超。 |
+| **C5**（同套迁移） | ⚠️ 相对旧表反转 | oracle 0.500，**global 0.458 与 oracle 打平**（−0.042，p=0.295 n.s.），**bm25 0.396 显著低于 oracle**（−0.104，p=0.011***）。只声称 global 平 oracle。 |
+| **C5/C13**（跨源） | ⚠️ 弱 + 有 bug | oracle 仅 0.236；**`global_all`=0 是死臂 bug**（0 seed，需修 `run_experiment_13` 全源聚合键）。 |
+| **C7**（进化） | ⚠️ **重述：暖机复用，非自我提升** | 恢复率被单点天花板钉在 ~0.81 不动（CA p=0.99）；学习在**成本轴**：seed-hit 冷 0.533→暖 0.786（Fisher p=0.028）、到恢复 rollout 3.77→1.24（MWU p=0.038）、fallback 份额 38%→2%；**无持续斜率**（seed-hit CA p=0.099）。Exp19 二级(0.813)≈Exp18 一级(0.810)，二级抽象不加分。写法："暖机后廉价复用"，并入 C5，**不写"越用越准"**。 |
+| **C8**（ECS 机制） | ⚠️ 重述 | full_ecs 0.368 / raw_corrected 0.328 / corrected_only 0.312 / **solution 0.264（最弱）** / cause_only 0.000。**EC 干净边际 = solution→full_ecs +0.104（p=0.0072，仅 wrong_cause 块差）**；但 full_ecs≈raw_corrected（n.s.）、guidance 单加 −0.048。头条："修正内容 ≫ 解释(cause_only=0)；EC 框有用且即 skill 触发键；结构胜纯内容未证"。 |
+
+### Exp20 — Generative guidance（新增，结论：文本指导已死）
+
+Runner: `run_experiment_20_generative_guidance_residual.py`（v2 含置信门控 + K 重复）。在 115 残差的 injection+safety 子集(52)上测"把 skill/guidance 当答题文本注入"。
+- v1 signed 结构：模型迷路(分<0.4)时 guidance **帮 +0.134**，快对(0.4–0.8)时 **害 −0.10～−0.17**，无差别注入互消≈0。
+- v2 门控：oracle 门 `ecs_skill_gated_oracle` 比 no_guidance **+2/52（n.s.，p=0.5）**；**可部署的 gold-free 自洽门收益 0**（模型自信地错，自洽探测不到迷路）。own_culprit 子集 skill vs no_guidance **0/0**。
+- **裁决：guidance 文本作为恢复手段死。skill 必须是【被执行的修复算子】，不是注入答题 prompt 的提示。** 此结论是 SKILL_EVOLUTION_DESIGN.md 的依据，Exp20 留作动机性负结果。
+- 输出：`generative_guidance_residual_detail.csv`。
+
+### 非确定性警示（跨主机/跨跑）
+
+`_evaluate_case` 在残差上两次跑对"有无 culprit"**翻转 19/52=37%**（8 丢 11 得）。**不是缓存**（代码无缓存层）；是**推理栈非确定性**（vLLM 连续批处理 + 跨 GPU，temperature=0 也不位级确定）+ **`rollout.py` 静默把超时当 0**（L115/120/188，应区分 LLMTimeoutError 与真 0）。**残差级结论须 ≥3 seed 平均**；C4 建在 credit≥0.4 的清晰 culprit 上，跨跑稳定，不受影响。修复：`export LLM_TIMEOUT=120` + 核对跨主机模型 build 一致。
+
+### Exp21 — Operator headroom（新增，待跑，进化方向总闸门）
+
+Runner: `run_experiment_21_operator_headroom.py`。在 115 残差上（0% 数据天花板）扫描比单点更丰富的算子：`single`(残差基线) / `double`(双点组合) / `param`(单点+item 提降权) / `richer`(取最优)，用与残差定义一致的 rollout 路径。**HEADROOM = richer 救回但 single 救不回的案例数**。并入 EC-on/off 臂（best 算子的修正内容上 [Error][Cause]+corrected vs corrected）。
+- **headroom 显著 → 算子进化为真，建可进化 skill 库**（skill body = 被执行算子）。
+- **headroom ≈0 → C6 墙立住，进化回落为复用/效率（Exp18/19）。**
+- 跑法：`export LLM_TIMEOUT=120; python -m experiments.run_experiment_21_operator_headroom --ecs-detail artifacts/sandbox/ecs_structure_ablation_detail.csv`，≥2 次比对 headroom 集。
+- 输出：`operator_headroom_detail.csv`。
+
+### 战略定位（结合竞品）
+
+机制（反事实归因/failure→rule/accept-if-improves/Shapley）已被 REFLECT、CausalFlow、CAR、MNL、RIMRULE、Reflexion/ExpeL 占满。**未占的窄缝 = agent 记忆子系统**（竞品全做 reasoning/tool-step）。新颖性 = **域 + 记忆失败本体论 + 记忆修复动作空间**，载于 skill 的 body（记忆修复算子），不在 skill 这个壳。完整设计 + 改/退场代码清单见 `SKILL_EVOLUTION_DESIGN.md`。
+
 ## 运行顺序
 
 Exp16 已裁决：`TRUE_COUPLED = 1/30 (0.033)`，MCTS 不进入正文主线；论文主线采用 offline exhaustive single-point oracle + online top-2 directed seed。Exp17/Exp18 已完成，可作为机制证据和可进化证据写入结果。
@@ -534,6 +571,8 @@ Ordered by threat to the claim chain.
 | `experiment_cross_dataset.csv` | Exp13 | C5 / generalization |
 | `experiment_cross_dataset_detail.csv` | Exp13 | C5 / generalization |
 | `significance_summary.csv` | analyze_significance | C4 / C5 / C8 paired CI + McNemar |
+| `generative_guidance_residual_detail.csv` | Exp20 | guidance-text negative result (dead) |
+| `operator_headroom_detail.csv` | Exp21 | operator-evolution gate (headroom + EC-on/off) |
 
 Do not add placeholder CSV numbers to the paper. Only cite files that exist under `artifacts/sandbox/` from a completed run.
 

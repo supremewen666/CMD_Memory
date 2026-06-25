@@ -6,7 +6,9 @@ import unittest
 
 from cmd_audit.core.models import MemoryItem
 from cmd_audit.counterfactual import (
+    OperatorSpec,
     PipelineAction,
+    apply_operator_static,
     apply_pipeline_action,
     get_legal_actions,
     attribute_single_point,
@@ -87,6 +89,67 @@ class TestPipelineActions(unittest.TestCase):
             intervention_config={"item_signal_hints": {"old": -1.0, "new": 1.0}},
         )
 
+        self.assertLess(result.index("[new priority]"), result.index("[old downweighted]"))
+
+    def test_operator_spec_filters_identity_and_merges_hints(self) -> None:
+        spec = OperatorSpec.from_actions(
+            (
+                (1, PipelineAction.IDENTITY),
+                (0, PipelineAction.RETRIEVAL_ERROR),
+                (2, PipelineAction.INJECTION_ERROR),
+            ),
+            item_signal_hints={"new": 1.0},
+        )
+
+        self.assertEqual(
+            spec.action_by_generation_point(),
+            {
+                0: PipelineAction.RETRIEVAL_ERROR,
+                2: PipelineAction.INJECTION_ERROR,
+            },
+        )
+        self.assertEqual(
+            spec.format(),
+            "gp0:retrieval_error+gp2:injection_error+hints[new=1]",
+        )
+
+        merged = spec.intervention_config(
+            {"item_signal_hints": {"old": -1.0, "invalid": object()}}
+        )
+
+        self.assertEqual(merged["item_signal_hints"], {"old": -1.0, "new": 1.0})
+
+        with self.assertRaises(ValueError):
+            OperatorSpec.from_actions(
+                (
+                    (0, PipelineAction.RETRIEVAL_ERROR),
+                    (0, PipelineAction.INJECTION_ERROR),
+                )
+            )
+
+    def test_apply_operator_static_runs_composite_with_parameters(self) -> None:
+        old = MemoryItem("old", "Kai chose Berlin for the workshop", source_event_ids=("e1",))
+        new = MemoryItem("new", "Kai chose Madrid for the workshop", source_event_ids=("e2",))
+        missed = MemoryItem("missed", "Kai booked the venue in Madrid", source_event_ids=("e3",))
+        recall_set = (old, new)
+        spec = OperatorSpec.from_actions(
+            (
+                (0, PipelineAction.RETRIEVAL_ERROR),
+                (1, PipelineAction.INJECTION_ERROR),
+            ),
+            item_signal_hints={"old": -1.0, "new": 1.0},
+        )
+
+        result = apply_operator_static(
+            "Context",
+            recall_set,
+            spec,
+            intervention_config={"candidate_items": recall_set + (missed,)},
+        )
+
+        self.assertIn("Corrected retrieval candidates", result)
+        self.assertIn("Kai booked the venue in Madrid", result)
+        self.assertIn("Normalized injected memory", result)
         self.assertLess(result.index("[new priority]"), result.index("[old downweighted]"))
 
 

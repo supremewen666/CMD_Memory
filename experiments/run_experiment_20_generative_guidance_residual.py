@@ -37,6 +37,16 @@ ecs_no_guidance isolates the (known-harmful) boilerplate text for contrast.
 Exp17 never ran ecs_no_guidance, so full_ecs's gain could not be attributed to the
 guidance vs the frame+content; this arm closes that gap.
 
+v2 adds K-repeat averaging (--repeats, damps the ~37%% inference-stack churn) and two
+CONFIDENCE-GATED arms that inject the skill ONLY when the model looks lost on the
+no-guidance answer:
+  ecs_skill_gated_oracle    gate on no-guidance score < --gate-threshold (gold; CEILING)
+  ecs_skill_gated_selfcons  gate on no-guidance answer self-consistency (gold-free; deployable)
+v1 found guidance HELPS lost cases (score<0.4: +0.134, 2 full rescues) but HURTS
+near-correct ones (mid/borderline: -0.10..-0.17), cancelling to ~0 when applied ungated.
+Gating tests whether selective injection keeps the rescue and drops the harm. Expect a
+small positive (~+2 recoveries at the ceiling, n.s. at n=52) -- direction, not headline.
+
 Gold-free guarantees:
   - corrected_context is built only by apply_pipeline_action(recall_set, gp, action);
     never copies case.gold_*.
@@ -61,6 +71,7 @@ import csv
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
+from statistics import mean, pstdev
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -86,6 +97,13 @@ from experiments.experiment_runner_common import (
 from experiments.probe_exhaustive import _evaluate_case
 
 ARMS = ("corrected_only", "ecs_no_guidance", "ecs_template", "ecs_skill")
+# Derived confidence-gated arms: inject the guidance/skill ONLY when the model
+# looks lost on the no-guidance answer. Exp20 v1 showed guidance HELPS when the
+# model is far from right (score<0.4, meanDelta +0.134) but HURTS when it is
+# already close (mid/borderline bands, -0.10..-0.17); applied ungated the two
+# cancel to ~0. Gating is meant to keep the rescue and drop the harm.
+GATED_ARMS = ("ecs_skill_gated_oracle", "ecs_skill_gated_selfcons")
+REPORT_ARMS = ARMS + GATED_ARMS
 ABSTAIN = "<abstain>"
 
 
@@ -206,6 +224,22 @@ def _agent_answer(client, query: str, context: str) -> str:
     return out.strip() if out else ""
 
 
+def _self_consistency(answers: list[str]) -> float:
+    """Gold-free confidence proxy: mean pairwise token-Jaccard over the repeated
+    no-guidance answers. ~1.0 = the model gives the same answer every time (sure);
+    low = answers disagree across repeats (unsure -> a gate signal to inject guidance)."""
+    import re
+    toks = [set(re.findall(r"[a-z0-9]+", a.lower())) for a in answers if a.strip()]
+    if len(toks) < 2:
+        return 1.0
+    sims = []
+    for i in range(len(toks)):
+        for j in range(i + 1, len(toks)):
+            union = toks[i] | toks[j]
+            sims.append(len(toks[i] & toks[j]) / len(union) if union else 1.0)
+    return sum(sims) / len(sims) if sims else 1.0
+
+
 # --------------------------------------------------------------------------- #
 # main                                                                        #
 # --------------------------------------------------------------------------- #
@@ -222,6 +256,15 @@ def main() -> None:
     parser.add_argument("--min-credit", type=float, default=0.05)
     parser.add_argument("--answer-recovered-threshold", type=float, default=0.8)
     parser.add_argument("--skill-examples", type=int, default=3)
+    parser.add_argument("--repeats", type=int, default=3,
+                        help="Generations per arm per case, averaged to damp inference-stack "
+                             "non-determinism (the 37%% culprit/answer churn seen across hosts).")
+    parser.add_argument("--gate-threshold", type=float, default=0.4,
+                        help="Oracle gate: inject guidance only when no-guidance mean score < this "
+                             "(uses gold via the scorer; establishes the gating CEILING).")
+    parser.add_argument("--consistency-threshold", type=float, default=0.5,
+                        help="Self-consistency gate (gold-free, deployable): inject when the "
+                             "no-guidance answers agree across repeats LESS than this.")
     args = parser.parse_args()
 
     labels = {l.strip() for l in args.labels.split(",") if l.strip()}
@@ -295,29 +338,57 @@ def main() -> None:
             skill=skills.get(gold, ""),
         )
 
-        per_arm = {}
+        # K-repeat generation per arm, averaged, to damp inference-stack non-determinism.
+        arm_scores = {arm: [] for arm in ARMS}
+        arm_answers = {arm: [] for arm in ARMS}
         for arm in ARMS:
-            answer = _agent_answer(client, case.query, contexts[arm])
-            score = score_answer_with_verifier(verifier, answer, case.gold_answer)
-            recovered = score >= args.answer_recovered_threshold
-            per_arm[arm] = (score, recovered, answer)
-            tally[arm][0] += int(recovered); tally[arm][1] += 1
-            tally_by_label[gold][arm][0] += int(recovered); tally_by_label[gold][arm][1] += 1
+            for _ in range(max(1, args.repeats)):
+                ans = _agent_answer(client, case.query, contexts[arm])
+                arm_scores[arm].append(score_answer_with_verifier(verifier, ans, case.gold_answer))
+                arm_answers[arm].append(ans)
+        mscore = {a: mean(arm_scores[a]) for a in ARMS}
+        sdscore = {a: (pstdev(arm_scores[a]) if len(arm_scores[a]) > 1 else 0.0) for a in ARMS}
+        rec = {a: mscore[a] >= args.answer_recovered_threshold for a in ARMS}
+
+        # Confidence-gated guidance: inject the skill ONLY when the model looks lost.
+        nog = mscore["ecs_no_guidance"]
+        gate_oracle = nog < args.gate_threshold                       # ceiling (gold via scorer)
+        agree = _self_consistency(arm_answers["ecs_no_guidance"])
+        gate_selfcons = agree < args.consistency_threshold            # deployable (gold-free)
+        gated = {
+            "ecs_skill_gated_oracle": (gate_oracle, f"nog={nog:.2f}"),
+            "ecs_skill_gated_selfcons": (gate_selfcons, f"agree={agree:.2f}"),
+        }
+
+        for arm in ARMS:
+            tally[arm][0] += int(rec[arm]); tally[arm][1] += 1
+            tally_by_label[gold][arm][0] += int(rec[arm]); tally_by_label[gold][arm][1] += 1
             detail_rows.append({
-                "case_id": case.case_id,
-                "gold_label": gold,
-                "repair_point": f"gp{gp}:{action.value}",
-                "point_source": point_src,
-                "arm": arm,
-                "answer_score": f"{score:.4f}",
-                "recovered": str(recovered).lower(),
-                "answer": answer.replace("\n", " ")[:500],
+                "case_id": case.case_id, "gold_label": gold,
+                "repair_point": f"gp{gp}:{action.value}", "point_source": point_src,
+                "arm": arm, "mean_score": f"{mscore[arm]:.4f}", "std_score": f"{sdscore[arm]:.4f}",
+                "n_repeats": str(args.repeats), "gate_applied": "",
+                "recovered": str(rec[arm]).lower(),
+                "answer": arm_answers[arm][0].replace("\n", " ")[:300],
+            })
+        for garm, (inject, signal) in gated.items():
+            src = "ecs_skill" if inject else "ecs_no_guidance"
+            tally[garm][0] += int(rec[src]); tally[garm][1] += 1
+            tally_by_label[gold][garm][0] += int(rec[src]); tally_by_label[gold][garm][1] += 1
+            detail_rows.append({
+                "case_id": case.case_id, "gold_label": gold,
+                "repair_point": f"gp{gp}:{action.value}", "point_source": point_src,
+                "arm": garm, "mean_score": f"{mscore[src]:.4f}", "std_score": "",
+                "n_repeats": str(args.repeats),
+                "gate_applied": f"{'inject' if inject else 'withhold'}({signal})",
+                "recovered": str(rec[src]).lower(), "answer": "",
             })
         print(
-            f"  [{i}/{len(residual)}] {gold:16s} gp{gp}:{action.value:18s} "
-            f"corrected={'Y' if per_arm['corrected_only'][1] else '.'} "
-            f"template={'Y' if per_arm['ecs_template'][1] else '.'} "
-            f"skill={'Y' if per_arm['ecs_skill'][1] else '.'}"
+            f"  [{i}/{len(residual)}] {gold:16s} gp{gp}:{action.value:16s} "
+            f"nog={'Y' if rec['ecs_no_guidance'] else '.'} "
+            f"skill={'Y' if rec['ecs_skill'] else '.'} "
+            f"gated={'Y' if rec['ecs_skill' if gate_oracle else 'ecs_no_guidance'] else '.'}"
+            f"{'[inject]' if gate_oracle else ''}"
         )
 
     _print_summary(tally, tally_by_label, detail_rows)
@@ -325,7 +396,7 @@ def main() -> None:
     detail_path = write_csv_table(
         OUT / "generative_guidance_residual_detail.csv",
         ["case_id", "gold_label", "repair_point", "point_source", "arm",
-         "answer_score", "recovered", "answer"],
+         "mean_score", "std_score", "n_repeats", "gate_applied", "recovered", "answer"],
         detail_rows,
         sandbox_root=OUT,
     )
@@ -346,27 +417,37 @@ def _paired(detail_rows, a, b):
 
 
 def _print_summary(tally, tally_by_label, detail_rows) -> None:
-    print("\n=== Recovery rate per arm (residual cases) ===")
-    print(f"{'arm':16s} {'recovered':>9s} {'total':>6s} {'rate':>8s}")
-    for arm in ARMS:
+    print("\n=== Recovery rate per arm (K-repeat mean per case) ===")
+    print(f"{'arm':28s} {'recovered':>9s} {'total':>6s} {'rate':>8s}")
+    for arm in REPORT_ARMS:
         rec, tot = tally[arm]
-        print(f"{arm:16s} {rec:>9d} {tot:>6d} {(rec/tot if tot else 0):>8.4f}")
+        print(f"{arm:28s} {rec:>9d} {tot:>6d} {(rec/tot if tot else 0):>8.4f}")
+    print("\n=== Mean continuous answer-score per arm (where gating's benefit shows) ===")
+    for arm in REPORT_ARMS:
+        vals = [float(r["mean_score"]) for r in detail_rows if r["arm"] == arm and r["mean_score"]]
+        if vals:
+            print(f"{arm:28s} mean_score={mean(vals):.4f}")
     print("\n=== Per label ===")
     for lbl in sorted(tally_by_label):
         cells = " ".join(
-            f"{arm}={tally_by_label[lbl][arm][0]}/{tally_by_label[lbl][arm][1]}" for arm in ARMS
+            f"{arm}={tally_by_label[lbl][arm][0]}/{tally_by_label[lbl][arm][1]}" for arm in REPORT_ARMS
         )
         print(f"  {lbl:16s} {cells}")
-    sn, ns = _paired(detail_rows, "ecs_skill", "ecs_no_guidance")
-    tn, nt = _paired(detail_rows, "ecs_template", "ecs_no_guidance")
-    sa, ta = _paired(detail_rows, "ecs_skill", "ecs_template")
-    print("\n=== Paired marginals (frame + corrected content fixed) ===")
-    print(f"  ecs_skill    vs ecs_no_guidance: skill-wins={sn}   no_guidance-wins={ns}   <- DOES THE SKILL TEXT ADD VALUE")
-    print(f"  ecs_template vs ecs_no_guidance: template-wins={tn} no_guidance-wins={nt}   <- boilerplate harm/help")
-    print(f"  ecs_skill    vs ecs_template   : skill-wins={sa}   template-wins={ta}        <- skill vs boilerplate")
-    print("  Verdict on the skill: positive only if (ecs_skill - ecs_no_guidance) is clearly > 0.")
-    print("  If ecs_no_guidance >= ecs_skill, the guidance TEXT layer (yours included) has no value;")
-    print("  the recovery is carried by the error+cause frame + corrected content.")
+    print("\n=== Key paired comparisons (does CONFIDENCE-GATING make guidance net-positive?) ===")
+    comps = [
+        ("ecs_skill", "ecs_no_guidance", "ungated skill (the original ~0 null)"),
+        ("ecs_skill_gated_oracle", "ecs_no_guidance", "ORACLE-gated vs no-guidance (gating CEILING)"),
+        ("ecs_skill_gated_selfcons", "ecs_no_guidance", "self-consistency-gated vs no-guidance (deployable)"),
+        ("ecs_skill_gated_oracle", "ecs_skill", "gated vs always-inject (did gating drop the harm?)"),
+    ]
+    for a, b, note in comps:
+        aw, bw = _paired(detail_rows, a, b)
+        print(f"  {a:26s} vs {b:16s}: a+{aw} / b+{bw}   <- {note}")
+    print("\n  Gating succeeds if (gated_oracle - no_guidance) > 0 and >= (skill - no_guidance):")
+    print("  it should harvest the far-band rescues (score<gate) while keeping the mid-band no-guidance.")
+    print("  Self-consistency gate is the gold-free, deployable version; oracle is the ceiling.")
+    print("  NOTE: repair-point churn (~37%) is only partly damped (answers repeated, _evaluate_case run once);")
+    print("  treat single-run deltas as indicative and average across >=3 full runs before claiming significance.")
 
 
 if __name__ == "__main__":
