@@ -6,7 +6,7 @@ import tempfile
 from types import SimpleNamespace
 
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
-from cmd_audit.counterfactual import PipelineAction
+from cmd_audit.counterfactual import OperatorSpec, PipelineAction
 from cmd_audit.repair.failure_memory import (
     FailureMemorySkillLoop,
     FailureMemoryStore,
@@ -65,6 +65,8 @@ def test_mcts_result_stores_one_based_hop_index() -> None:
     assert record is not None
     assert record.key.hop_index == 2
     assert record.error_type == "injection_error"
+    assert record.operator_spec is not None
+    assert record.operator_spec.format() == "gp1:injection_error"
 
 
 def test_mcts_action_priors_return_complete_action_distribution() -> None:
@@ -110,6 +112,42 @@ def test_add_mcts_result_only_persists_recovered_records() -> None:
     assert len(store) == 0
 
 
+def test_store_retrieves_operator_specs_by_memory_fingerprint() -> None:
+    store = FailureMemoryStore()
+    operator = OperatorSpec.from_actions(
+        (
+            (0, PipelineAction.RETRIEVAL_ERROR),
+            (1, PipelineAction.INJECTION_ERROR),
+        ),
+        item_signal_hints={"item_new": 1.0},
+    )
+    store.add(
+        StepLevelRecord.from_mcts_result(
+            query="alpha project deadline",
+            hop_index=1,
+            label="retrieval_error",
+            cause="cause",
+            corrected_memory="corrected",
+            repair_guidance="guidance",
+            recovery_success=True,
+            recovery_gain=0.9,
+            memory_texts=("alpha deadline bridge evidence",),
+            operator_spec=operator,
+        )
+    )
+
+    specs, source_count = store.retrieve_operator_specs(
+        "unrelated wording",
+        max_depth=3,
+        memory_texts=("alpha deadline bridge evidence",),
+    )
+
+    assert source_count == 1
+    assert [spec.format() for spec in specs] == [
+        "gp0:retrieval_error+gp1:injection_error+hints[item_new=1]"
+    ]
+
+
 def test_skill_loop_writes_valid_pattern_and_returns_seed() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         loop = FailureMemorySkillLoop(
@@ -135,9 +173,14 @@ def test_skill_loop_writes_valid_pattern_and_returns_seed() -> None:
             corrected_memory="corrected",
             repair_guidance="guidance",
             recovery_gain=0.8,
+            operator_spec=OperatorSpec.single(1, PipelineAction.RETRIEVAL_ERROR),
         )
 
         pairs, source_count = loop.retrieve_seed_pairs(
+            "alpha project deadline",
+            max_depth=3,
+        )
+        specs, operator_source_count = loop.retrieve_operator_specs(
             "alpha project deadline",
             max_depth=3,
         )
@@ -145,8 +188,85 @@ def test_skill_loop_writes_valid_pattern_and_returns_seed() -> None:
 
     assert pattern is not None
     assert pattern.valid
+    assert pattern.operator_spec is not None
     assert pairs == [(1, "retrieval_error")]
     assert source_count == 1
+    assert [spec.format() for spec in specs] == ["gp1:retrieval_error"]
+    assert operator_source_count == 1
     # Patterns are now keyed by content cluster, so the id carries a cluster
     # suffix (one retrieval_error family here -> cluster 0).
     assert "patterns/pattern_retrieval_error_0.md" in index
+
+
+def test_skill_loop_loads_operator_specs_from_markdown_store() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = MarkdownFailureMemoryStore(tmpdir)
+        pattern_markdown = FailureMemorySkillLoop(
+            store,
+            threshold=2,
+        ).skill.format_pattern(
+            ("# Case\n\n## Diagnosis\n- **Label**: retrieval_error\n",),
+            trigger_fingerprint="alpha bridge evidence",
+            source_case_ids=("case_1", "case_2"),
+            operator_spec=OperatorSpec.from_actions(
+                (
+                    (0, PipelineAction.RETRIEVAL_ERROR),
+                    (1, PipelineAction.INJECTION_ERROR),
+                ),
+                item_signal_hints={"item_new": 1.0},
+            ),
+            recovery_track={
+                "recovered": 2,
+                "total": 2,
+                "avg_recovery_gain": 0.75,
+            },
+        )
+        store.write_pattern(
+            "pattern_retrieval_error_0",
+            pattern_markdown,
+            summary="retrieval_error, 2 source cases, valid=true",
+        )
+
+        cold_loop = FailureMemorySkillLoop(store)
+        loaded = cold_loop.load_patterns_from_disk()
+        specs, source_count = cold_loop.retrieve_operator_specs(
+            "unrelated wording",
+            max_depth=3,
+            memory_texts=("alpha bridge evidence",),
+        )
+
+    assert loaded == 1
+    assert source_count == 1
+    assert [spec.format() for spec in specs] == [
+        "gp0:retrieval_error+gp1:injection_error+hints[item_new=1]"
+    ]
+
+
+def test_markdown_store_skips_review_required_patterns() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = MarkdownFailureMemoryStore(tmpdir)
+        pattern_markdown = FailureMemorySkillLoop(store).skill.format_pattern(
+            ("# Case\n\n## Diagnosis\n- **Label**: retrieval_error\n",),
+            trigger_fingerprint="alpha bridge evidence",
+            source_case_ids=("case_1",),
+            operator_spec=OperatorSpec.single(0, PipelineAction.RETRIEVAL_ERROR),
+            recovery_track={
+                "recovered": 1,
+                "total": 1,
+                "avg_recovery_gain": 0.5,
+            },
+        )
+        store.write_pattern(
+            "pattern_retrieval_error_review",
+            pattern_markdown + "\n## Review Required\n- needs human check\n",
+            summary="retrieval_error, review required",
+        )
+
+        specs, source_count = store.retrieve_operator_specs(
+            "unrelated wording",
+            max_depth=2,
+            memory_texts=("alpha bridge evidence",),
+        )
+
+    assert specs == []
+    assert source_count == 0

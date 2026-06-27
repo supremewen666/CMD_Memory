@@ -10,7 +10,6 @@ from .harness import (
     run_real_suite,
     write_attribution_table,
     write_comparison_metrics_table,
-    write_confusion_matrix_table,
 )
 from .data_io import load_all_real_cases, load_probe_cases, load_probe_cases_v1
 
@@ -35,17 +34,17 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument(
         "--output",
         default=None,
-        help="output directory for attribution, metrics, and confusion artifacts",
+        help="output directory for attribution and operator recovery metrics",
     )
     run_parser.add_argument(
         "--metrics-out",
         default="artifacts/comparison_metrics.csv",
-        help="CSV path for CMD-vs-comparator diagnosis metrics",
+        help="CSV path for CMD operator recovery metrics",
     )
     run_parser.add_argument(
         "--confusion-out",
-        default="artifacts/attribution_confusion_matrix.csv",
-        help="CSV path for the CMD attribution confusion matrix",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     run_parser.add_argument(
         "--on-the-fly-baseline-rescore",
@@ -92,13 +91,13 @@ def main(argv: list[str] | None = None) -> int:
         "--no-hook",
         dest="use_hook",
         action="store_false",
-        help="disable Pre-CMD Hook (run all 10 replays per case)",
+        help="deprecated no-op; live V1 runtime always enters through the hook",
     )
     v1_parser.add_argument(
         "--no-prefilter",
         dest="use_hook",
         action="store_false",
-        help="deprecated alias for --no-hook",
+        help="deprecated no-op alias for --no-hook",
     )
     v1_parser.add_argument(
         "--tie-margin",
@@ -124,7 +123,6 @@ def main(argv: list[str] | None = None) -> int:
             dest = Path(args.output)
             args.out = dest / "attribution_table.csv"
             args.metrics_out = dest / "comparison_metrics.csv"
-            args.confusion_out = dest / "attribution_confusion_matrix.csv"
         cases = load_probe_cases(args.cases)
         results = run_cases(
             cases,
@@ -132,11 +130,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         write_attribution_table(results, args.out)
         write_comparison_metrics_table(results, args.metrics_out)
-        write_confusion_matrix_table(results, args.confusion_out)
         print(
             f"wrote {len(results)} attribution row(s) to {Path(args.out)} "
-            f"with comparison metrics to {Path(args.metrics_out)} "
-            f"and confusion matrix to {Path(args.confusion_out)}"
+            f"with operator recovery metrics to {Path(args.metrics_out)}"
         )
         return 0
 
@@ -169,9 +165,6 @@ def main(argv: list[str] | None = None) -> int:
             dest.mkdir(parents=True, exist_ok=True)
             write_attribution_table(results, dest / "attribution_table.csv")
             write_comparison_metrics_table(results, dest / "comparison_metrics.csv")
-            write_confusion_matrix_table(
-                results, dest / "attribution_confusion_matrix.csv"
-            )
             print(f"wrote {len(results)} V1 attribution rows to {dest}/")
         else:
             parser.error("run-v1 requires --cases or --real-data")

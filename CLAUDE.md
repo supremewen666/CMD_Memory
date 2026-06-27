@@ -138,18 +138,18 @@ cmd_audit/adapters/
   -> mem0.py / letta.py recorded-trace adapters
 ```
 
-`replays/` currently holds a flat portfolio; `TASK.md` migrates the live attribution path to `item_gate/` (Tier 2) + `counterfactual/` (Tier 3, was `mcts/`). The formation oracle replays and `reasoning` / `route` replays are removed from the live path.
+`replays/` is now a legacy/internal offline-baseline shim. The live attribution path is `item_gate/` (Tier 2) + `counterfactual/` operator specs (Tier 3); formation oracle, reasoning, route, and portfolio replays are not paper-facing live modules.
 
 Probe datasets (`data/probe_cases/`, built by `experiments/build_probe_cases.py`): `real_multihop_cases.json` (4-action single-fault chains, C4/C5), `real_recurrent_cases.json` (same-chain query families with fixed label across paraphrased variants — the recurrence structure C7 self-evolution needs), `real_three_source_cases.json` (cross-source, item labels retained), `real_coupled_failure_boundary_cases.json` (C6). 
 
 | Subpackage / Module | Role |
 |---------------------|------|
 | `core/models.py` | `ProbeCase`, `MemoryItem`, `GoldEvidence`, `BaselineOutput` dataclasses |
-| `core/labels.py` | `PIPELINE_LABEL_ORDER` (4 live step actions), `ITEM_LABELS` (5), `REPLAY_TO_LABEL`, `validate_label` |
+| `core/labels.py` | `PIPELINE_LABEL_ORDER` (4 live step actions), `ITEM_LABELS` (5), validators; `REPLAY_TO_LABEL` is legacy/offline replay mapping only. |
 | `core/llm_client.py` | Provider-agnostic LLM API client (`generate(prompt, *, system=None) -> str`) |
 | `data_io/` | `load_probe_cases`, `load_all_real_cases`, `load_real_cases_by_source` |
-| `replays/` | Intervention implementations + portfolio; being migrated to `counterfactual/` step actions |
-| `attribution/` | `assign_attribution` — recovery-gain / credit ranking over step actions |
+| `replays/` | Legacy/internal offline-baseline shim; not exported from top-level `cmd_audit` and not part of the live operator-skill path. |
+| `attribution/` | Legacy/offline replay ranking helpers; live attribution uses `counterfactual/` operator search. |
 | `scoring/phrase.py` | `answer_score`, `evidence_recall_from_text` (phrase-matching fallback) |
 | `scoring/llm.py` | `SubagentScorer`, `EvidenceVerifier`, `AnswerVerifier`; `AnswerRubricScorer` (continuous answer-axis G-Eval) |
 | `scoring/retrieval.py` | BM25 deterministic retrieval, `RetrievalMetrics`, evidence boundary enforcement |
@@ -164,8 +164,8 @@ Probe datasets (`data/probe_cases/`, built by `experiments/build_probe_cases.py`
 | `repair/actions.py` | `RepairAction`, `TargetedRepairAction`, action_type taxonomy, tool schema |
 | `repair/failure_memory.py` | `FailureMemoryStore`, composite retrieval key (target: `(query, hop, label)`), recurrence comparison |
 | `baselines/` | Comparator subpackage: evidence-recall, subagent judge, random label, llm_judge, memory-probe grid |
-| `eval/metrics.py` | `DiagnosisPrediction`, `DiagnosisMetrics`, `compute_diagnosis_metrics` (macro F1) |
-| `eval/writers.py` | Shared CSV/text writers (`write_attribution_table`, `write_confusion_matrix_table`, etc.) |
+| `eval/metrics.py` | Internal diagnostic label metrics only; macro-F1 is not a live/release headline. |
+| `eval/writers.py` | Shared CSV/text writers (`write_attribution_table`, recovery metrics, step-level metrics, provenance; confusion writer retained for internal diagnostics). |
 | `eval/provenance.py` | `ProvenanceTracker`, HMAC tamper detection, `get_graph_distractor_edges()` |
 | `eval/surrogate_gap.py` | Surrogate-vs-gold recovery-gain measurement |
 | `eval/release_gates.py` | `GateResult`, `GateReview`, phase gate checks |
@@ -206,8 +206,8 @@ Full domain language and taxonomy live in `CONTEXT.md`.
 Primary artifacts:
 
 - `artifacts/attribution_table*.csv` — per-case predicted label, per-hop credit, recovery gains, comparator outputs.
-- `artifacts/attribution_confusion_matrix*.csv` — label confusion matrix for smoke, per-source, or real-data runs.
-- `artifacts/comparison_metrics*.csv` — CMD vs evidence-recall / subagent_judge / llm_judge / random baselines.
+- `artifacts/comparison_metrics*.csv` — operator recovery metrics (`positive_recovery_rate`, `mean_recovery_gain`), cost, and provenance completeness.
+- `artifacts/attribution_confusion_matrix*.csv` — legacy/internal diagnostic confusion matrix; not produced by live/release runs by default.
 - `artifacts/sandbox/post_repair_table*.csv` — Post-Repair Context Replay assessment distribution.
 - `artifacts/sandbox/repair_success_table*.csv` — targeted repair outcomes.
 - `artifacts/sandbox/recurrence_*.csv|txt` — Failure Memory recurrence summaries.

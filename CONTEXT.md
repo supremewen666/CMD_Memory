@@ -22,7 +22,7 @@ Domain language for Counterfactual Memory Debugger research. Defines terminology
 
 **Error-Cause-Solution (ECS)** — A structured record: what failed, which operation caused it, what corrected memory should replace it, and what repair guidance to apply.
 
-**Failure Memory** — A store of ECS records, retrieved by keyword match on current task, injected as `corrected_memory + repair_guidance`.
+**Failure Memory** — A store of ECS/operator records, retrieved by fingerprint match on current task. Its executable repair output (`corrected_memory` / operator-transformed context) may enter answer-time context; `repair_guidance`, `cause`, and `fm_context` remain metadata for repair selection, audit records, and skill distillation.
 
 **Post-Repair Context Replay** — After ECS, rebuild context with the repair and re-run the original query. Outputs `recovered` / `partial` / `failed`. This is CMD's automated quality gate.
 
@@ -194,7 +194,7 @@ CMD's Tier 3 single-point counterfactual scan diagnoses retrieval-period failure
 
 4. **ECS cause constraint**: a step-action ECS cause must name a step action (`retrieval_error` etc.), not borrow item-label vocabulary; a Tier 2 item ECS cause uses the item label directly. The two streams stay separate — pipeline ECS never re-declares item-fault names in free text.
 
-5. **Context construction mode**: Failure Memory injects only `corrected_memory + repair_guidance`. Contrastive mode (`wrong_memory + cause + corrected_memory + repair_guidance`) is experimental. **Gold-free construction guard** (structural, not text-based): repaired context is a pure function of `(recall_set, pipeline_action)` via `apply_pipeline_action` and never reads `case.gold_*` — scoring legitimately uses gold, construction does not. This isolates the selection-policy claim (CMD-repair vs no-repair vs random / llm_judge, all sharing one gold-free executor) from any gold leak.
+5. **Context construction mode**: Answer-time repair context receives only executable repaired content: `corrected_memory` or an operator-transformed context. `repair_guidance`, `cause`, `wrong_memory`, and `fm_context` do not enter the answer prompt; they are metadata for action selection, audit, and skill distillation. **Gold-free construction guard** (structural, not text-based): repaired context is a pure function of `(recall_set, pipeline_action)` via `apply_pipeline_action` and never reads `case.gold_*` — scoring legitimately uses gold, construction does not. This isolates the selection-policy claim (CMD-repair vs no-repair vs random / llm_judge, all sharing one gold-free executor) from any gold leak.
 
 6. **Perturbation type**: Probe Case `perturbation_type` is an injected ground-truth label, never guessed.
 
@@ -217,7 +217,7 @@ CMD's Tier 3 single-point counterfactual scan diagnoses retrieval-period failure
 - **Formation failures** (write / compression / premature_extraction / ingestion) are not labels — absorbed by Fill branch as evidence-missing.
 - **Interventions** for step actions: oracle_retrieval, injection_oracle, oracle_granularity, graph_off, safety_off.
 - **Post-Repair Context Replay** follows **ECS** and serves as automated quality gate.
-- **Failure Memory** stores `wrong_memory + original_evidence + corrected_memory + repair_guidance` per ECS record; `fm_context` = diagnosis signal, `corrected_memory` = repair signal.
+- **Failure Memory** stores `wrong_memory + original_evidence + corrected_memory + repair_guidance` per ECS/operator record; `repair_guidance`/`fm_context` are metadata signals, while `corrected_memory` or the operator-transformed context is the answer-time repair signal.
 - **Hook** gates two branches: Fill (evidence missing → re-extract this turn, no diagnosis) vs Fix (evidence present → Tier 2 item gate → Tier 3 pipeline MCTS). Tier 2 and Tier 3 run inside Fix branch, in series not parallel.
 - **RepairOrchestrator** iterates `close_deltas` via **RepairExecutor** → LLM selects **RepairAction** → **Adapter.apply_repair** → Post-Repair Context Replay.
 

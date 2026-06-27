@@ -13,6 +13,8 @@ This package contains the runnable evidence for `EXPERIMENT.md`. The active pape
 | C8 | `python -m experiments.run_experiment_17_ecs_structure_ablation` | ECS structure ablation with fixed repair content. |
 | C7 | `python -m experiments.run_experiment_18_failure_memory_trajectory` | Online FailureMemory trajectory: recovered priors reduce cost-to-recovery. |
 | C7/P5 | `python -m experiments.run_experiment_19_skill_abstraction` | Two-tier FailureMemory skill abstraction: recovered cases -> validated patterns -> pattern seeds. |
+| Operator evolution | `python -m experiments.run_experiment_21_operator_headroom` | Composite/parameterized operator headroom over single-point residuals. |
+| Operator transfer | `python -m experiments.run_experiment_22_operator_transfer` | Leave-one-out operator-skill transfer with fingerprint retrieval and same-budget random control. |
 
 Recommended sequence:
 
@@ -25,6 +27,11 @@ python -m experiments.run_experiment_16_coupled_exhaustive
 python -m experiments.run_experiment_18_failure_memory_trajectory
 python -m experiments.run_experiment_19_skill_abstraction
 python -m experiments.run_experiment_17_ecs_structure_ablation
+python -m experiments.run_experiment_21_operator_headroom --ecs-detail artifacts/ecs_structure_ablation_detail.csv --out artifacts/sandbox/operator_headroom_detail.csv
+python -m experiments.run_experiment_22_operator_transfer --operator-bank artifacts/sandbox/operator_headroom_detail.csv --out artifacts/sandbox/operator_transfer_detail_run1.csv
+python -m experiments.run_experiment_22_operator_transfer --operator-bank artifacts/sandbox/operator_headroom_detail.csv --out artifacts/sandbox/operator_transfer_detail_run2.csv --random-seed 23
+python -m experiments.run_experiment_22_operator_transfer --operator-bank artifacts/sandbox/operator_headroom_detail.csv --out artifacts/sandbox/operator_transfer_detail_run3.csv --random-seed 24
+python -m experiments.analyze_operator_transfer --csv artifacts/sandbox/operator_transfer_detail_run1.csv artifacts/sandbox/operator_transfer_detail_run2.csv artifacts/sandbox/operator_transfer_detail_run3.csv
 ```
 
 ## Legacy runners

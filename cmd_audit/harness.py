@@ -8,7 +8,6 @@ from typing import Any
 
 from .attribution import AttributionResult, assign_replay_baseline_attribution
 from cmd_audit.baselines.comparators import BaselineSuiteResult, run_baseline_suite
-from .eval import DiagnosisPrediction, compute_diagnosis_metrics
 from .core.models import ProbeCase, RetrievedItem, MemoryItem
 from .data_io import load_all_real_cases
 from .repair import (
@@ -42,7 +41,6 @@ from .replays import (
 from .scoring import answer_score, evidence_recall_from_text
 from .eval import (
     write_attribution_table,
-    write_confusion_matrix_table,
     write_csv_table,
     write_post_repair_table,
     write_provenance_completeness_summary,
@@ -54,7 +52,15 @@ from .item_gate import (
     item_signal_hints_from_result,
     run_item_gate_for_recall_set,
 )
-from .counterfactual import PipelineAction, SearchResult, attribute_single_point
+from .counterfactual import (
+    OperatorSpec,
+    PipelineAction,
+    SearchResult,
+    attribute_single_point,
+    evaluate_operator_spec,
+)
+
+_SKILL_OPERATOR_ACCEPT_THRESHOLD = 0.0
 
 
 @dataclass(frozen=True)
@@ -383,74 +389,28 @@ def write_repair_success_table_from_full(
     return rows
 
 
-def diagnosis_predictions(result: AuditResult) -> tuple[DiagnosisPrediction, ...]:
-    predicted_label = None
-    top2_labels: tuple[str, ...] = ()
-    if result.attribution is not None:
-        predicted_label = result.attribution.predicted_label
-        top2_labels = result.attribution.top2_labels
-    predictions = [
-        DiagnosisPrediction(
-            system_name="CMD-Audit",
-            case_id=result.case_id,
-            gold_label=result.perturbation_label,
-            predicted_label=predicted_label,
-            top2_labels=top2_labels,
-            cost_per_diagnosis=result.diagnosis_cost,
-        )
-    ]
-    for comparator in result.baseline_suite.comparator_results:
-        predictions.append(
-            DiagnosisPrediction(
-                system_name=comparator.comparator_name,
-                case_id=result.case_id,
-                gold_label=result.perturbation_label,
-                predicted_label=comparator.predicted_label or None,
-                top2_labels=comparator.top2_labels,
-                cost_per_diagnosis=comparator.cost_per_diagnosis,
-            )
-        )
-    return tuple(predictions)
-
-
 def write_comparison_metrics_table(
     results: list[AuditResult],
     output_path: str | Path,
     *,
     memory_probe_best_accuracy: float | None = None,
 ) -> None:
-    predictions = [
-        prediction for result in results for prediction in diagnosis_predictions(result)
-    ]
-    metrics = compute_diagnosis_metrics(predictions)
-
     fieldnames = [
         "system_name",
-        "attribution_accuracy",
-        "macro_f1",
-        "top2_accuracy",
+        "cases",
+        "triggered_cases",
+        "positive_recovery_rate",
+        "mean_recovery_gain",
         "cost_per_diagnosis",
+        "provenance_completeness",
     ]
     if memory_probe_best_accuracy is not None:
         fieldnames.append("memory_probe_best_accuracy")
 
-    rows = [
-        {
-            "system_name": row.system_name,
-            "attribution_accuracy": f"{row.attribution_accuracy:.3f}",
-            "macro_f1": f"{row.macro_f1:.3f}",
-            "top2_accuracy": f"{row.top2_accuracy:.3f}",
-            "cost_per_diagnosis": f"{row.cost_per_diagnosis:.3f}",
-            **(
-                {"memory_probe_best_accuracy": f"{memory_probe_best_accuracy:.3f}"}
-                if memory_probe_best_accuracy is not None
-                else {}
-            ),
-        }
-        for system_name in sorted(metrics)
-        for row in [metrics[system_name]]
+    attributed_results = [result for result in results if result.attribution is not None]
+    recovery_gains = [
+        float(result.attribution.recovery_gain) for result in attributed_results
     ]
-
     total_replays = sum(len(result.replays) for result in results)
     replays_with_prov = sum(
         sum(1 for replay in result.replays if replay.provenance_edges)
@@ -459,24 +419,62 @@ def write_comparison_metrics_table(
     provenance_completeness = (
         replays_with_prov / total_replays if total_replays > 0 else 0.0
     )
-    fieldnames.append("provenance_completeness")
-    rows.append(
+
+    rows: list[dict[str, str]] = [
         {
             "system_name": "CMD-Audit",
-            "attribution_accuracy": "",
-            "macro_f1": f"{provenance_completeness:.3f}",
-            "top2_accuracy": "",
-            "cost_per_diagnosis": "",
+            "cases": str(len(results)),
+            "triggered_cases": str(len(attributed_results)),
+            "positive_recovery_rate": f"{_positive_rate(recovery_gains):.3f}",
+            "mean_recovery_gain": f"{_mean(recovery_gains):.3f}",
+            "cost_per_diagnosis": f"{_mean([r.diagnosis_cost for r in results]):.3f}",
+            "provenance_completeness": f"{provenance_completeness:.3f}",
             **(
                 {"memory_probe_best_accuracy": f"{memory_probe_best_accuracy:.3f}"}
                 if memory_probe_best_accuracy is not None
                 else {}
             ),
-            "provenance_completeness": f"{replays_with_prov}/{total_replays}",
         }
-    )
+    ]
+
+    comparator_costs: dict[str, list[float]] = {}
+    for result in results:
+        for comparator in result.baseline_suite.comparator_results:
+            comparator_costs.setdefault(comparator.comparator_name, []).append(
+                comparator.cost_per_diagnosis
+            )
+
+    for comparator_name in sorted(comparator_costs):
+        rows.append(
+            {
+                "system_name": comparator_name,
+                "cases": str(len(comparator_costs[comparator_name])),
+                "triggered_cases": "0",
+                "positive_recovery_rate": "0.000",
+                "mean_recovery_gain": "0.000",
+                "cost_per_diagnosis": f"{_mean(comparator_costs[comparator_name]):.3f}",
+                "provenance_completeness": "0.000",
+                **(
+                    {
+                        "memory_probe_best_accuracy": (
+                            f"{memory_probe_best_accuracy:.3f}"
+                        )
+                    }
+                    if memory_probe_best_accuracy is not None
+                    else {}
+                ),
+            }
+        )
 
     write_csv_table(output_path, fieldnames, rows)
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _positive_rate(values: list[float]) -> float:
+    return sum(1 for value in values if value > 0.0) / len(values) if values else 0.0
 
 
 # ── Private pipeline helpers ────────────────────────────────────────────
@@ -583,17 +581,20 @@ def _run_full(
     )
     if audit.attribution is None:
         return audit
-    ecs_repair_guidance = (
-        failure_memory_store.get_repair_guidance(
-            case.query, audit.attribution.predicted_label
-        )
+    guidance_getter = (
+        getattr(failure_memory_store, "get_repair_guidance", None)
         if failure_memory_store is not None
+        else None
+    )
+    ecs_operator_metadata = (
+        guidance_getter(case.query, audit.attribution.predicted_label)
+        if callable(guidance_getter)
         else ""
     )
     ecs_draft = draft_ecs(
         case,
         audit,
-        repair_guidance=ecs_repair_guidance or None,
+        operator_metadata=ecs_operator_metadata or None,
     )
     repaired_context = build_repaired_context(case, ecs_draft)
     post_repair_scorer = evidence_scorer or scorer
@@ -676,6 +677,7 @@ def _run_with_hook(
     item_signal_hints: dict[str, float] = {}
     attribution = None
     mcts_client = _agent_generate_client(case.query, agent_generate)
+    memory_texts = tuple(item.text for item in recall_set)
     if recall_set and mcts_client is not None:
         item_gate_result = run_item_gate_for_recall_set(
             mcts_client,
@@ -686,11 +688,32 @@ def _run_with_hook(
         item_signal_hints = item_signal_hints_from_result(item_gate_result)
 
     attribution_result = None
+    mcts_max_depth = max(1, min(3, len(recall_set) or 1))
+    base_context = _initial_mcts_context(case, recall_set)
+    intervention_config = {
+        "candidate_items": case.extracted_memory,
+        "raw_events": case.raw_events,
+        "item_signal_hints": item_signal_hints,
+    }
     if attribution is None and mcts_client is not None:
-        mcts_max_depth = max(1, min(3, len(recall_set) or 1))
+        attribution_result = _try_failure_memory_operator_specs(
+            mcts_client,
+            base_context,
+            recall_set,
+            case.gold_answer,
+            case.query,
+            mcts_max_depth,
+            intervention_config,
+            answer_verifier,
+            failure_memory_store,
+            memory_texts=memory_texts,
+        )
+        attribution = _attribution_from_mcts(attribution_result)
+
+    if attribution is None and mcts_client is not None:
         attribution_result = attribute_single_point(
             mcts_client,
-            _initial_mcts_context(case, recall_set),
+            base_context,
             recall_set,
             case.gold_evidence,
             case.gold_answer,
@@ -702,25 +725,25 @@ def _run_with_hook(
                 if baseline_answer_score_llm is not None
                 else baseline.answer_score
             ),
-            intervention_config={
-                "candidate_items": case.extracted_memory,
-                "raw_events": case.raw_events,
-                "item_signal_hints": item_signal_hints,
-            },
-            action_priors=(
-                {
-                    hop: failure_memory_store.get_mcts_action_priors(
-                        case.query,
-                        hop_index=hop,
-                    )
-                    for hop in range(1, mcts_max_depth + 1)
-                }
-                if failure_memory_store is not None
-                else None
+            intervention_config=intervention_config,
+            action_priors=_failure_memory_action_priors(
+                failure_memory_store,
+                case.query,
+                max_depth=mcts_max_depth,
+                memory_texts=memory_texts,
             ),
         )
-        if failure_memory_store is not None:
-            failure_memory_store.add_attribution_result(case.query, attribution_result)
+        add_attribution_result = (
+            getattr(failure_memory_store, "add_attribution_result", None)
+            if failure_memory_store is not None
+            else None
+        )
+        if callable(add_attribution_result):
+            add_attribution_result(
+                case.query,
+                attribution_result,
+                memory_texts=memory_texts,
+            )
         attribution = _attribution_from_mcts(attribution_result)
     if attribution is None:
         attribution = _attribution_from_structural_gap(case)
@@ -798,6 +821,132 @@ def _agent_generate_client(
     if agent_generate is None:
         return None
     return _AgentGenerateClient(query, agent_generate)
+
+
+def _try_failure_memory_operator_specs(
+    client: Any,
+    initial_context: str,
+    recall_set: tuple[MemoryItem, ...],
+    gold_answer: str,
+    query: str,
+    max_depth: int,
+    intervention_config: dict[str, Any],
+    answer_verifier: Any,
+    failure_memory_store: FailureMemoryStore | None,
+    *,
+    memory_texts: tuple[str, ...],
+    top_k: int = 2,
+    accept_threshold: float = _SKILL_OPERATOR_ACCEPT_THRESHOLD,
+) -> SearchResult | None:
+    """Try matched Failure Memory operator skills before exhaustive search.
+
+    The operator construction path is gold-free; ``gold_answer`` is used only
+    for the recovery gate. If no matched operator improves over the identity
+    backbone, callers fall back to single-point attribution.
+    """
+    if failure_memory_store is None:
+        return None
+    retrieve_operator_specs = getattr(
+        failure_memory_store,
+        "retrieve_operator_specs",
+        None,
+    )
+    if not callable(retrieve_operator_specs):
+        return None
+    operator_specs, _source_count = retrieve_operator_specs(
+        query,
+        max_depth=max_depth,
+        top_k=top_k,
+        memory_texts=memory_texts,
+    )
+    if not operator_specs:
+        return None
+
+    identity = evaluate_operator_spec(
+        client,
+        initial_context,
+        recall_set,
+        OperatorSpec(),
+        max_depth=max_depth,
+        gold_answer=gold_answer,
+        answer_verifier=answer_verifier,
+        intervention_config=intervention_config,
+    )
+    if not identity.successful:
+        return None
+
+    best_spec: OperatorSpec | None = None
+    best_gain = accept_threshold
+    for spec in operator_specs:
+        result = evaluate_operator_spec(
+            client,
+            initial_context,
+            recall_set,
+            spec,
+            max_depth=max_depth,
+            gold_answer=gold_answer,
+            answer_verifier=answer_verifier,
+            intervention_config=intervention_config,
+        )
+        if not result.successful:
+            continue
+        net_gain = result.score - identity.score
+        if net_gain > best_gain:
+            best_gain = net_gain
+            best_spec = spec
+
+    if best_spec is None or not best_spec.steps:
+        return None
+    return _search_result_from_operator_spec(best_spec, best_gain)
+
+
+def _failure_memory_action_priors(
+    failure_memory_store: Any,
+    query: str,
+    *,
+    max_depth: int,
+    memory_texts: tuple[str, ...],
+) -> dict[int, dict[str, float]] | None:
+    if failure_memory_store is None:
+        return None
+    get_priors = getattr(failure_memory_store, "get_mcts_action_priors", None)
+    if not callable(get_priors):
+        return None
+    return {
+        hop: get_priors(
+            query,
+            hop_index=hop,
+            memory_texts=memory_texts,
+        )
+        for hop in range(1, max_depth + 1)
+    }
+
+
+def _search_result_from_operator_spec(
+    operator_spec: OperatorSpec,
+    recovery_gain: float,
+) -> SearchResult:
+    """Project an accepted operator skill into the existing SearchResult shape."""
+    action_credits: dict[int, dict[PipelineAction, float]] = {}
+    for step in operator_spec.steps:
+        credits = action_credits.setdefault(
+            step.generation_point,
+            {PipelineAction.IDENTITY: 0.0},
+        )
+        credits[step.action] = recovery_gain
+
+    main = operator_spec.steps[0]
+    return SearchResult(
+        best_action_sequence=tuple(step.action for step in operator_spec.steps),
+        main_culprit=(main.generation_point, main.action, recovery_gain),
+        action_credits=action_credits,
+        iterations_completed=len(operator_spec.steps),
+        nodes_explored=len(operator_spec.steps) + 1,
+        terminal_rollouts=1,
+        early_stops=1,
+        search_time_seconds=0.0,
+        avg_rollout_time=0.0,
+    )
 
 
 def _attribution_from_mcts(attribution_result: SearchResult | None) -> AttributionResult | None:
@@ -961,7 +1110,7 @@ def run_real_suite(
 
     Loads the full 596+5 real probe case suite, runs the pipeline
     (with the Pre-CMD Hook by default), and writes attribution table, comparison
-    metrics, and confusion matrix to *out_dir*.
+    operator recovery metrics, step-level metrics, and provenance to *out_dir*.
     """
     dest = Path(out_dir)
     dest.mkdir(parents=True, exist_ok=True)
@@ -994,12 +1143,10 @@ def run_real_suite(
 
     att_path = dest / "attribution_table.csv"
     metrics_path = dest / "comparison_metrics.csv"
-    confusion_path = dest / "attribution_confusion_matrix.csv"
     provenance_path = dest / "provenance_completeness.csv"
 
     write_attribution_table(results, att_path)
     write_comparison_metrics_table(results, metrics_path)
-    write_confusion_matrix_table(results, confusion_path)
     write_step_level_metrics_table(results, dest / "step_level_metrics.csv")
     write_provenance_completeness_summary(results, provenance_path)
     if ran_full:

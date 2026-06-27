@@ -1,4 +1,7 @@
-"""Public API for cmd_audit.replays."""
+"""Legacy/offline replay shim for diagnostics and adapter baselines.
+
+The live CMD path uses ``counterfactual`` operator specs, not this portfolio.
+"""
 
 from ._result import (
     AgentGenerate,

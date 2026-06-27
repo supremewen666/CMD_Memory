@@ -1,6 +1,6 @@
 """Subagent loop orchestrator integrating confidence gate → item gate → attribution.
 
-Implements the V2 subagent loop from DISCUSSION.md:
+Implements the subagent loop from DISCUSSION.md:
 Hook confidence gate → Tier 2 item gate → Tier 3 pipeline attribution
 """
 from __future__ import annotations
@@ -209,6 +209,7 @@ class SubagentLoopOrchestrator:
         attribution_result = None
         attribution_complete = False
         item_signal_hints = item_signal_hints_from_result(item_gate_result)
+        memory_texts = tuple(item.text for item in active_recall_set)
 
         _logger.debug("Running Tier 3 step-level attribution")
 
@@ -223,16 +224,11 @@ class SubagentLoopOrchestrator:
                 max_depth=self.mcts_max_depth,
                 answer_verifier=answer_verifier,
                 intervention_config={"item_signal_hints": item_signal_hints},
-                action_priors=(
-                    {
-                        hop: active_failure_memory_store.get_mcts_action_priors(
-                            query,
-                            hop_index=hop,
-                        )
-                        for hop in range(1, self.mcts_max_depth + 1)
-                    }
-                    if active_failure_memory_store is not None
-                    else None
+                action_priors=_failure_memory_action_priors(
+                    active_failure_memory_store,
+                    query,
+                    max_depth=self.mcts_max_depth,
+                    memory_texts=memory_texts,
                 ),
             )
             attribution_complete = True
@@ -286,6 +282,28 @@ class SubagentLoopOrchestrator:
 
         # No issues found
         return None, 0.0
+
+
+def _failure_memory_action_priors(
+    failure_memory_store,
+    query: str,
+    *,
+    max_depth: int,
+    memory_texts: tuple[str, ...],
+):
+    if failure_memory_store is None:
+        return None
+    get_priors = getattr(failure_memory_store, "get_mcts_action_priors", None)
+    if not callable(get_priors):
+        return None
+    return {
+        hop: get_priors(
+            query,
+            hop_index=hop,
+            memory_texts=memory_texts,
+        )
+        for hop in range(1, max_depth + 1)
+    }
 
 
 def run_v2_subagent_loop(

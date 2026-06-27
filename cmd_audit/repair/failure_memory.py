@@ -14,6 +14,7 @@ from ..core.labels import (
     validate_label,
 )
 from ..core.models import ProbeCase
+from ..counterfactual import OperatorSpec, PipelineAction
 from .ecs import ECSDraft
 from ..scoring import evidence_recall_from_text
 from ..eval.writers import write_csv_table, write_text_artifact
@@ -498,9 +499,9 @@ def _write_recurrence_summary(
         "",
         f"Failure Memory worth keeping in scope: {summary.failure_memory_worth_keeping}",
         "",
-        "Claim: CMD Failure Memory (corrected_memory + repair_guidance)",
-        "improves future similar tasks over no-FM baseline without the",
-        "pollution risk of full failed traces.",
+        "Claim: CMD Failure Memory operator/corrected-content repairs",
+        "improve future similar tasks over no-FM baseline without injecting",
+        "full failed traces or answer-time guidance.",
         "",
         "Evidence threshold: FM useful rate >= 0.5",
         "",
@@ -626,6 +627,7 @@ class FailureMemoryDiagnosis:
     signature: str = ""
     problem_item: str = ""
     pattern: str = ""
+    operator_spec: OperatorSpec | None = None
 
     def __post_init__(self) -> None:
         validate_diagnosis_label(self.label)
@@ -722,6 +724,13 @@ class FailureMemorySkill:
                 f"- **Root Cause**: {diagnosis.cause}",
                 "",
                 "## Repair",
+                "### Operator Spec",
+                (
+                    diagnosis.operator_spec.to_markdown_block()
+                    if diagnosis.operator_spec is not None
+                    else "None recorded"
+                ),
+                "",
                 f"- **Guidance**: {diagnosis.repair_guidance}",
                 f"- **Corrected Memory**: {diagnosis.corrected_memory}",
                 "",
@@ -734,11 +743,23 @@ class FailureMemorySkill:
             ]
         )
 
-    def format_pattern(self, cases: tuple[str, ...], *, llm_client=None) -> str:
+    def format_pattern(
+        self,
+        cases: tuple[str, ...],
+        *,
+        trigger_fingerprint: str = "",
+        source_case_ids: tuple[str, ...] = (),
+        operator_spec: OperatorSpec | None = None,
+        recovery_track: dict[str, float | int] | None = None,
+        llm_client=None,
+    ) -> str:
         if llm_client is not None:
             return llm_client.generate(
                 "Abstract a reusable CMD Failure Memory pattern from these "
-                "source cases. Keep it medium-grained and cite source cases.\n\n"
+                "source cases. The output must include an executable operator "
+                "spec, trigger fingerprint, recovery track record, and source "
+                "case citations. Do not write answer-time guidance as the repair "
+                "mechanism.\n\n"
                 + "\n\n---\n\n".join(cases)
             )
         labels = sorted(
@@ -750,21 +771,42 @@ class FailureMemorySkill:
             }
         )
         diagnosis = labels[0] if len(labels) == 1 else "review_required"
+        if operator_spec is None and diagnosis in PIPELINE_STEP_ACTIONS:
+            operator_spec = OperatorSpec.single(0, PipelineAction(diagnosis))
+        track = recovery_track or {}
+        recovered = int(track.get("recovered", len(cases)))
+        total = int(track.get("total", len(cases)))
+        avg_gain = float(track.get("avg_recovery_gain", 0.0))
+        operator_block = (
+            operator_spec.to_markdown_block()
+            if operator_spec is not None
+            else "```operator-spec\n - review_required\n```"
+        )
+        source_ids = source_case_ids or tuple(
+            f"case_{i + 1}" for i in range(len(cases))
+        )
         return "\n".join(
             [
                 f"# Pattern: {diagnosis}",
                 "",
+                f"**Trigger Fingerprint**: {trigger_fingerprint or 'review_required'}",
+                "",
                 "**Trigger Conditions**:",
-                "- Cases share the same diagnosis label and repair shape.",
+                "- Recall-content fingerprint matches the source case cluster.",
+                "- Retrieved memory shape is compatible with the operator spec.",
                 "",
                 f"**Diagnosis**: {diagnosis}",
                 "",
-                "**Repair Guide**:",
-                "- Reuse only after checking a concrete source case.",
-                "- If the current case contradicts the pattern, mark for review.",
+                "## Operator Spec",
+                operator_block,
+                "",
+                "## Recovery Track Record",
+                f"- Recovered source cases: {recovered}/{total}",
+                f"- Average recovery gain: {avg_gain:.3f}",
+                "- Acceptance gate: execute the operator and keep it only if recovery improves.",
                 "",
                 "**Source Cases**:",
-                *[f"- case_{i + 1}" for i in range(len(cases))],
+                *[f"- {case_id}" for case_id in source_ids],
                 "",
                 "**Validation Status**: review_required",
                 "",
@@ -889,6 +931,69 @@ class MarkdownFailureMemoryStore:
     def read_pattern(self, pattern_id: str) -> str:
         return (self.patterns_dir / f"{pattern_id}.md").read_text(encoding="utf-8")
 
+    def list_pattern_ids(self) -> tuple[str, ...]:
+        """Return stored pattern ids in deterministic order."""
+        self.ensure()
+        return tuple(sorted(path.stem for path in self.patterns_dir.glob("*.md")))
+
+    def iter_pattern_markdowns(self) -> tuple[tuple[str, str], ...]:
+        """Return ``(pattern_id, markdown)`` pairs for stored patterns."""
+        return tuple(
+            (
+                pattern_id,
+                self.read_pattern(pattern_id),
+            )
+            for pattern_id in self.list_pattern_ids()
+        )
+
+    def read_pattern_records(self) -> tuple["FailureMemoryPatternRecord", ...]:
+        """Parse executable pattern records from markdown skill files.
+
+        Patterns marked for review, missing a parseable operator spec, or using
+        non-live labels are skipped. Concrete case files remain the source of
+        truth; this method only reloads already-distilled executable skills.
+        """
+        records: list[FailureMemoryPatternRecord] = []
+        for pattern_id, markdown in self.iter_pattern_markdowns():
+            record = _pattern_record_from_markdown(pattern_id, markdown)
+            if record is not None:
+                records.append(record)
+        return tuple(records)
+
+    def retrieve_operator_specs(
+        self,
+        query: str,
+        *,
+        max_depth: int,
+        top_k: int = 2,
+        memory_texts: tuple[str, ...] = (),
+    ) -> tuple[list[OperatorSpec], int]:
+        """Retrieve executable operator specs from persisted markdown skills."""
+        signature = _memory_fingerprint(memory_texts or (query,))
+        scored: list[tuple[float, FailureMemoryPatternRecord]] = []
+        for record in self.read_pattern_records():
+            if record.review_required or record.operator_spec is None:
+                continue
+            score = _query_signature_similarity(record.query_signature, signature)
+            if score > 0.0:
+                scored.append((score, record))
+        scored.sort(key=lambda item: item[0], reverse=True)
+
+        specs: list[OperatorSpec] = []
+        seen = set()
+        for _score, record in scored:
+            spec = record.operator_spec
+            if not _operator_within_depth(spec, max_depth):
+                continue
+            key = spec.format()
+            if key in seen:
+                continue
+            specs.append(spec)
+            seen.add(key)
+            if len(specs) >= top_k:
+                break
+        return specs, len(scored)
+
     def reuse_prompt(
         self,
         *,
@@ -932,6 +1037,10 @@ class FailureMemoryPatternRecord:
     query_signature: str
     valid: bool
     review_required: bool
+    operator_spec: OperatorSpec | None = None
+    recovery_count: int = 0
+    source_count: int = 0
+    avg_recovery_gain: float = 0.0
 
     def __post_init__(self) -> None:
         validate_label(self.label)
@@ -972,6 +1081,14 @@ class FailureMemorySkillLoop:
     def pattern_count(self) -> int:
         return len(self._patterns)
 
+    def load_patterns_from_disk(self) -> int:
+        """Load executable markdown pattern specs into the in-memory index."""
+        loaded = 0
+        for record in self.markdown_store.read_pattern_records():
+            self._patterns[record.pattern_id] = record
+            loaded += 1
+        return loaded
+
     def record_recovered_case(
         self,
         *,
@@ -985,6 +1102,7 @@ class FailureMemorySkillLoop:
         retrieved_items: tuple[str, ...] = (),
         memory_texts: tuple[str, ...] = (),
         recovery_gain: float = 0.0,
+        operator_spec: OperatorSpec | None = None,
         llm_client=None,
     ) -> FailureMemoryPatternRecord | None:
         """Write a recovered case and update its content-cluster pattern.
@@ -1002,6 +1120,10 @@ class FailureMemorySkillLoop:
             corrected_memory=corrected_memory,
             repair_guidance=repair_guidance,
             retrieved_items=retrieved_items,
+            operator_spec=operator_spec or OperatorSpec.single(
+                hop_index - 1,
+                PipelineAction(label),
+            ),
         )
         outcome = FailureMemoryOutcome(
             assessment="recovered",
@@ -1017,7 +1139,13 @@ class FailureMemorySkillLoop:
 
         fingerprint = _memory_fingerprint(memory_texts or (query,))
         cluster = self._assign_cluster(label, fingerprint)
-        cluster["cases"].append((case_id, case_markdown, hop_index))
+        cluster["cases"].append((
+            case_id,
+            case_markdown,
+            hop_index,
+            diagnosis.operator_spec,
+            recovery_gain,
+        ))
         cluster["texts"].extend(memory_texts or (query,))
         # Recompute the cluster signature from pooled text, capped at top_k so a
         # growing cluster does not blow the signature up into a near-universal
@@ -1095,6 +1223,40 @@ class FailureMemorySkillLoop:
                 break
         return pairs, len(scored)
 
+    def retrieve_operator_specs(
+        self,
+        query: str,
+        *,
+        max_depth: int,
+        top_k: int = 2,
+        memory_texts: tuple[str, ...] = (),
+    ) -> tuple[list[OperatorSpec], int]:
+        """Return executable operator specs from matching skill patterns."""
+        signature = _memory_fingerprint(memory_texts or (query,))
+        scored: list[tuple[float, FailureMemoryPatternRecord]] = []
+        for record in self._patterns.values():
+            if record.review_required or record.operator_spec is None:
+                continue
+            score = _query_signature_similarity(record.query_signature, signature)
+            if score > 0.0:
+                scored.append((score, record))
+        scored.sort(key=lambda item: item[0], reverse=True)
+
+        specs: list[OperatorSpec] = []
+        seen = set()
+        for _score, record in scored:
+            spec = record.operator_spec
+            if not _operator_within_depth(spec, max_depth):
+                continue
+            key = spec.format()
+            if key in seen:
+                continue
+            specs.append(spec)
+            seen.add(key)
+            if len(specs) >= top_k:
+                break
+        return specs, len(scored)
+
     def _write_pattern(
         self,
         label: str,
@@ -1103,12 +1265,26 @@ class FailureMemorySkillLoop:
         llm_client=None,
     ) -> FailureMemoryPatternRecord:
         bucket = cluster["cases"]
-        case_ids = tuple(case_id for case_id, _case_md, _hop in bucket)
-        case_markdowns = tuple(case_md for _case_id, case_md, _hop in bucket)
-        hop_index = Counter(hop for _case_id, _case_md, hop in bucket).most_common(1)[0][0]
+        case_ids = tuple(case_id for case_id, _case_md, _hop, _op, _gain in bucket)
+        case_markdowns = tuple(case_md for _case_id, case_md, _hop, _op, _gain in bucket)
+        hop_index = Counter(
+            hop for _case_id, _case_md, hop, _op, _gain in bucket
+        ).most_common(1)[0][0]
+        operator_spec = _most_common_operator_spec(
+            tuple(op for _case_id, _case_md, _hop, op, _gain in bucket)
+        ) or OperatorSpec.single(hop_index - 1, PipelineAction(label))
+        gains = [float(gain) for _case_id, _case_md, _hop, _op, gain in bucket]
 
         pattern_markdown = self.skill.format_pattern(
             case_markdowns,
+            trigger_fingerprint=cluster["fingerprint"],
+            source_case_ids=case_ids,
+            operator_spec=operator_spec,
+            recovery_track={
+                "recovered": len(bucket),
+                "total": len(bucket),
+                "avg_recovery_gain": sum(gains) / len(gains) if gains else 0.0,
+            },
             llm_client=llm_client,
         )
         validation = self.skill.validate_pattern(
@@ -1143,6 +1319,10 @@ class FailureMemorySkillLoop:
             query_signature=cluster["fingerprint"],
             valid=validation.valid,
             review_required=not validation.valid,
+            operator_spec=operator_spec,
+            recovery_count=len(bucket),
+            source_count=len(bucket),
+            avg_recovery_gain=sum(gains) / len(gains) if gains else 0.0,
         )
         self._patterns[pattern_id] = record
         return record
@@ -1153,9 +1333,185 @@ def _extract_case_label(case_markdown: str) -> str:
     return match.group(1) if match else ""
 
 
+def _pattern_record_from_markdown(
+    pattern_id: str,
+    pattern_markdown: str,
+) -> FailureMemoryPatternRecord | None:
+    label = _extract_pattern_label(pattern_markdown)
+    if not label:
+        return None
+    try:
+        validate_label(label)
+    except ValueError:
+        return None
+
+    operator_spec = _operator_spec_from_markdown(pattern_markdown)
+    if operator_spec is None:
+        return None
+
+    source_case_ids = _extract_source_case_ids(pattern_markdown)
+    recovery_count, source_count = _extract_recovery_counts(
+        pattern_markdown,
+        default_total=len(source_case_ids),
+    )
+    avg_gain = _extract_average_recovery_gain(pattern_markdown)
+    review_required = "## Review Required" in pattern_markdown
+    first_step = operator_spec.steps[0] if operator_spec.steps else None
+    hop_index = first_step.generation_point + 1 if first_step is not None else 1
+    return FailureMemoryPatternRecord(
+        pattern_id=pattern_id,
+        label=label,
+        hop_index=hop_index,
+        source_case_ids=source_case_ids,
+        query_signature=_extract_trigger_fingerprint(pattern_markdown),
+        valid=not review_required,
+        review_required=review_required,
+        operator_spec=operator_spec,
+        recovery_count=recovery_count,
+        source_count=source_count,
+        avg_recovery_gain=avg_gain,
+    )
+
+
+def _operator_spec_from_markdown(pattern_markdown: str) -> OperatorSpec | None:
+    match = re.search(
+        r"```operator-spec\s*(?P<body>.*?)```",
+        pattern_markdown,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return None
+    body = match.group("body")
+    steps: list[dict[str, object]] = []
+    hints: dict[str, float] = {}
+
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("-"):
+            line = line[1:].strip()
+        if line.startswith("params.item_signal_hints="):
+            hints.update(_parse_item_signal_hints(line.split("=", 1)[1]))
+            continue
+        fields = dict(re.findall(r"([A-Za-z_.]+)=([^\s]+)", line))
+        if not fields or "action" not in fields:
+            continue
+        try:
+            step = {
+                "hop_index": int(fields.get("hop", fields.get("hop_index", "1"))),
+                "action": fields["action"],
+                "select": fields.get("select", fields.get("selector", "")),
+                "transform": fields.get("transform", ""),
+            }
+            OperatorSpec.from_dict({"steps": (step,)})
+        except (ValueError, TypeError):
+            return None
+        steps.append(step)
+
+    if not steps:
+        return None
+    try:
+        return OperatorSpec.from_dict(
+            {
+                "steps": steps,
+                "params": {"item_signal_hints": hints},
+            }
+        )
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_item_signal_hints(raw: str) -> dict[str, float]:
+    hints: dict[str, float] = {}
+    for part in raw.split(","):
+        item = part.strip()
+        if not item:
+            continue
+        if ":" in item:
+            memory_id, weight = item.split(":", 1)
+        elif "=" in item:
+            memory_id, weight = item.split("=", 1)
+        else:
+            continue
+        memory_id = memory_id.strip()
+        if not memory_id:
+            continue
+        try:
+            hints[memory_id] = float(weight)
+        except ValueError:
+            continue
+    return hints
+
+
+def _extract_trigger_fingerprint(pattern_markdown: str) -> str:
+    match = re.search(
+        r"\*\*Trigger Fingerprint\*\*:\s*(.+)",
+        pattern_markdown,
+    )
+    return match.group(1).strip() if match else ""
+
+
+def _extract_source_case_ids(pattern_markdown: str) -> tuple[str, ...]:
+    match = re.search(
+        r"\*\*Source Cases\*\*:\s*(?P<body>(?:\n- .+)+)",
+        pattern_markdown,
+    )
+    if not match:
+        return ()
+    return tuple(
+        line.strip()[2:].strip()
+        for line in match.group("body").splitlines()
+        if line.strip().startswith("- ")
+    )
+
+
+def _extract_recovery_counts(
+    pattern_markdown: str,
+    *,
+    default_total: int,
+) -> tuple[int, int]:
+    match = re.search(
+        r"Recovered source cases:\s*(\d+)\s*/\s*(\d+)",
+        pattern_markdown,
+    )
+    if not match:
+        return default_total, default_total
+    return int(match.group(1)), int(match.group(2))
+
+
+def _extract_average_recovery_gain(pattern_markdown: str) -> float:
+    match = re.search(
+        r"Average recovery gain:\s*([-+]?\d+(?:\.\d+)?)",
+        pattern_markdown,
+    )
+    if not match:
+        return 0.0
+    return float(match.group(1))
+
+
 def _extract_pattern_label(pattern_markdown: str) -> str:
     match = re.search(r"\*\*Diagnosis\*\*:\s*([a-z_]+)", pattern_markdown)
     return match.group(1) if match else ""
+
+
+def _operator_within_depth(operator_spec: OperatorSpec, max_depth: int) -> bool:
+    return all(0 <= step.generation_point < max_depth for step in operator_spec.steps)
+
+
+def _most_common_operator_spec(
+    operator_specs: tuple[OperatorSpec | None, ...],
+) -> OperatorSpec | None:
+    counts: Counter[str] = Counter(
+        spec.format() for spec in operator_specs if spec is not None
+    )
+    if not counts:
+        return None
+    selected = counts.most_common(1)[0][0]
+    for spec in operator_specs:
+        if spec is not None and spec.format() == selected:
+            return spec
+    return None
 
 
 # ── Step-Level Failure Memory (TASK.md #6) ─────────────────────────────────
@@ -1216,6 +1572,7 @@ class StepLevelRecord:
     repair_guidance: str
     recovery_success: bool
     recovery_gain: float
+    operator_spec: OperatorSpec | None = None
 
     @classmethod
     def from_mcts_result(
@@ -1230,7 +1587,10 @@ class StepLevelRecord:
         recovery_gain: float,
         *,
         memory_texts: tuple[str, ...] = (),
+        operator_spec: OperatorSpec | None = None,
     ) -> "StepLevelRecord":
+        if operator_spec is None:
+            operator_spec = OperatorSpec.single(hop_index - 1, PipelineAction(label))
         key = StepLevelKey.from_components(
             query, hop_index, label, memory_texts=memory_texts
         )
@@ -1242,6 +1602,7 @@ class StepLevelRecord:
             repair_guidance=repair_guidance,
             recovery_success=recovery_success,
             recovery_gain=recovery_gain,
+            operator_spec=operator_spec,
         )
 
 
@@ -1250,6 +1611,7 @@ def step_level_record_from_mcts_result(
     mcts_result,
     *,
     recovery_success_threshold: float = 0.0,
+    memory_texts: tuple[str, ...] = (),
 ) -> StepLevelRecord | None:
     """Convert a SearchResult into a step-level Failure Memory record."""
     culprit = getattr(mcts_result, "main_culprit", None)
@@ -1273,6 +1635,8 @@ def step_level_record_from_mcts_result(
         ),
         recovery_success=recovery_gain > recovery_success_threshold,
         recovery_gain=recovery_gain,
+        operator_spec=OperatorSpec.single(int(generation_point), PipelineAction(label)),
+        memory_texts=memory_texts,
     )
 
 
@@ -1322,12 +1686,14 @@ class FailureMemoryStore:
         mcts_result,
         *,
         recovery_success_threshold: float = 0.0,
+        memory_texts: tuple[str, ...] = (),
     ) -> StepLevelRecord | None:
         """Persist step-level attribution experience for future reuse."""
         record = step_level_record_from_mcts_result(
             query,
             mcts_result,
             recovery_success_threshold=recovery_success_threshold,
+            memory_texts=memory_texts,
         )
         if record is None:
             return None
@@ -1335,6 +1701,22 @@ class FailureMemoryStore:
             return None
         self.add(record)
         return record
+
+    def add_attribution_result(
+        self,
+        query: str,
+        attribution_result,
+        *,
+        recovery_success_threshold: float = 0.0,
+        memory_texts: tuple[str, ...] = (),
+    ) -> StepLevelRecord | None:
+        """Compatibility alias for storing live attribution experience."""
+        return self.add_mcts_result(
+            query,
+            attribution_result,
+            recovery_success_threshold=recovery_success_threshold,
+            memory_texts=memory_texts,
+        )
 
     def retrieve(
         self,
@@ -1463,6 +1845,42 @@ class FailureMemoryStore:
             )
             for label in labels
         }
+
+    def retrieve_operator_specs(
+        self,
+        query: str,
+        *,
+        max_depth: int,
+        top_k: int = 2,
+        memory_texts: tuple[str, ...] = (),
+    ) -> tuple[list[OperatorSpec], int]:
+        """Return executable operator specs from similar recovered records."""
+        records = self.retrieve(
+            query=query,
+            top_k=max(top_k * 3, top_k),
+            memory_texts=memory_texts,
+        )
+        specs: list[OperatorSpec] = []
+        seen = set()
+        for record in records:
+            if not isinstance(record, StepLevelRecord):
+                continue
+            if not record.recovery_success:
+                continue
+            spec = record.operator_spec or OperatorSpec.single(
+                record.key.hop_index - 1,
+                PipelineAction(record.error_type),
+            )
+            if not _operator_within_depth(spec, max_depth):
+                continue
+            key = spec.format()
+            if key in seen:
+                continue
+            specs.append(spec)
+            seen.add(key)
+            if len(specs) >= top_k:
+                break
+        return specs, len(records)
 
     def get_hook_confidence_bonus(
         self,

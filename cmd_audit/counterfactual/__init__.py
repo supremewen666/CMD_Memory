@@ -5,24 +5,46 @@ implementation is single-point counterfactual scanning over generation points.
 Tree search and value distillation are retired from the mainline.
 """
 
-from .actions import PipelineAction, get_legal_actions, apply_pipeline_action
+from .actions import (
+    PIPELINE_ACTION_OPERATOR_DSL,
+    PipelineAction,
+    PipelineOperatorDSL,
+    SelectPredicate,
+    TransformPrimitive,
+    apply_pipeline_action,
+    get_legal_actions,
+    operator_dsl_for_action,
+)
 from .context import generate_conditioned_context
-from .operators import OperatorSpec, OperatorStep, apply_operator_static
+from .operators import (
+    OperatorExecutionResult,
+    OperatorSpec,
+    OperatorStep,
+    apply_operator_static,
+    evaluate_operator_spec,
+)
 from .search import SinglePointAttributor, SinglePointConfig, SearchResult, attribute_single_point
 from .rollout import rollout_to_terminal, RolloutResult
 
 __all__ = [
+    "OperatorExecutionResult",
     "OperatorSpec",
     "OperatorStep",
+    "PIPELINE_ACTION_OPERATOR_DSL",
     "PipelineAction",
+    "PipelineOperatorDSL",
     "RolloutResult",
     "SearchResult",
+    "SelectPredicate",
     "apply_pipeline_action",
     "apply_operator_static",
+    "evaluate_operator_spec",
     "generate_conditioned_context",
     "get_legal_actions",
+    "operator_dsl_for_action",
     "rollout_to_terminal",
     "SinglePointAttributor",
     "SinglePointConfig",
+    "TransformPrimitive",
     "attribute_single_point",
 ]

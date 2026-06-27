@@ -10,7 +10,6 @@ from .harness import (
     run_case,
     run_cases,
     run_real_suite,
-    run_replay_baseline_case,
 )
 
 # ── Core types ────────────────────────────────────────────────────────────────
@@ -20,11 +19,6 @@ from .core.models import (
     ProbeCase,
     ProvenanceEdge,
 )
-from .attribution import (
-    AttributionResult,
-    assign_attribution,
-    assign_replay_baseline_attribution,
-)
 
 # ── Label registry ────────────────────────────────────────────────────────────
 from .core.labels import (
@@ -33,7 +27,6 @@ from .core.labels import (
     PIPELINE_LABELS,
     PIPELINE_LABEL_ORDER,
     PIPELINE_STEP_ACTIONS,
-    REPLAY_TO_LABEL,
     LabelValidationError,
     MonitorAnomalyReasonError,
     validate_item_label,
@@ -50,18 +43,14 @@ from .data_io import (
 
 # ── Eval ──────────────────────────────────────────────────────────────────────
 from .eval import (
-    DiagnosisMetrics,
-    DiagnosisPrediction,
     ProvenanceTracker,
     SurrogateGapRow,
     SurrogateGapSummary,
     bootstrap_metric,
-    compute_diagnosis_metrics,
     measure_surrogate_gap,
     measure_surrogate_gaps,
     compute_surrogate_gap_summary,
     write_attribution_table,
-    write_confusion_matrix_table,
     write_post_repair_table,
     write_retrieval_metrics_table,
     write_retrieval_trace_table,
@@ -123,33 +112,25 @@ from .baselines.comparators import (
 # ── Hook (public contract) ────────────────────────────────────────────────────
 from .hook import HookDecision, ConfidenceFactors, post_retrieve_hook
 
-# ── Replays (paper-facing subset) ─────────────────────────────────────────────
-from .replays import (
-    ReplayResult,
-    run_replay_portfolio,
-)
-
 __all__ = [
     # entry points
     "AuditResult", "run_case", "run_cases", "run_real_suite",
-    "run_replay_baseline_case",
     # core types
     "Citation", "MemoryItem", "ProbeCase", "ProvenanceEdge",
-    "AttributionResult", "assign_attribution", "assign_replay_baseline_attribution",
     # label registry
     "ITEM_LABELS", "MONITOR_ANOMALY_REASON_VALUES", "PIPELINE_LABELS",
-    "PIPELINE_LABEL_ORDER", "PIPELINE_STEP_ACTIONS", "REPLAY_TO_LABEL",
+    "PIPELINE_LABEL_ORDER", "PIPELINE_STEP_ACTIONS",
     "LabelValidationError", "MonitorAnomalyReasonError",
     "validate_item_label", "validate_label", "validate_monitor_anomaly_reason",
     "PhraseMatchShortcutWarning",
     # data I/O
     "load_probe_cases", "load_probe_cases_v1",
     # eval
-    "DiagnosisMetrics", "DiagnosisPrediction", "ProvenanceTracker",
+    "ProvenanceTracker",
     "SurrogateGapRow", "SurrogateGapSummary", "bootstrap_metric",
-    "compute_diagnosis_metrics", "measure_surrogate_gap", "measure_surrogate_gaps",
+    "measure_surrogate_gap", "measure_surrogate_gaps",
     "compute_surrogate_gap_summary", "write_attribution_table",
-    "write_confusion_matrix_table", "write_post_repair_table",
+    "write_post_repair_table",
     "write_retrieval_metrics_table", "write_retrieval_trace_table",
     "write_step_level_metrics_table",
     # repair
@@ -174,7 +155,5 @@ __all__ = [
     # baselines
     "BaselineSuiteResult", "run_baseline_suite",
     # hook
-    "PreCmdDecision",
-    # replays
-    "ReplayResult", "run_replay_portfolio",
+    "HookDecision", "ConfidenceFactors", "post_retrieve_hook",
 ]

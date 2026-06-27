@@ -8,9 +8,13 @@ from cmd_audit.core.models import MemoryItem
 from cmd_audit.counterfactual import (
     OperatorSpec,
     PipelineAction,
+    SelectPredicate,
+    TransformPrimitive,
     apply_operator_static,
     apply_pipeline_action,
+    evaluate_operator_spec,
     get_legal_actions,
+    operator_dsl_for_action,
     attribute_single_point,
 )
 from cmd_audit.counterfactual.context import generate_conditioned_context
@@ -118,6 +122,18 @@ class TestPipelineActions(unittest.TestCase):
         )
 
         self.assertEqual(merged["item_signal_hints"], {"old": -1.0, "new": 1.0})
+        self.assertEqual(spec.steps[0].selector, "missed_candidates")
+        self.assertEqual(spec.steps[0].transform, "add_from_store")
+        self.assertEqual(
+            spec.to_dict()["steps"][0],
+            {
+                "generation_point": 0,
+                "hop_index": 1,
+                "action": "retrieval_error",
+                "select": "missed_candidates",
+                "transform": "add_from_store",
+            },
+        )
 
         with self.assertRaises(ValueError):
             OperatorSpec.from_actions(
@@ -151,6 +167,38 @@ class TestPipelineActions(unittest.TestCase):
         self.assertIn("Kai booked the venue in Madrid", result)
         self.assertIn("Normalized injected memory", result)
         self.assertLess(result.index("[new priority]"), result.index("[old downweighted]"))
+
+    def test_action_dsl_registry_exposes_select_transform(self) -> None:
+        dsl = operator_dsl_for_action(PipelineAction.GRANULARITY_ERROR)
+
+        self.assertIsNotNone(dsl)
+        self.assertEqual(dsl.selector, SelectPredicate.COARSE_RECALL)
+        self.assertEqual(dsl.transform, TransformPrimitive.EXPAND_GRANULARITY)
+
+    def test_evaluate_operator_spec_scores_terminal_answer(self) -> None:
+        recall_set = (
+            MemoryItem("recall", "France is in Europe", source_event_ids=("e1",)),
+        )
+        missed = MemoryItem(
+            "gold",
+            "Paris is the capital of France",
+            source_event_ids=("e2",),
+        )
+        spec = OperatorSpec.single(0, PipelineAction.RETRIEVAL_ERROR)
+
+        result = evaluate_operator_spec(
+            FakeClient(),
+            "Query: capital of France",
+            recall_set,
+            spec,
+            max_depth=1,
+            gold_answer="Paris",
+            answer_verifier=answer_verifier,
+            intervention_config={"candidate_items": recall_set + (missed,)},
+        )
+
+        self.assertTrue(result.successful)
+        self.assertEqual(result.score, 1.0)
 
 
 class TestCounterfactualAttribution(unittest.TestCase):

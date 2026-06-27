@@ -9,6 +9,7 @@ Implements the live pipeline step actions:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -41,6 +42,62 @@ class PipelineAction(Enum):
         return self in {
             PipelineAction.SAFETY_ERROR,
         }
+
+
+class SelectPredicate(Enum):
+    """Memory-item selector predicates used by pipeline repair operators."""
+
+    MISSED_CANDIDATES = "missed_candidates"
+    INJECTION_BUFFER = "injection_buffer"
+    COARSE_RECALL = "coarse_recall"
+    SAFETY_REVIEWED = "safety_reviewed"
+
+
+class TransformPrimitive(Enum):
+    """Structural transforms applied to selected memory items."""
+
+    ADD_FROM_STORE = "add_from_store"
+    RE_EMIT_ORDERED = "re_emit_ordered"
+    EXPAND_GRANULARITY = "expand_granularity"
+    RESTORE_REDACTED = "restore_redacted"
+
+
+@dataclass(frozen=True)
+class PipelineOperatorDSL:
+    """SELECT(predicate) x TRANSFORM(primitive) spec for one step action."""
+
+    action: PipelineAction
+    selector: SelectPredicate
+    transform: TransformPrimitive
+
+
+PIPELINE_ACTION_OPERATOR_DSL: dict[PipelineAction, PipelineOperatorDSL] = {
+    PipelineAction.RETRIEVAL_ERROR: PipelineOperatorDSL(
+        action=PipelineAction.RETRIEVAL_ERROR,
+        selector=SelectPredicate.MISSED_CANDIDATES,
+        transform=TransformPrimitive.ADD_FROM_STORE,
+    ),
+    PipelineAction.INJECTION_ERROR: PipelineOperatorDSL(
+        action=PipelineAction.INJECTION_ERROR,
+        selector=SelectPredicate.INJECTION_BUFFER,
+        transform=TransformPrimitive.RE_EMIT_ORDERED,
+    ),
+    PipelineAction.GRANULARITY_ERROR: PipelineOperatorDSL(
+        action=PipelineAction.GRANULARITY_ERROR,
+        selector=SelectPredicate.COARSE_RECALL,
+        transform=TransformPrimitive.EXPAND_GRANULARITY,
+    ),
+    PipelineAction.SAFETY_ERROR: PipelineOperatorDSL(
+        action=PipelineAction.SAFETY_ERROR,
+        selector=SelectPredicate.SAFETY_REVIEWED,
+        transform=TransformPrimitive.RESTORE_REDACTED,
+    ),
+}
+
+
+def operator_dsl_for_action(action: PipelineAction) -> PipelineOperatorDSL | None:
+    """Return the structural SELECT x TRANSFORM spec for a step action."""
+    return PIPELINE_ACTION_OPERATOR_DSL.get(action)
 
 
 def get_legal_actions(

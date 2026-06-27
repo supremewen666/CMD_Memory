@@ -12,7 +12,13 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from ..core.models import MemoryItem
-from .actions import PipelineAction, apply_pipeline_action
+from .actions import (
+    PipelineAction,
+    apply_pipeline_action,
+    operator_dsl_for_action,
+)
+from .context import generate_conditioned_context
+from .rollout import rollout_to_terminal
 
 
 @dataclass(frozen=True)
@@ -21,12 +27,45 @@ class OperatorStep:
 
     generation_point: int
     action: PipelineAction
+    selector: str = ""
+    transform: str = ""
 
     def __post_init__(self) -> None:
         if self.generation_point < 0:
             raise ValueError("generation_point must be >= 0")
         if self.action == PipelineAction.IDENTITY:
             raise ValueError("OperatorStep cannot use identity")
+        dsl = operator_dsl_for_action(self.action)
+        if dsl is not None:
+            if not self.selector:
+                object.__setattr__(self, "selector", dsl.selector.value)
+            if not self.transform:
+                object.__setattr__(self, "transform", dsl.transform.value)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize this step for markdown skills and artifacts."""
+        return {
+            "generation_point": self.generation_point,
+            "hop_index": self.generation_point + 1,
+            "action": self.action.value,
+            "select": self.selector,
+            "transform": self.transform,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "OperatorStep":
+        """Build a step from a serialized operator spec."""
+        raw_action = value.get("action", "")
+        action = raw_action if isinstance(raw_action, PipelineAction) else PipelineAction(str(raw_action))
+        generation_point = value.get("generation_point")
+        if generation_point is None:
+            generation_point = int(value.get("hop_index", 1)) - 1
+        return cls(
+            generation_point=int(generation_point),
+            action=action,
+            selector=str(value.get("select") or value.get("selector") or ""),
+            transform=str(value.get("transform") or ""),
+        )
 
 
 @dataclass(frozen=True)
@@ -68,6 +107,13 @@ class OperatorSpec:
         return cls(steps=steps, item_signal_hints=hints)
 
     @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "OperatorSpec":
+        """Build a spec from a serialized markdown/artifact shape."""
+        steps = tuple(OperatorStep.from_dict(item) for item in value.get("steps", ()))
+        raw_hints = value.get("item_signal_hints") or value.get("params", {}).get("item_signal_hints") or {}
+        return cls(steps=steps, item_signal_hints=_normalize_hints(raw_hints))
+
+    @classmethod
     def single(
         cls,
         generation_point: int,
@@ -94,6 +140,13 @@ class OperatorSpec:
     def action_by_generation_point(self) -> dict[int, PipelineAction]:
         """Return non-identity actions keyed by 0-based generation point."""
         return {step.generation_point: step.action for step in self.steps}
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize this operator for skill records and artifacts."""
+        return {
+            "steps": [step.to_dict() for step in self.steps],
+            "params": {"item_signal_hints": self.item_signal_hints_dict()},
+        }
 
     def intervention_config(
         self,
@@ -130,6 +183,26 @@ class OperatorSpec:
             pieces.append(f"hints[{hint_text}]")
         return "+".join(pieces) if pieces else "identity"
 
+    def to_markdown_block(self) -> str:
+        """Human-readable executable operator block for markdown skills."""
+        lines = ["```operator-spec"]
+        for step in self.steps:
+            lines.append(
+                " - "
+                f"hop={step.generation_point + 1} "
+                f"action={step.action.value} "
+                f"select={step.selector} "
+                f"transform={step.transform}"
+            )
+        if self.item_signal_hints:
+            hints = ", ".join(
+                f"{memory_id}:{weight:g}"
+                for memory_id, weight in self.item_signal_hints
+            )
+            lines.append(f" - params.item_signal_hints={hints}")
+        lines.append("```")
+        return "\n".join(lines)
+
 
 def apply_operator_static(
     context: str,
@@ -150,6 +223,72 @@ def apply_operator_static(
             intervention_config=cfg,
         )
     return current
+
+
+@dataclass(frozen=True)
+class OperatorExecutionResult:
+    """Terminal score for one executed operator."""
+
+    operator: OperatorSpec
+    terminal_context: str
+    terminal_answer: str
+    score: float
+    successful: bool
+    generation_points_completed: int
+
+
+def evaluate_operator_spec(
+    client: Any,
+    initial_context: str,
+    recall_set: tuple[MemoryItem, ...],
+    operator: OperatorSpec,
+    *,
+    max_depth: int,
+    gold_answer: str,
+    answer_verifier: Any = None,
+    intervention_config: dict[str, Any] | None = None,
+) -> OperatorExecutionResult:
+    """Execute an operator along the generation backbone and score terminal answer.
+
+    Context construction is gold-free: the operator only reads the recall set,
+    candidate memory pool, raw events, and item-signal params in
+    ``intervention_config``. The gold answer is used only for scoring.
+    """
+    cfg = operator.intervention_config(intervention_config)
+    current = initial_context
+    action_by_gp = operator.action_by_generation_point()
+    for generation_point in range(max_depth):
+        action = action_by_gp.get(generation_point, PipelineAction.IDENTITY)
+        intervened = apply_pipeline_action(
+            action,
+            current,
+            recall_set,
+            generation_point,
+            intervention_config=cfg,
+        )
+        current = generate_conditioned_context(
+            client,
+            intervened,
+            generation_point + 1,
+        )
+
+    result = rollout_to_terminal(
+        client,
+        current,
+        max_depth,
+        max_depth,
+        recall_set,
+        gold_answer,
+        answer_verifier=answer_verifier,
+    )
+    return OperatorExecutionResult(
+        operator=operator,
+        terminal_context=result.terminal_context,
+        terminal_answer=result.terminal_answer,
+        score=result.recovery_gain,
+        successful=result.rollout_successful,
+        generation_points_completed=result.generation_points_completed,
+    )
 
 
 def _normalize_hints(

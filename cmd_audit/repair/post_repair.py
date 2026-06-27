@@ -39,13 +39,17 @@ def classify_repair_assessment(
 
 @dataclass(frozen=True)
 class RepairedContext:
-    """Context rebuilt from ECS for Post-Repair Context Replay."""
+    """Context rebuilt from executable repair content for Post-Repair replay.
+
+    ``operator_metadata`` and ``fm_context`` are retained for repair audit
+    records. They do not cross into answer-time context.
+    """
 
     case_id: str
     corrected_memory: str
-    repair_guidance: str
     repaired_evidence_block: str
     original_query: str
+    operator_metadata: str = ""
     fm_context: str = ""
 
 
@@ -69,7 +73,7 @@ def draft_ecs(
     case: ProbeCase,
     audit_result,
     *,
-    repair_guidance: str | None = None,
+    operator_metadata: str | None = None,
 ) -> ECSDraft:
     """Draft an ECS record from CMD-Audit attribution results.
 
@@ -82,12 +86,12 @@ def draft_ecs(
     replay = _replay_for_label(case, audit_result, attribution.predicted_label)
     recovery_delta = float(getattr(attribution, "recovery_gain", 0.0) or 0.0)
 
-    cause, corrected_memory, repair_guidance = _ecs_for_label(
+    cause, corrected_memory, operator_documentation = _ecs_for_label(
         case,
         attribution.predicted_label,
         replay,
         recovery_delta=recovery_delta,
-        repair_guidance_override=repair_guidance,
+        operator_metadata_override=operator_metadata,
     )
 
     return ECSDraft(
@@ -95,7 +99,7 @@ def draft_ecs(
         predicted_label=attribution.predicted_label,
         cause=cause,
         corrected_memory=corrected_memory,
-        repair_guidance=repair_guidance,
+        repair_guidance=operator_documentation,
         repaired_evidence_block=replay.evidence_block,
         recovered_action=attribution.predicted_label,
         recovery_delta=recovery_delta,
@@ -107,7 +111,7 @@ def draft_ecs_for_label(
     audit_result,
     label: str,
     *,
-    repair_guidance: str | None = None,
+    operator_metadata: str | None = None,
 ) -> ECSDraft:
     """Draft an ECS record for a specific label (iterative repair).
 
@@ -130,11 +134,11 @@ def draft_ecs_for_label(
     validate_diagnosis_label(label)
     replay = _replay_for_label(case, audit_result, label)
 
-    cause, corrected_memory, repair_guidance = _ecs_for_label(
+    cause, corrected_memory, operator_documentation = _ecs_for_label(
         case,
         label,
         replay,
-        repair_guidance_override=repair_guidance,
+        operator_metadata_override=operator_metadata,
     )
 
     return ECSDraft(
@@ -142,14 +146,14 @@ def draft_ecs_for_label(
         predicted_label=label,
         cause=cause,
         corrected_memory=corrected_memory,
-        repair_guidance=repair_guidance,
+        repair_guidance=operator_documentation,
         repaired_evidence_block=replay.evidence_block,
         recovered_action=label,
     )
 
 
 def _replay_for_label(case: ProbeCase, audit_result, label: str):
-    """Return replay evidence for a label, or a minimal runtime evidence block."""
+    """Return replay evidence for a label, or a live gold-free evidence block."""
     from ..core.labels import REPLAY_TO_LABEL
     from ..replays import ReplayResult
 
@@ -163,23 +167,33 @@ def _replay_for_label(case: ProbeCase, audit_result, label: str):
                 break
 
     if replay is None:
-        # Fallback: create a minimal replay-like object for the label
-        # In offline mode with gold evidence, we can fabricate evidence_block
-        if case.gold_evidence:
-            evidence_block = " | ".join(ev.text for ev in case.gold_evidence)
-        else:
-            evidence_block = ""
-        # Create a minimal object with just evidence_block attribute
+        evidence_block = _gold_free_runtime_evidence_block(case)
         replay = ReplayResult(
             replay_name="fallback",
-            answer=case.gold_answer,
-            evidence_score=1.0,
-            answer_score=1.0,
+            answer="",
+            evidence_score=0.0,
+            answer_score=0.0,
             recovery_gain=0.0,
             evidence_block=evidence_block,
             cost_units=0.0,
         )
     return replay
+
+
+def _gold_free_runtime_evidence_block(case: ProbeCase) -> str:
+    """Best live repair content available without reading gold fields."""
+    baseline_context = case.primary_baseline.injected_context
+    if baseline_context:
+        return baseline_context
+    memory_by_id = {item.memory_id: item for item in case.extracted_memory}
+    recalled = [
+        memory_by_id[memory_id].text
+        for memory_id in case.primary_baseline.retrieved_memory_ids
+        if memory_id in memory_by_id
+    ]
+    if recalled:
+        return "\n".join(recalled)
+    return "\n".join(item.text for item in case.extracted_memory)
 
 
 def build_repaired_context(
@@ -189,9 +203,9 @@ def build_repaired_context(
     return RepairedContext(
         case_id=case.case_id,
         corrected_memory=ecs_draft.corrected_memory,
-        repair_guidance=ecs_draft.repair_guidance,
         repaired_evidence_block=ecs_draft.repaired_evidence_block,
         original_query=case.query,
+        operator_metadata=ecs_draft.repair_guidance,
         fm_context=fm_context,
     )
 
@@ -272,9 +286,9 @@ def run_hard_case_update_baseline(
     ctx = RepairedContext(
         case_id=case.case_id,
         corrected_memory=all_memory,
-        repair_guidance="Hard-case update: all extracted memory injected as context.",
         repaired_evidence_block=all_memory,
         original_query=case.query,
+        operator_metadata="Hard-case update: all extracted memory injected as context.",
     )
     return run_post_repair_context_replay(
         case,
@@ -319,22 +333,22 @@ def _ecs_for_label(
     replay,
     *,
     recovery_delta: float = 0.0,
-    repair_guidance_override: str | None = None,
+    operator_metadata_override: str | None = None,
 ) -> tuple[str, str, str]:
-    """Return (cause, corrected_memory, repair_guidance) for a predicted label."""
+    """Return (cause, corrected_memory, operator documentation) for a label."""
     from .actions import (
         get_targeted_repair_action_v1,
     )  # lazy import to avoid circular dependency
 
     action = get_targeted_repair_action_v1(predicted_label)
-    repair_guidance = repair_guidance_override or action.repair_guidance
+    operator_documentation = operator_metadata_override or action.repair_guidance
     cause = action.cause
     if recovery_delta > 0.0:
         cause = (
             f"Counterfactual action {predicted_label} recovered the case "
             f"with delta={recovery_delta:.3f}; {cause}"
         )
-    return (cause, replay.evidence_block, repair_guidance)
+    return (cause, replay.evidence_block, operator_documentation)
 
 
 def detect_gold_answer_leak(
@@ -342,12 +356,9 @@ def detect_gold_answer_leak(
 ) -> bool:
     """True when the repaired context already contains the gold answer verbatim.
 
-    Phase 1 leak guard. The recovery-rate headline is only meaningful if the
-    repaired context does NOT hand the model the answer. The fallback in
-    ``_replay_for_label`` fabricates ``evidence_block`` from ``gold_evidence``
-    (and sets answer_score=1.0), which can flow into ``corrected_memory`` and
-    make Post-Repair "recover" by copying, not by repair. A case flagged here
-    must be excluded from the leak-clean recovery rate.
+    The recovery-rate headline is only meaningful if the repaired context does
+    not hand the model the answer. Fallback evidence is built from runtime
+    memory, not gold evidence, but this guard remains as a final leak check.
 
     Empty / whitespace gold answers never count as leaked.
     """
@@ -358,19 +369,11 @@ def detect_gold_answer_leak(
 
 
 def _combine_context(ctx: RepairedContext) -> str:
-    # Executor = corrected memory + guidance. repaired_evidence_block is
-    # currently a duplicate of corrected_memory (both derive from
-    # replay.evidence_block in the ECS path, both = all_memory in the
-    # hard-case baseline), so re-injecting it only adds a repetition/recency
-    # artifact, not new content. Omitting it keeps a single evidence copy and
-    # pre-empts the "said the answer twice" critique of the executor.
-    parts = [
-        ctx.corrected_memory,
-        ctx.repair_guidance,
-    ]
-    if ctx.fm_context:
-        parts.append(ctx.fm_context)
-    return "\n".join(parts)
+    # Executor = corrected memory only. Operator metadata and failure-memory
+    # prose are repair-selection/audit records, not answer-time hints.
+    # ``repaired_evidence_block`` currently duplicates corrected_memory in the
+    # production paths, so it stays out to avoid repetition artifacts.
+    return ctx.corrected_memory
 
 
 def _verify_answer(

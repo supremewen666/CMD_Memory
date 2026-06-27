@@ -13,6 +13,12 @@ from ..eval.writers import write_csv_table, write_text_artifact
 
 @dataclass(frozen=True)
 class TargetedRepairAction:
+    """Repair-action metadata.
+
+    ``repair_guidance`` is a legacy field name kept for callers and stored
+    records. Treat it as operator documentation, not answer-time guidance.
+    """
+
     label: str
     action_name: str
     description: str
@@ -618,7 +624,11 @@ def build_repair_action_prompt(
     content: str,
     repair_guidance: str,
 ) -> str:
-    """Build the JSON-only RepairAction subagent prompt."""
+    """Build the JSON-only RepairAction subagent prompt.
+
+    The legacy ``repair_guidance`` field is supplied as operator documentation
+    for action selection; it is not an answer-time prompt hint.
+    """
     validate_diagnosis_label(label)
     return "\n\n".join(
         (
@@ -626,7 +636,7 @@ def build_repair_action_prompt(
             "ADAPTER SUPPORTED ACTIONS:\n" + json.dumps(list(supported_actions)),
             "DEFAULT TARGET STORE:\n" + target_store,
             "CONTENT TO APPLY:\n" + content,
-            "REPAIR GUIDANCE:\n" + repair_guidance,
+            "OPERATOR DOCUMENTATION:\n" + repair_guidance,
             "COUNTERFACTUAL EVIDENCE BLOCK:\n" + evidence_block,
             "FAILURE MEMORY CONTEXT:\n" + fm_context,
             "REQUIRED JSON SCHEMA:\n"

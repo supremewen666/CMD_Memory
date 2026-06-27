@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from cmd_audit.core.labels import PIPELINE_LABEL_ORDER
 from cmd_audit.eval import release_gates
 from cmd_audit.eval.release_gates import (
     _check_step_level_metrics,
@@ -74,37 +73,15 @@ def test_attribution_release_gate_includes_step_level_metrics(tmp_path: Path) ->
         [
             {
                 "system_name": "CMD-Audit",
-                "attribution_accuracy": "0.95",
-                "macro_f1": "0.94",
-                "top2_accuracy": "1.0",
-            },
-            {
-                "system_name": "evidence_recall",
-                "attribution_accuracy": "0.70",
-                "macro_f1": "0.65",
-                "top2_accuracy": "0.80",
-            },
-            {
-                "system_name": "subagent_judge",
-                "attribution_accuracy": "0.72",
-                "macro_f1": "0.68",
-                "top2_accuracy": "0.82",
-            },
-            {
-                "system_name": "random_label",
-                "attribution_accuracy": "0.20",
-                "macro_f1": "0.20",
-                "top2_accuracy": "0.40",
+                "cases": "3",
+                "triggered_cases": "3",
+                "positive_recovery_rate": "0.67",
+                "mean_recovery_gain": "0.42",
+                "cost_per_diagnosis": "1.20",
+                "provenance_completeness": "1.0",
             },
         ],
     )
-    confusion_rows = []
-    for label in PIPELINE_LABEL_ORDER:
-        row = {"gold_label": label}
-        row.update({candidate: "0" for candidate in PIPELINE_LABEL_ORDER})
-        row[label] = "3"
-        confusion_rows.append(row)
-    _write_csv(artifacts / "attribution_confusion_matrix.csv", confusion_rows)
     _write_csv(
         sandbox / "post_repair_table.csv",
         [
@@ -130,9 +107,12 @@ def test_attribution_release_gate_includes_step_level_metrics(tmp_path: Path) ->
 
     assert result.gate_id == "attribution_evidence"
     assert result.all_passed is True
-    assert "step_level_attribution_metrics" in {
-        criterion.criterion_id for criterion in result.criteria
-    }
+    criterion_ids = {criterion.criterion_id for criterion in result.criteria}
+    assert "operator_recovery_gain_metrics" in criterion_ids
+    assert "step_level_attribution_metrics" in criterion_ids
+    assert "macro_f1_exceeds_baselines" not in criterion_ids
+    assert "confusion_diagonal_dominance" not in criterion_ids
+    assert "accuracy_top2_exceeds_baselines" not in criterion_ids
 
 
 def test_runtime_integration_gate_uses_semantic_gate_id() -> None:

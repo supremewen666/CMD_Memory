@@ -109,7 +109,7 @@ class RepairOrchestrator:
 
         for label in labels_to_try:
             try:
-                repair_guidance = (
+                operator_metadata = (
                     self._fm_store.get_repair_guidance(case.query, label)
                     if self._fm_store is not None
                     else ""
@@ -118,7 +118,7 @@ class RepairOrchestrator:
                     case,
                     audit_result,
                     label,
-                    repair_guidance=repair_guidance or None,
+                    operator_metadata=operator_metadata or None,
                 )
             except LabelValidationError as exc:
                 labels_skipped.append((label, str(exc)))

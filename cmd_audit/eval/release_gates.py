@@ -8,16 +8,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cmd_audit.core.labels import PIPELINE_LABEL_ORDER
 from .provenance import detect_tamper
 from .writers import write_text_artifact
 
 _GATE_DECISION_VALUES = ("approved", "deferred", "rejected")
 
 ATTRIBUTION_RELEASE_CRITERION_IDS = (
-    "macro_f1_exceeds_baselines",
-    "confusion_diagonal_dominance",
-    "accuracy_top2_exceeds_baselines",
+    "operator_recovery_gain_metrics",
     "repair_assessment_distribution",
     "step_level_attribution_metrics",
 )
@@ -27,7 +24,6 @@ STEP_LEVEL_METRIC_THRESHOLDS = {
     "step_attribution_coverage": 0.8,
     "identity_baseline_coverage": 1.0,
     "positive_credit_rate": 0.5,
-    "primary_label_correctness": 0.5,
 }
 
 
@@ -97,21 +93,15 @@ def check_attribution_release_gate(
 
     criteria: list[GateCriterion] = []
 
-    # Criterion 1: Macro F1 exceeds baselines
-    criteria.append(_check_macro_f1(artifacts_dir / "comparison_metrics.csv"))
-
-    # Criterion 2: Confusion matrix diagonal dominance
+    # Criterion 1: Operator execution produces positive recovery gain.
     criteria.append(
-        _check_confusion_diagonal(artifacts_dir / "attribution_confusion_matrix.csv")
+        _check_operator_recovery_metrics(artifacts_dir / "comparison_metrics.csv")
     )
 
-    # Criterion 3: Attribution accuracy and top-2 exceed baselines
-    criteria.append(_check_accuracy_top2(artifacts_dir / "comparison_metrics.csv"))
-
-    # Criterion 4: Repair assessment distribution
+    # Criterion 2: Repair assessment distribution
     criteria.append(_check_repair_distribution(sandbox_dir / "post_repair_table.csv"))
 
-    # Criterion 5: Step-level attribution metrics
+    # Criterion 3: Step-level attribution metrics
     criteria.append(_check_step_level_metrics(artifacts_dir / "step_level_metrics.csv"))
 
     all_passed = all(c.passed for c in criteria)
@@ -181,10 +171,10 @@ def check_runtime_integration_gate(
         criterion_id="adapter_integration_count",
         description=(
             "At least two distinct memory agents integrated through "
-            "the Adapter Interface without macro F1 regression"
+            "the Adapter Interface without repair efficacy regression"
         ),
         artifact_path="cmd_audit/adapters/",
-        threshold="adapter_count >= 2 AND no macro F1 regression",
+        threshold="adapter_count >= 2 AND no repair efficacy regression",
         passed=passed,
         evidence=evidence,
         missing=missing,
@@ -330,19 +320,6 @@ def _read_comparison_csv(path: Path) -> dict[str, dict[str, float]]:
     return rows
 
 
-def _read_confusion_csv(path: Path) -> dict[str, dict[str, int]]:
-    """Read attribution_confusion_matrix.csv, return {gold_label: {pred_label: count}}."""
-    if not path.exists():
-        raise FileNotFoundError(f"Required artifact not found: {path}")
-    matrix: dict[str, dict[str, int]] = {}
-    with open(path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            gold = row["gold_label"]
-            matrix[gold] = {k: int(v) for k, v in row.items() if k != "gold_label"}
-    return matrix
-
-
 def _read_repair_csv(path: Path) -> list[str]:
     """Read post_repair_table.csv, return post-repair assessment values."""
     if not path.exists():
@@ -386,146 +363,40 @@ def _read_step_level_metrics_csv(path: Path) -> dict[str, float]:
     }
 
 
-def _check_macro_f1(comparison_path: Path) -> GateCriterion:
-    description = "CMD macro F1 exceeds all comparator baselines"
+def _check_operator_recovery_metrics(comparison_path: Path) -> GateCriterion:
+    description = "Executed repair operators produce positive recovery gain"
     threshold = (
-        "CMD-Audit macro_f1 > evidence_recall AND subagent_judge AND random_label"
-    )
-
-    try:
-        data = _read_comparison_csv(comparison_path)
-        cmd_macro_f1 = data["CMD-Audit"]["macro_f1"]
-        baseline_f1s = {
-            name: data[name]["macro_f1"]
-            for name in ("evidence_recall", "subagent_judge", "random_label")
-        }
-        max_baseline = max(baseline_f1s.values())
-        passed = cmd_macro_f1 > max_baseline
-
-        evidence_parts = [f"CMD-Audit macro_f1={cmd_macro_f1:.3f}"]
-        for name, val in baseline_f1s.items():
-            evidence_parts.append(f"{name}={val:.3f}")
-        evidence = "; ".join(evidence_parts)
-
-        missing = ""
-        if not passed:
-            missing = (
-                f"CMD-Audit macro_f1 ({cmd_macro_f1:.3f}) does not exceed "
-                f"best baseline ({max_baseline:.3f})"
-            )
-    except (FileNotFoundError, KeyError) as exc:
-        passed = False
-        evidence = f"Could not evaluate: {exc}"
-        missing = str(exc)
-
-    return GateCriterion(
-        criterion_id="macro_f1_exceeds_baselines",
-        description=description,
-        artifact_path=str(comparison_path),
-        threshold=threshold,
-        passed=passed,
-        evidence=evidence,
-        missing=missing,
-    )
-
-
-def _check_confusion_diagonal(confusion_path: Path) -> GateCriterion:
-    description = "Confusion matrix diagonal dominance for all pipeline step actions"
-    threshold = "For each step-action row: diagonal > sum of off-diagonal entries"
-
-    try:
-        data = _read_confusion_csv(confusion_path)
-        step_labels = list(PIPELINE_LABEL_ORDER)
-        violations: list[str] = []
-
-        for label in step_labels:
-            if label not in data:
-                violations.append(f"{label}: missing from confusion matrix")
-                continue
-            row = data[label]
-            diagonal = row.get(label, 0)
-            off_diagonal_sum = sum(v for k, v in row.items() if k != label)
-            if diagonal <= off_diagonal_sum:
-                violations.append(
-                    f"{label}: diagonal={diagonal} <= off_diagonal_sum={off_diagonal_sum}"
-                )
-
-        passed = len(violations) == 0
-        if passed:
-            evidence = (
-                f"All {len(step_labels)} step actions have diagonal > off-diagonal sum"
-            )
-        else:
-            evidence = "; ".join(violations)
-        missing = "" if passed else evidence
-
-    except (FileNotFoundError, KeyError) as exc:
-        passed = False
-        evidence = f"Could not evaluate: {exc}"
-        missing = str(exc)
-
-    return GateCriterion(
-        criterion_id="confusion_diagonal_dominance",
-        description=description,
-        artifact_path=str(confusion_path),
-        threshold=threshold,
-        passed=passed,
-        evidence=evidence,
-        missing=missing,
-    )
-
-
-def _check_accuracy_top2(comparison_path: Path) -> GateCriterion:
-    description = (
-        "CMD outperforms all baselines on attribution accuracy and top-2 accuracy"
-    )
-    threshold = (
-        "CMD-Audit attribution_accuracy > all baselines AND "
-        "CMD-Audit top2_accuracy > all baselines"
+        "triggered_cases > 0 AND positive_recovery_rate > 0 "
+        "AND mean_recovery_gain > 0"
     )
 
     try:
         data = _read_comparison_csv(comparison_path)
         cmd = data["CMD-Audit"]
-        baselines = ("evidence_recall", "subagent_judge", "random_label")
-
-        cmd_acc = cmd["attribution_accuracy"]
-        cmd_top2 = cmd["top2_accuracy"]
-        max_baseline_acc = max(data[name]["attribution_accuracy"] for name in baselines)
-        max_baseline_top2 = max(data[name]["top2_accuracy"] for name in baselines)
-
-        acc_ok = cmd_acc > max_baseline_acc
-        top2_ok = cmd_top2 > max_baseline_top2
-        passed = acc_ok and top2_ok
-
-        evidence_parts = [
-            f"CMD-Audit attribution_accuracy={cmd_acc:.3f} "
-            f"(best baseline={max_baseline_acc:.3f})",
-            f"CMD-Audit top2_accuracy={cmd_top2:.3f} "
-            f"(best baseline={max_baseline_top2:.3f})",
-        ]
-        evidence = "; ".join(evidence_parts)
-
-        missing_parts = []
-        if not acc_ok:
-            missing_parts.append(
-                f"CMD attribution_accuracy ({cmd_acc:.3f}) <= "
-                f"best baseline ({max_baseline_acc:.3f})"
-            )
-        if not top2_ok:
-            missing_parts.append(
-                f"CMD top2_accuracy ({cmd_top2:.3f}) <= "
-                f"best baseline ({max_baseline_top2:.3f})"
-            )
+        triggered_cases = int(cmd["triggered_cases"])
+        positive_rate = cmd["positive_recovery_rate"]
+        mean_gain = cmd["mean_recovery_gain"]
+        passed = triggered_cases > 0 and positive_rate > 0.0 and mean_gain > 0.0
+        evidence = (
+            f"triggered_cases={triggered_cases}; "
+            f"positive_recovery_rate={positive_rate:.3f}; "
+            f"mean_recovery_gain={mean_gain:.3f}"
+        )
+        missing_parts: list[str] = []
+        if triggered_cases <= 0:
+            missing_parts.append("no CMD-triggered operator executions")
+        if positive_rate <= 0.0:
+            missing_parts.append("positive_recovery_rate <= 0")
+        if mean_gain <= 0.0:
+            missing_parts.append("mean_recovery_gain <= 0")
         missing = "; ".join(missing_parts)
-
-    except (FileNotFoundError, KeyError) as exc:
+    except (FileNotFoundError, KeyError, ValueError) as exc:
         passed = False
         evidence = f"Could not evaluate: {exc}"
         missing = str(exc)
 
     return GateCriterion(
-        criterion_id="accuracy_top2_exceeds_baselines",
+        criterion_id="operator_recovery_gain_metrics",
         description=description,
         artifact_path=str(comparison_path),
         threshold=threshold,

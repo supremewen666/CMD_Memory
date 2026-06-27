@@ -10,6 +10,7 @@ from cmd_audit.repair import (
     FailureMemorySkill,
     MarkdownFailureMemoryStore,
 )
+from cmd_audit.counterfactual import OperatorSpec, PipelineAction
 
 
 class FailureMemorySkillContractTest(unittest.TestCase):
@@ -27,6 +28,7 @@ class FailureMemorySkillContractTest(unittest.TestCase):
             signature="schedule overlap item_conflict",
             problem_item="item_1 and item_2 conflict",
             pattern="[[pattern_temporal_conflict]]",
+            operator_spec=OperatorSpec.single(1, PipelineAction.INJECTION_ERROR),
         )
         outcome = FailureMemoryOutcome(
             assessment="recovered",
@@ -39,8 +41,44 @@ class FailureMemorySkillContractTest(unittest.TestCase):
         self.assertIn("## Retrieved Items", markdown)
         self.assertIn("**Label**: item_conflict", markdown)
         self.assertIn("## Repair", markdown)
+        self.assertIn("### Operator Spec", markdown)
+        self.assertIn("hop=2 action=injection_error", markdown)
         self.assertIn("**Assessment**: recovered", markdown)
         self.assertIn("[[pattern_temporal_conflict]]", markdown)
+
+    def test_format_pattern_emits_operator_spec_skill(self) -> None:
+        skill = FailureMemorySkill()
+        case = skill.format_case(
+            FailureMemoryDiagnosis(
+                query="Where is the workshop?",
+                label="retrieval_error",
+                cause="Retriever missed the venue memory.",
+                corrected_memory="Workshop venue is Madrid.",
+                repair_guidance="Add the missed venue memory.",
+                operator_spec=OperatorSpec.single(0, PipelineAction.RETRIEVAL_ERROR),
+            ),
+            FailureMemoryOutcome(
+                assessment="recovered",
+                recovered=True,
+                recovery_gain=0.7,
+            ),
+        )
+
+        pattern = skill.format_pattern(
+            (case,),
+            trigger_fingerprint="bridge key madrid",
+            source_case_ids=("case_bridge_1",),
+            operator_spec=OperatorSpec.single(0, PipelineAction.RETRIEVAL_ERROR),
+            recovery_track={"recovered": 1, "total": 1, "avg_recovery_gain": 0.7},
+        )
+
+        self.assertIn("**Trigger Fingerprint**: bridge key madrid", pattern)
+        self.assertIn("## Operator Spec", pattern)
+        self.assertIn("hop=1 action=retrieval_error", pattern)
+        self.assertIn("select=missed_candidates", pattern)
+        self.assertIn("## Recovery Track Record", pattern)
+        self.assertIn("- case_bridge_1", pattern)
+        self.assertIn("Acceptance gate", pattern)
 
     def test_validate_pattern_prefers_case_truth(self) -> None:
         skill = FailureMemorySkill()

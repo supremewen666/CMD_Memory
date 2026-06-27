@@ -118,9 +118,9 @@ class RepairExecutor:
         repaired_ctx = RepairedContext(
             case_id=case.case_id,
             corrected_memory=ecs_draft.corrected_memory,
-            repair_guidance=ecs_draft.repair_guidance,
             repaired_evidence_block=evidence_block,
             original_query=case.query,
+            operator_metadata=ecs_draft.repair_guidance,
             fm_context=fm_context,
         )
         post_repair = run_post_repair_context_replay(case, repaired_ctx)
