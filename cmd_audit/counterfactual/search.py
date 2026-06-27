@@ -26,6 +26,7 @@ class SinglePointConfig:
     early_stopping_threshold: float = 0.8
     time_limit_seconds: float = 30.0
     include_gated_actions: bool = True
+    include_item_actions: bool = False
     action_priors: dict[str, float] | dict[int, dict[str, float]] = field(default_factory=dict)
     restrict_to_hop: int | None = None
 
@@ -145,8 +146,10 @@ class SinglePointAttributor:
                 recall_set,
                 gen_point,
                 self.config.include_gated_actions,
+                self.config.include_item_actions,
                 _priors_for_generation_point(self.config.action_priors, gen_point),
                 self.config.restrict_to_hop,
+                intervention_config,
             ):
                 if action == PipelineAction.IDENTITY:
                     continue
@@ -272,13 +275,17 @@ def _ordered_legal_actions(
     recall_set: tuple[MemoryItem, ...],
     gen_point: int,
     include_gated_actions: bool,
+    include_item_actions: bool,
     action_priors: dict[str, float],
     restrict_to_hop: int | None,
+    intervention_config: dict[str, Any] | None,
 ) -> list[PipelineAction]:
     actions = get_legal_actions(
         recall_set,
         gen_point,
         include_gated_actions=include_gated_actions,
+        include_item_actions=include_item_actions,
+        intervention_config=intervention_config,
         restrict_to_hop=restrict_to_hop,
     )
     identity = [action for action in actions if action == PipelineAction.IDENTITY]
@@ -330,6 +337,7 @@ def attribute_single_point(
     baseline_answer_score: float = 0.0,
     intervention_config: dict[str, Any] | None = None,
     action_priors: dict[str, float] | dict[int, dict[str, float]] | None = None,
+    include_item_actions: bool = False,
     value_function_type: str = "nested",
     restrict_to_hop: int | None = None,
 ) -> SearchResult:
@@ -338,6 +346,7 @@ def attribute_single_point(
     config = SinglePointConfig(
         max_iterations=max_iterations,
         max_depth=max_depth,
+        include_item_actions=include_item_actions,
         action_priors=dict(action_priors or {}),
         restrict_to_hop=restrict_to_hop,
     )

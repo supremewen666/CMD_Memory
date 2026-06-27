@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+import re
 from typing import Any
 
 from ..core.models import MemoryItem
@@ -24,6 +26,11 @@ class PipelineAction(Enum):
     INJECTION_ERROR = "injection_error"
     GRANULARITY_ERROR = "granularity_error"
     SAFETY_ERROR = "safety_error"
+    ITEM_STALE = "item_stale"
+    ITEM_CONFLICT = "item_conflict"
+    ITEM_POISONED = "item_poisoned"
+    ITEM_WRONG = "item_wrong"
+    ITEM_COMPRESSION_DISTORTED = "item_compression_distorted"
     IDENTITY = "identity"  # No intervention (baseline)
 
     @property
@@ -33,6 +40,11 @@ class PipelineAction(Enum):
             PipelineAction.RETRIEVAL_ERROR,
             PipelineAction.INJECTION_ERROR,
             PipelineAction.GRANULARITY_ERROR,
+            PipelineAction.ITEM_STALE,
+            PipelineAction.ITEM_CONFLICT,
+            PipelineAction.ITEM_POISONED,
+            PipelineAction.ITEM_WRONG,
+            PipelineAction.ITEM_COMPRESSION_DISTORTED,
             PipelineAction.IDENTITY,
         }
 
@@ -43,6 +55,11 @@ class PipelineAction(Enum):
             PipelineAction.SAFETY_ERROR,
         }
 
+    @property
+    def is_item_level(self) -> bool:
+        """True if the action repairs a memory item rather than a pipeline step."""
+        return self in ITEM_LEVEL_ACTIONS
+
 
 class SelectPredicate(Enum):
     """Memory-item selector predicates used by pipeline repair operators."""
@@ -51,6 +68,11 @@ class SelectPredicate(Enum):
     INJECTION_BUFFER = "injection_buffer"
     COARSE_RECALL = "coarse_recall"
     SAFETY_REVIEWED = "safety_reviewed"
+    SAME_KEY_OLDER_VERSION = "same_key_older_version"
+    MUTUALLY_EXCLUSIVE_ASSERTION = "mutually_exclusive_assertion"
+    PROVENANCE_ANOMALY = "provenance_anomaly"
+    RAW_EVENT_CONTRADICTION = "raw_event_contradiction"
+    DISTORTED_SUMMARY = "distorted_summary"
 
 
 class TransformPrimitive(Enum):
@@ -60,6 +82,11 @@ class TransformPrimitive(Enum):
     RE_EMIT_ORDERED = "re_emit_ordered"
     EXPAND_GRANULARITY = "expand_granularity"
     RESTORE_REDACTED = "restore_redacted"
+    REPLACE_WITH_NEWER = "replace_with_newer"
+    DECONFLICT_HIGHER_PROVENANCE = "deconflict_higher_provenance"
+    SUPPRESS_ITEM = "suppress_item"
+    REPLACE_FROM_RAW = "replace_from_raw"
+    EXPAND_TO_RAW = "expand_to_raw"
 
 
 @dataclass(frozen=True)
@@ -92,7 +119,42 @@ PIPELINE_ACTION_OPERATOR_DSL: dict[PipelineAction, PipelineOperatorDSL] = {
         selector=SelectPredicate.SAFETY_REVIEWED,
         transform=TransformPrimitive.RESTORE_REDACTED,
     ),
+    PipelineAction.ITEM_STALE: PipelineOperatorDSL(
+        action=PipelineAction.ITEM_STALE,
+        selector=SelectPredicate.SAME_KEY_OLDER_VERSION,
+        transform=TransformPrimitive.REPLACE_WITH_NEWER,
+    ),
+    PipelineAction.ITEM_CONFLICT: PipelineOperatorDSL(
+        action=PipelineAction.ITEM_CONFLICT,
+        selector=SelectPredicate.MUTUALLY_EXCLUSIVE_ASSERTION,
+        transform=TransformPrimitive.DECONFLICT_HIGHER_PROVENANCE,
+    ),
+    PipelineAction.ITEM_POISONED: PipelineOperatorDSL(
+        action=PipelineAction.ITEM_POISONED,
+        selector=SelectPredicate.PROVENANCE_ANOMALY,
+        transform=TransformPrimitive.SUPPRESS_ITEM,
+    ),
+    PipelineAction.ITEM_WRONG: PipelineOperatorDSL(
+        action=PipelineAction.ITEM_WRONG,
+        selector=SelectPredicate.RAW_EVENT_CONTRADICTION,
+        transform=TransformPrimitive.REPLACE_FROM_RAW,
+    ),
+    PipelineAction.ITEM_COMPRESSION_DISTORTED: PipelineOperatorDSL(
+        action=PipelineAction.ITEM_COMPRESSION_DISTORTED,
+        selector=SelectPredicate.DISTORTED_SUMMARY,
+        transform=TransformPrimitive.EXPAND_TO_RAW,
+    ),
 }
+
+ITEM_LEVEL_ACTIONS = frozenset(
+    {
+        PipelineAction.ITEM_STALE,
+        PipelineAction.ITEM_CONFLICT,
+        PipelineAction.ITEM_POISONED,
+        PipelineAction.ITEM_WRONG,
+        PipelineAction.ITEM_COMPRESSION_DISTORTED,
+    }
+)
 
 
 def operator_dsl_for_action(action: PipelineAction) -> PipelineOperatorDSL | None:
@@ -105,6 +167,8 @@ def get_legal_actions(
     generation_point: int,
     *,
     include_gated_actions: bool = True,
+    include_item_actions: bool = False,
+    intervention_config: dict[str, Any] | None = None,
     restrict_to_hop: int | None = None,
 ) -> list[PipelineAction]:
     """Get legal actions for a generation point.
@@ -135,6 +199,9 @@ def get_legal_actions(
         )
         if has_safety_metadata:
             actions.append(PipelineAction.SAFETY_ERROR)
+
+    if include_item_actions:
+        actions.extend(_legal_item_actions(recall_set, intervention_config))
 
     return actions
 
@@ -220,6 +287,21 @@ def apply_pipeline_action(
 
     elif action == PipelineAction.SAFETY_ERROR:
         return _repair_safety_context(context, recall_set, intervention_config)
+
+    elif action == PipelineAction.ITEM_STALE:
+        return _repair_item_stale_context(context, recall_set, intervention_config)
+
+    elif action == PipelineAction.ITEM_CONFLICT:
+        return _repair_item_conflict_context(context, recall_set, intervention_config)
+
+    elif action == PipelineAction.ITEM_POISONED:
+        return _repair_item_poisoned_context(context, recall_set, intervention_config)
+
+    elif action == PipelineAction.ITEM_WRONG:
+        return _repair_item_wrong_context(context, recall_set, intervention_config)
+
+    elif action == PipelineAction.ITEM_COMPRESSION_DISTORTED:
+        return _repair_item_compression_context(context, recall_set, intervention_config)
 
     else:
         _logger.warning("Unknown pipeline action: %s", action)
@@ -388,6 +470,150 @@ def _repair_safety_context(
     )
 
 
+def _repair_item_stale_context(
+    context: str,
+    recall_set: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None,
+) -> str:
+    """Prefer the newest recalled version and explicitly demote older versions."""
+    versioned = _timestamped_items(recall_set)
+    if len(versioned) < 2:
+        return context
+    tolerance_days = int(
+        (intervention_config or {}).get("item_timestamp_tolerance_days", 7)
+    )
+    newest_ts, newest_item = max(versioned, key=lambda entry: entry[0])
+    older = tuple(
+        item
+        for ts, item in versioned
+        if item.memory_id != newest_item.memory_id
+        and (newest_ts - ts).total_seconds() > tolerance_days * 24 * 60 * 60
+    )
+    if not older:
+        return context
+    body = "\n".join(
+        [
+            f"- [{newest_item.memory_id} priority] {newest_item.text}",
+            *(
+                f"- [{item.memory_id} downweighted] older version retained only for audit"
+                for item in older
+            ),
+        ]
+    )
+    return _append_block(context, "Item-level stale repair", body)
+
+
+def _repair_item_conflict_context(
+    context: str,
+    recall_set: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None,
+) -> str:
+    """Re-emit conflicting recall by provenance strength without hiding items."""
+    if len(recall_set) < 2:
+        return context
+    non_poisoned = tuple(item for item in recall_set if not _is_poisoned_item(item))
+    if len(non_poisoned) < 2:
+        return context
+    ranked = sorted(
+        non_poisoned,
+        key=lambda item: (-_item_provenance_score(item), item.memory_id),
+    )
+    if _item_provenance_score(ranked[0]) == _item_provenance_score(ranked[-1]):
+        return context
+    lines = []
+    for i, item in enumerate(ranked):
+        marker = " priority" if i == 0 else " downweighted"
+        lines.append(f"- [{item.memory_id}{marker}] {item.text}")
+    return _append_block(
+        context,
+        "Item-level conflict deconfliction",
+        "\n".join(lines),
+    )
+
+
+def _repair_item_poisoned_context(
+    context: str,
+    recall_set: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None,
+) -> str:
+    """Suppress injection-like recalled items and re-emit trusted neighbors."""
+    poisoned = tuple(item for item in recall_set if _is_poisoned_item(item))
+    if not poisoned:
+        return context
+    trusted = tuple(item for item in recall_set if item not in poisoned)
+    if not trusted:
+        trusted = tuple(
+            item for item in _candidate_items(recall_set, intervention_config, 0)
+            if not _is_poisoned_item(item)
+        )
+    if not trusted:
+        return context
+    poisoned_ids = ", ".join(item.memory_id for item in poisoned)
+    body = "\n".join(
+        [
+            f"- suppressed item ids: {poisoned_ids}",
+            *(
+                f"- [{item.memory_id} priority] {item.text}"
+                for item in _order_items_by_signal(trusted, intervention_config)
+            ),
+        ]
+    )
+    return _append_block(context, "Item-level poisoned-item suppression", body)
+
+
+def _repair_item_wrong_context(
+    context: str,
+    recall_set: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None,
+) -> str:
+    """Replace low-provenance contradictory items with reachable raw events."""
+    if not recall_set:
+        return context
+    lines = _raw_repair_lines(
+        recall_set,
+        intervention_config,
+        exclude_recalled_sources=False,
+    )
+    if not lines:
+        return context
+    return _append_block(
+        context,
+        "Item-level raw-event replacement candidates",
+        "\n".join(lines),
+    )
+
+
+def _repair_item_compression_context(
+    context: str,
+    recall_set: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None,
+) -> str:
+    """Expand compressed summaries to raw detail available in the store trace."""
+    if not recall_set:
+        return context
+    lines = _raw_repair_lines(
+        recall_set,
+        intervention_config,
+        exclude_recalled_sources=True,
+    )
+    if not lines:
+        # Some generated item suites mark the compressed item as the target but
+        # still retain its source event. In that case, all raw non-query events
+        # are the most faithful expansion surface.
+        lines = _raw_repair_lines(
+            recall_set,
+            intervention_config,
+            exclude_recalled_sources=False,
+        )
+    if not lines:
+        return context
+    return _append_block(
+        context,
+        "Item-level raw-detail expansion",
+        "\n".join(lines),
+    )
+
+
 def _candidate_items(
     recall_set: tuple[MemoryItem, ...],
     intervention_config: dict[str, Any] | None,
@@ -463,3 +689,93 @@ def _append_block(context: str, heading: str, body: str) -> str:
     if not body.strip():
         return context
     return f"{context.rstrip()}\n\n{heading}:\n{body}"
+
+
+_POISON_SIGNATURE = re.compile(
+    r"\b(ignore|disregard|override|system prompt|developer instruction|"
+    r"answer\s+[^.;:]+instead|not trustworthy|malicious|injected instruction)\b",
+    re.IGNORECASE,
+)
+
+
+def _legal_item_actions(
+    recall_set: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None,
+) -> list[PipelineAction]:
+    """Return gold-free item actions whose structural preconditions are visible."""
+    actions: list[PipelineAction] = []
+    if len(_timestamped_items(recall_set)) >= 2:
+        actions.append(PipelineAction.ITEM_STALE)
+    if len(recall_set) >= 2:
+        actions.append(PipelineAction.ITEM_CONFLICT)
+    if any(_is_poisoned_item(item) for item in recall_set):
+        actions.append(PipelineAction.ITEM_POISONED)
+    if _raw_event_texts(intervention_config):
+        actions.append(PipelineAction.ITEM_WRONG)
+        actions.append(PipelineAction.ITEM_COMPRESSION_DISTORTED)
+    return actions
+
+
+def _timestamped_items(
+    items: tuple[MemoryItem, ...],
+) -> tuple[tuple[datetime, MemoryItem], ...]:
+    out: list[tuple[datetime, MemoryItem]] = []
+    for item in items:
+        timestamp = _item_timestamp(item)
+        if timestamp is not None:
+            out.append((timestamp, item))
+    return tuple(out)
+
+
+def _item_timestamp(item: MemoryItem) -> datetime | None:
+    raw = item.store
+    if not isinstance(raw, str) or not raw.endswith("Z"):
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _item_provenance_score(item: MemoryItem) -> float:
+    score = 0.0
+    if item.provenance:
+        score += 2.0 * len(item.provenance)
+        score -= sum(3.0 for edge in item.provenance if edge.tamper_detected)
+        score += max((edge.timestamp for edge in item.provenance), default=0.0) / 1_000_000_000
+    if item.source_event_ids:
+        score += len(item.source_event_ids)
+    if any(event_id not in {"e_query", "query"} for event_id in item.source_event_ids):
+        score += 3.0
+    timestamp = _item_timestamp(item)
+    if timestamp is not None:
+        score += timestamp.timestamp() / 1_000_000_000
+    if _is_poisoned_item(item):
+        score -= 10.0
+    return score
+
+
+def _is_poisoned_item(item: MemoryItem) -> bool:
+    if any(getattr(edge, "tamper_detected", False) for edge in item.provenance):
+        return True
+    return bool(_POISON_SIGNATURE.search(item.text))
+
+
+def _raw_repair_lines(
+    recall_set: tuple[MemoryItem, ...],
+    intervention_config: dict[str, Any] | None,
+    *,
+    exclude_recalled_sources: bool,
+) -> list[str]:
+    event_texts = _raw_event_texts(intervention_config)
+    if not event_texts:
+        return []
+    recalled_sources = _recall_source_events(recall_set)
+    lines: list[str] = []
+    for event_id, text in event_texts.items():
+        if event_id in {"e_query", "query"}:
+            continue
+        if exclude_recalled_sources and event_id in recalled_sources:
+            continue
+        lines.append(f"- [{event_id}] {text}")
+    return lines

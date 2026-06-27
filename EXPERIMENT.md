@@ -38,6 +38,7 @@ ECS 是机制层，不是 Exp14 的证据路径。Exp14 只使用 `run_single_re
 | **C5/C13**（跨源） | ⚠️ 弱 + 有 bug | oracle 仅 0.236；**`global_all`=0 是死臂 bug**（0 seed，需修 `run_experiment_13` 全源聚合键）。 |
 | **C7**（进化） | ⚠️ **重述：暖机复用，非自我提升** | 恢复率被单点天花板钉在 ~0.81 不动（CA p=0.99）；学习在**成本轴**：seed-hit 冷 0.533→暖 0.786（Fisher p=0.028）、到恢复 rollout 3.77→1.24（MWU p=0.038）、fallback 份额 38%→2%；**无持续斜率**（seed-hit CA p=0.099）。Exp19 二级(0.813)≈Exp18 一级(0.810)，二级抽象不加分。写法："暖机后廉价复用"，并入 C5，**不写"越用越准"**。 |
 | **C8**（ECS 机制） | ⚠️ 重述 | full_ecs 0.368 / raw_corrected 0.328 / corrected_only 0.312 / **solution 0.264（最弱）** / cause_only 0.000。**EC 干净边际 = solution→full_ecs +0.104（p=0.0072，仅 wrong_cause 块差）**；但 full_ecs≈raw_corrected（n.s.）、guidance 单加 −0.048。头条："修正内容 ≫ 解释(cause_only=0)；EC 框有用且即 skill 触发键；结构胜纯内容未证"。 |
+| **C9**（算子进化，新主线） | ✅ **GO** | guidance 文本进化已死（Exp20）；改为**被执行的修复算子**。Exp21：富算子(双点+参数)恢复单点够不着的残差，headroom 三跑稳定 34–37/115（配对 p~1e-10）。Exp22：库机制 `comp_fp_topN` 打平案例自身天花板（vs oracle ns），且**两段增益**——retrieve-N+accept-if-improves 扛主力（random_topN 0.84×oracle），C7 指纹键在同预算随机之上显著加分（26/8，p=2.9e-3）、远胜 query 键（p=6e-6）。生产代码已落地(commit e880010，190 测试)。 |
 
 ### Exp20 — Generative guidance（新增，结论：文本指导已死）
 
@@ -51,13 +52,58 @@ Runner: `run_experiment_20_generative_guidance_residual.py`（v2 含置信门控
 
 `_evaluate_case` 在残差上两次跑对"有无 culprit"**翻转 19/52=37%**（8 丢 11 得）。**不是缓存**（代码无缓存层）；是**推理栈非确定性**（vLLM 连续批处理 + 跨 GPU，temperature=0 也不位级确定）+ **`rollout.py` 静默把超时当 0**（L115/120/188，应区分 LLMTimeoutError 与真 0）。**残差级结论须 ≥3 seed 平均**；C4 建在 credit≥0.4 的清晰 culprit 上，跨跑稳定，不受影响。修复：`export LLM_TIMEOUT=120` + 核对跨主机模型 build 一致。
 
-### Exp21 — Operator headroom（新增，待跑，进化方向总闸门）
+### Exp21 — Operator headroom（已跑，进化方向总闸门：GO）
 
-Runner: `run_experiment_21_operator_headroom.py`。在 115 残差上（0% 数据天花板）扫描比单点更丰富的算子：`single`(残差基线) / `double`(双点组合) / `param`(单点+item 提降权) / `richer`(取最优)，用与残差定义一致的 rollout 路径。**HEADROOM = richer 救回但 single 救不回的案例数**。并入 EC-on/off 臂（best 算子的修正内容上 [Error][Cause]+corrected vs corrected）。
-- **headroom 显著 → 算子进化为真，建可进化 skill 库**（skill body = 被执行算子）。
-- **headroom ≈0 → C6 墙立住，进化回落为复用/效率（Exp18/19）。**
-- 跑法：`export LLM_TIMEOUT=120; python -m experiments.run_experiment_21_operator_headroom --ecs-detail artifacts/sandbox/ecs_structure_ablation_detail.csv`，≥2 次比对 headroom 集。
+Runner: `run_experiment_21_operator_headroom.py`。在 115 残差上（0% 数据天花板）扫描比单点更丰富的算子：`single`(残差基线) / `double`(双点组合) / `param`(单点+item 提降权) / `richer`(取最优)，用与残差定义一致的 rollout 路径。**HEADROOM = richer 救回但 single 救不回的案例数**。
+
+**结果（三次跑稳定，配对 McNemar 免疫 churn）**：
+
+| 算子类 | rate | vs single 配对 | p |
+|---|---|---|---|
+| single | ~0.42 | — | — |
+| param | ~0.53 | 13/0 | 2.4e-4 *** |
+| double | ~0.61–0.63 | 25–29/4 | ~1e-4/1e-5 *** |
+| **richer** | **~0.72–0.74** | **34–37/0** | **~1e-10/1e-11 *** |
+
+- **HEADROOM 三跑稳定在 34–37/115**（richer 救回、single 救不回）。**GO：富算子扩展了可修复范围，建可进化 skill 库。**
+- baseline 漂移说明：single 在残差上恢复 ~0.42（非 0），是 Exp21 与 Exp17 残差定义的 rollout 路径差异（系统性，非噪声）；论文用**within-run 配对**口径，绕开绝对率。
+- **b2 算子需求拆解**（决定 skill body 必须表达哪些算子）：headroom 主要来自 `double_only`（~19）+ `param_only`（~7）+ `both`（~6）。复现 shape：`injection+injection`、`injection+safety`、`+hints[m_hop2_gold=-1]`（降权 distractor）等——验证了"双点组合 + item 提降权参数"是必需的算子形态。
+- EC-on/off：EC 框作答题文本仅弱正、未达可声称；EC 的确定用途是 **skill 触发/索引键**。
+- 跑法：`export LLM_TIMEOUT=120; python -m experiments.run_experiment_21_operator_headroom --ecs-detail artifacts/sandbox/ecs_structure_ablation_detail.csv`；分析 `python -m experiments.analyze_operator_headroom --csv artifacts/sandbox/operator_headroom_detail.csv`。
 - 输出：`operator_headroom_detail.csv`。
+
+### Exp22 — Operator transfer（已跑，可进化承重实验：GO）
+
+Runner: `run_experiment_22_operator_transfer.py`。LOO：从**其他**残差案例的最优复合算子建库，按键检索、执行、recovery 验证；判定库能否不重搜就捕获 Exp21 的 headroom（= 真·进化 vs 仅"更大搜索"）。键对比：`comp_global`(全局众数) / `comp_bm25`(query 键) / `comp_fp`(C7 内容指纹键，一次性众数) / `comp_fp_topN`(检索 top-N 指纹近邻算子 + accept-if-improves，部署级库机制) / `random_topN`(同预算随机算子，键的对照) / `comp_oracle`(案例自身穷举天花板)。
+
+**结果（配对 McNemar，免疫 oracle churn）**：
+
+| arm | rate | 关键配对 | p |
+|---|---|---|---|
+| single_xfer | 0.15–0.24 | — | — |
+| comp_bm25（query 键） | 0.14–0.26 | — | — |
+| comp_global | 0.26–0.27 | — | — |
+| comp_fp（一次性指纹众数） | 0.37–0.39 | vs single 27–28/3–9 | ~4e-3/4e-6 *** |
+| **random_topN（同预算随机）** | **0.45** | — | — |
+| **comp_fp_topN（库机制）** | **0.58–0.61** | vs single 43–53/0 | 4.6e-10 / 2.2e-16 *** |
+| comp_oracle（天花板） | 0.54–0.58 | vs comp_fp_topN 7/15 | **ns（库≈或超天花板）** |
+
+**裁决：GO，且按数据修正为"两段增益"叙事**：
+
+1. **库机制扛主力**：`random_topN` 同预算随机就达 0.45（0.84×oracle）——大头来自 **retrieve-N + accept-if-improves** 这个通用机制，**不是指纹键魔法**。论文必须主动 own 这个 random baseline。
+2. **指纹键提供显著增量**：`comp_fp_topN vs random_topN` **26/8，p=2.9e-3 ** —— 内容指纹检索在同预算随机之上仍显著加分。词表覆盖混淆排除（且 cost 分布 66% 第一发命中、`comp_global` 仅 0.27）。
+3. **指纹键 ≫ query 键**：`comp_fp vs comp_bm25` 30/4，p=6e-6 —— C7 诊断（query 词键锁不住链身份）在复合算子上重现。
+4. **库≈案例自身天花板**：`comp_fp_topN vs comp_oracle` ns（≈或略超），即库捕获了几乎全部可迁移质量。
+
+**诚实 caveat**：Exp22 oracle（~0.58）低于 Exp21 richer 天花板（~0.74），因 oracle 是"每案存单个最优 shape 重执行"吃 churn；gap 是**库太薄（每案存1 shape）**，非不可迁移。每案存多 shape 可把 0.58 推向 0.74（future lever）。`random_topN` 经核为干净 LOO（候选池 `comp_shapes_all` 派生自 `others=[c2!=cid]`，排除自身）。
+
+- 论文表述：**小型可复用算子库 + retrieve-N + accept-if-improves 恢复案例自身穷举天花板的绝大部分；C7 内容指纹检索在同预算随机之上带来显著增量（p=2.9e-3），并远胜 query 键（p=6e-6）。**
+- 跑法：`python -m experiments.run_experiment_22_operator_transfer --operator-bank artifacts/sandbox/operator_headroom_detail.csv`；分析 `python -m experiments.analyze_operator_transfer --csv artifacts/sandbox/operator_transfer_detail.csv`。≥2 次跑，引配对 McNemar 而非漂移的 vs_oracle 比值。
+- 输出：`operator_transfer_detail.csv`。
+
+### 生产代码状态（commit e880010）
+
+算子进化机制已落地并通过 190 测试：`counterfactual/operators.py`（`OperatorSpec` 组合/参数化、`evaluate_operator_spec`、`apply_operator_static`、`to_markdown_block`）、`actions.py` 的 `SELECT×TRANSFORM` DSL、harness Fix 路径的 operator-spec 搜索 + accept-if-improves、`failure_memory` 产可执行算子规格 skill + 指纹检索。**未完成（RETIRE 收尾）**：`post_repair.py` guidance 注入、`replays/`。生产路径端到端复现 Exp22 GO 结果待验证。
 
 ### 战略定位（结合竞品）
 
@@ -573,6 +619,7 @@ Ordered by threat to the claim chain.
 | `significance_summary.csv` | analyze_significance | C4 / C5 / C8 paired CI + McNemar |
 | `generative_guidance_residual_detail.csv` | Exp20 | guidance-text negative result (dead) |
 | `operator_headroom_detail.csv` | Exp21 | operator-evolution gate (headroom + EC-on/off) |
+| `operator_transfer_detail.csv` | Exp22 | composite-operator transfer (GO: library ties oracle; fp-key + topN) |
 
 Do not add placeholder CSV numbers to the paper. Only cite files that exist under `artifacts/sandbox/` from a completed run.
 

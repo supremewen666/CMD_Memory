@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 from collections import Counter
 from pathlib import Path
@@ -43,6 +44,14 @@ PIPELINE_LABEL_CYCLE = (
     "safety_error",
 )
 
+ITEM_LABEL_CYCLE = (
+    "item_stale",
+    "item_conflict",
+    "item_poisoned",
+    "item_wrong",
+    "item_compression_distorted",
+)
+
 COUPLED_LABEL_PAIRS = (
     ("retrieval_error", "injection_error"),
     ("retrieval_error", "granularity_error"),
@@ -72,15 +81,20 @@ def build_all(
     coupled_per_source: int = 10,
     recurrent_families_per_source: int = 8,
     recurrent_variants_per_family: int = 5,
+    item_per_label: int = 40,
 ) -> dict[str, Any]:
     """Build source-specific and aggregate probe-case JSON files."""
     output_dir.mkdir(parents=True, exist_ok=True)
     all_auto: list[dict[str, Any]] = []
     all_poisoned: list[dict[str, Any]] = []
+    all_item_layer: list[dict[str, Any]] = []
     all_multihop: list[dict[str, Any]] = []
     all_coupled: list[dict[str, Any]] = []
     all_recurrent: list[dict[str, Any]] = []
     summary: dict[str, Any] = {"sources": {}}
+    item_per_label_per_source = (
+        math.ceil(item_per_label / len(RAW_FILES)) if item_per_label else 0
+    )
 
     for source_name, rel_path in RAW_FILES.items():
         path = raw_dir / rel_path.name
@@ -105,6 +119,11 @@ def build_all(
                 selected[target_per_source : target_per_source + poisoned_per_source]
             )
         ]
+        item_layer_cases = _build_balanced_item_cases(
+            source_name,
+            selected,
+            per_label=item_per_label_per_source,
+        )
 
         multihop_start = target_per_source + poisoned_per_source
         multihop_rows = selected[multihop_start : multihop_start + multihop_per_source]
@@ -150,6 +169,7 @@ def build_all(
         _write_json(output_dir / f"real_{source_name}_cases.json", auto_cases)
         all_auto.extend(auto_cases)
         all_poisoned.extend(poisoned_cases)
+        all_item_layer.extend(item_layer_cases)
         all_multihop.extend(multihop_cases)
         all_coupled.extend(coupled_cases)
         all_recurrent.extend(recurrent_cases)
@@ -158,6 +178,7 @@ def build_all(
             "raw_cases": len(rows),
             "auto_cases": len(auto_cases),
             "hitl_poisoned_cases": len(poisoned_cases),
+            "item_layer_cases": len(item_layer_cases),
             "multihop_cases": len(multihop_cases),
             "coupled_boundary_cases": len(coupled_cases),
             "recurrent_cases": len(recurrent_cases),
@@ -171,10 +192,14 @@ def build_all(
             "poisoned_label_counts": dict(
                 Counter(c["perturbation_label"] for c in poisoned_cases)
             ),
+            "item_layer_label_counts": dict(
+                Counter(c["perturbation_label"] for c in item_layer_cases)
+            ),
         }
 
     _write_json(output_dir / "real_three_source_cases.json", all_auto)
     _write_json(output_dir / "real_item_poisoned_hitl_cases.json", all_poisoned)
+    _write_json(output_dir / "real_item_layer_cases.json", all_item_layer)
     _write_json(output_dir / "real_multihop_cases.json", all_multihop)
     _write_json(output_dir / "real_coupled_failure_boundary_cases.json", all_coupled)
     _write_json(output_dir / "real_recurrent_cases.json", all_recurrent)
@@ -185,6 +210,7 @@ def build_all(
     )
     summary["total_auto_cases"] = len(all_auto)
     summary["total_hitl_poisoned_cases"] = len(all_poisoned)
+    summary["total_item_layer_cases"] = len(all_item_layer)
     summary["total_multihop_cases"] = len(all_multihop)
     summary["total_coupled_boundary_cases"] = len(all_coupled)
     summary["total_recurrent_cases"] = len(all_recurrent)
@@ -195,6 +221,9 @@ def build_all(
         {c["recurrent_family_id"] for c in all_recurrent}
     )
     summary["auto_label_counts"] = dict(Counter(_stored_label(c) for c in all_auto))
+    summary["item_layer_label_counts"] = dict(
+        Counter(c["perturbation_label"] for c in all_item_layer)
+    )
     summary["multihop_label_counts"] = dict(
         Counter(c["perturbation_label"] for c in all_multihop)
     )
@@ -203,6 +232,39 @@ def build_all(
     )
     _write_report(output_dir / "probe_case_build_report.md", summary)
     return summary
+
+
+def _build_balanced_item_cases(
+    source_name: str,
+    rows: list[dict[str, Any]],
+    *,
+    per_label: int,
+) -> list[dict[str, Any]]:
+    """Build the STALE-fallback item suite with balanced labels.
+
+    These cases reuse real source queries but isolate item-layer defects so T1
+    can run even if the external STALE repository or license is unavailable.
+    """
+    if per_label <= 0:
+        return []
+    cases: list[dict[str, Any]] = []
+    usable = rows[:per_label]
+    if len(usable) < per_label:
+        raise ValueError(
+            f"only {len(usable)} rows available for {source_name} item suite, "
+            f"need {per_label}"
+        )
+    for label_index, label in enumerate(ITEM_LABEL_CYCLE):
+        for row_index, row in enumerate(usable):
+            case = _build_case(
+                source_name,
+                500_000 + label_index * 10_000 + row_index,
+                row,
+                label,
+            )
+            case["suite"] = "balanced_item_layer_fallback"
+            cases.append(case)
+    return cases
 
 
 def _build_case(source_name: str, idx: int, row: dict[str, Any], label: str) -> dict[str, Any]:
@@ -1272,6 +1334,7 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
         "",
         f"Total automatic cases: {summary['total_auto_cases']}",
         f"Total HITL poisoned cases: {summary['total_hitl_poisoned_cases']}",
+        f"Total item-layer fallback cases: {summary['total_item_layer_cases']}",
         f"Total multi-hop cases: {summary['total_multihop_cases']}",
         f"Total coupled boundary cases: {summary['total_coupled_boundary_cases']}",
         "",
@@ -1282,6 +1345,9 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
         "## Automatic Label Counts",
     ]
     for label, count in sorted(summary["auto_label_counts"].items()):
+        lines.append(f"- `{label}`: {count}")
+    lines.extend(["", "## Balanced Item-Layer Fallback Counts"])
+    for label, count in sorted(summary["item_layer_label_counts"].items()):
         lines.append(f"- `{label}`: {count}")
     lines.extend(["", "## Multi-Hop Label Counts"])
     for label, count in sorted(summary["multihop_label_counts"].items()):
@@ -1294,6 +1360,7 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
         lines.append(
             f"- `{source}`: raw={stats['raw_cases']}, auto={stats['auto_cases']}, "
             f"hitl_poisoned={stats['hitl_poisoned_cases']}, "
+            f"item_layer={stats['item_layer_cases']}, "
             f"multihop={stats['multihop_cases']}, "
             f"coupled_boundary={stats['coupled_boundary_cases']}"
         )
@@ -1310,6 +1377,7 @@ def main() -> None:
     parser.add_argument("--coupled-per-source", type=int, default=10)
     parser.add_argument("--recurrent-families-per-source", type=int, default=8)
     parser.add_argument("--recurrent-variants-per-family", type=int, default=5)
+    parser.add_argument("--item-per-label", type=int, default=40)
     args = parser.parse_args()
 
     summary = build_all(
@@ -1321,6 +1389,7 @@ def main() -> None:
         coupled_per_source=args.coupled_per_source,
         recurrent_families_per_source=args.recurrent_families_per_source,
         recurrent_variants_per_family=args.recurrent_variants_per_family,
+        item_per_label=args.item_per_label,
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
