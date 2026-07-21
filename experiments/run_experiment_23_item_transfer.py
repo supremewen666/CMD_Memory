@@ -136,6 +136,15 @@ def main() -> None:
     p.add_argument("--random-seed", type=int, default=23)
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--recovered-threshold", type=float, default=0.1)
+    p.add_argument(
+        "--max-depth",
+        type=int,
+        default=1,
+        help=(
+            "generation points to execute. Default 1 matches the STALE single-item "
+            "operator bank; set 2+ only for composite diagnostics."
+        ),
+    )
     args = p.parse_args()
 
     bank_path = Path(args.operator_bank)
@@ -177,11 +186,17 @@ def main() -> None:
     tally = defaultdict(lambda: [0, 0])
     rows = []
     print(f"Item operator transfer (LOO) over {len(cases)} cases\n")
+    print(
+        "Config: "
+        f"max_depth={args.max_depth}, "
+        f"neighbors={args.neighbors}, "
+        f"topn={args.topn}\n"
+    )
 
     for i, case in enumerate(cases, start=1):
         cid = case.case_id
         recall = _retrieved_memory_items(case)
-        max_depth = max(1, min(3, len(recall) or 1))
+        max_depth = max(1, min(args.max_depth, len(recall) or 1))
         base_ctx = _initial_mcts_context(case, recall)
         cfg = {"candidate_items": case.extracted_memory, "raw_events": case.raw_events}
         gold = case.gold_answer

@@ -10,7 +10,7 @@ Run:
     python -m experiments.run_experiment_23_item_headroom \
         --cases data/probe_cases/real_item_layer_cases.json
 Smoke:
-    python -m experiments.run_experiment_23_item_headroom --limit 6 --no-ec-test
+    python -m experiments.run_experiment_23_item_headroom --limit 6
 """
 
 from __future__ import annotations
@@ -86,7 +86,14 @@ def _parameter_item_ids(recall: tuple, cfg: dict) -> tuple[str, ...]:
     return tuple(memory_ids)
 
 
-def _legal_repair_actions(recall, gp, cfg, *, include_pipeline: bool) -> list[PipelineAction]:
+def _legal_repair_actions(
+    recall,
+    gp,
+    cfg,
+    *,
+    include_pipeline: bool,
+    allowed_item_actions: set[str],
+) -> list[PipelineAction]:
     actions = get_legal_actions(
         recall,
         gp,
@@ -97,7 +104,10 @@ def _legal_repair_actions(recall, gp, cfg, *, include_pipeline: bool) -> list[Pi
         action
         for action in actions
         if action != PipelineAction.IDENTITY
-        and (include_pipeline or action.is_item_level)
+        and (
+            (action.is_item_level and action.value in allowed_item_actions)
+            or (include_pipeline and not action.is_item_level)
+        )
     ]
 
 
@@ -119,10 +129,52 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--out", default=str(OUT / "item_operator_headroom_detail.csv"))
     p.add_argument("--recovered-threshold", type=float, default=0.1)
+    p.add_argument(
+        "--headroom-margin",
+        type=float,
+        default=0.02,
+        help="minimum extra net recovery over single to count a composite as useful.",
+    )
     p.add_argument("--answer-recovered-threshold", type=float, default=0.8)
+    p.add_argument(
+        "--max-depth",
+        type=int,
+        default=1,
+        help=(
+            "generation points to scan. Default 1 is the STALE single-item protocol; "
+            "set 2+ only when running composite diagnostics."
+        ),
+    )
+    p.add_argument(
+        "--operator-classes",
+        choices=("single", "single-param", "all"),
+        default="single",
+        help=(
+            "operator families to evaluate. Default single is the STALE main protocol; "
+            "single-param adds item_signal_hints; all also runs double/double_param."
+        ),
+    )
+    p.add_argument(
+        "--action-space",
+        choices=("auto", "stale-conflict", "all-item"),
+        default="auto",
+        help=(
+            "item actions to scan. auto narrows STALE T1/T2 runs to "
+            "item_stale+item_conflict and uses all item actions otherwise."
+        ),
+    )
     p.add_argument("--include-pipeline-actions", action="store_true")
     p.add_argument("--allow-data-floor-failures", action="store_true")
-    p.add_argument("--no-ec-test", action="store_true")
+    p.add_argument(
+        "--ec-test",
+        action="store_true",
+        help="run the expensive EC-on/off comparison for recovered cases.",
+    )
+    p.add_argument(
+        "--no-ec-test",
+        action="store_true",
+        help="deprecated compatibility flag; EC tests are skipped unless --ec-test is set.",
+    )
     args = p.parse_args()
 
     labels = {label.strip() for label in args.labels.split(",") if label.strip()}
@@ -149,13 +201,25 @@ def main() -> None:
     arms = ("single", "double", "param", "double_param", "richer")
     tally = defaultdict(lambda: [0, 0])
     headroom_cases = []
+    double_extra_cases = []
+    double_param_extra_cases = []
     ec_on = ec_off = ec_both_rec = 0
     rows = []
     print(f"Item operator headroom over {len(all_cases)} cases, labels={sorted(labels)}\n")
+    allowed_item_actions = _allowed_item_actions(labels, args.action_space)
+    print(
+        "Config: "
+        f"max_depth={args.max_depth}, "
+        f"operator_classes={args.operator_classes}, "
+        f"action_space={args.action_space}, "
+        f"allowed_item_actions={sorted(allowed_item_actions)}, "
+        f"ec_test={args.ec_test and not args.no_ec_test}, "
+        f"include_pipeline_actions={args.include_pipeline_actions}\n"
+    )
 
     for i, case in enumerate(all_cases, start=1):
         recall = _retrieved_memory_items(case)
-        max_depth = max(1, min(3, len(recall) or 1))
+        max_depth = max(1, min(args.max_depth, len(recall) or 1))
         base_ctx = _initial_mcts_context(case, recall)
         cfg = {"candidate_items": case.extracted_memory, "raw_events": case.raw_events}
         parameter_item_ids = _parameter_item_ids(recall, cfg)
@@ -188,6 +252,7 @@ def main() -> None:
                 gp,
                 cfg,
                 include_pipeline=args.include_pipeline_actions,
+                allowed_item_actions=allowed_item_actions,
             ):
                 op = OperatorSpec.single(gp, action)
                 gain = net(rec(op))
@@ -195,7 +260,7 @@ def main() -> None:
                     single_best, single_op = gain, op
 
         double_best, double_op = -1.0, None
-        if max_depth >= 2:
+        if args.operator_classes == "all" and max_depth >= 2:
             for gp0 in range(max_depth):
                 for gp1 in range(gp0 + 1, max_depth):
                     for a0 in _legal_repair_actions(
@@ -203,20 +268,23 @@ def main() -> None:
                         gp0,
                         cfg,
                         include_pipeline=args.include_pipeline_actions,
+                        allowed_item_actions=allowed_item_actions,
                     ):
                         for a1 in _legal_repair_actions(
                             recall,
                             gp1,
                             cfg,
                             include_pipeline=args.include_pipeline_actions,
+                            allowed_item_actions=allowed_item_actions,
                         ):
                             op = OperatorSpec.from_actions(((gp0, a0), (gp1, a1)))
                             gain = net(rec(op))
                             if gain > double_best:
                                 double_best, double_op = gain, op
 
-        param_best, param_op = single_best, single_op
-        if single_op is not None:
+        param_best, param_op = -1.0, None
+        if args.operator_classes in {"single-param", "all"} and single_op is not None:
+            param_best, param_op = single_best, single_op
             for memory_id in parameter_item_ids:
                 for weight in (-1.0, 1.0):
                     op = single_op.with_item_signal_hint(memory_id, weight)
@@ -224,8 +292,9 @@ def main() -> None:
                     if gain > param_best:
                         param_best, param_op = gain, op
 
-        double_param_best, double_param_op = double_best, double_op
-        if double_op is not None:
+        double_param_best, double_param_op = -1.0, None
+        if args.operator_classes == "all" and double_op is not None:
+            double_param_best, double_param_op = double_best, double_op
             for memory_id in parameter_item_ids:
                 for weight in (-1.0, 1.0):
                     op = double_op.with_item_signal_hint(memory_id, weight)
@@ -245,21 +314,48 @@ def main() -> None:
         )
         recovered = {
             "single": single_best > args.recovered_threshold,
-            "double": double_best > args.recovered_threshold,
+            "double": double_op is not None and double_best > args.recovered_threshold,
             "param": param_best > args.recovered_threshold,
-            "double_param": double_param_best > args.recovered_threshold,
+            "double_param": (
+                double_param_op is not None
+                and double_param_best > args.recovered_threshold
+            ),
             "richer": richer_best > args.recovered_threshold,
         }
+        evaluated = {
+            "single": single_op is not None,
+            "double": double_op is not None,
+            "param": param_op is not None,
+            "double_param": double_param_op is not None,
+            "richer": richer_op is not None,
+        }
         for arm in arms:
+            if not evaluated[arm]:
+                continue
             tally[arm][0] += int(recovered[arm])
             tally[arm][1] += 1
 
         is_headroom = recovered["richer"] and not recovered["single"]
         if is_headroom:
             headroom_cases.append(case.case_id)
+        double_extra = _extra_over_single(double_best, double_op, single_best)
+        double_param_extra = _extra_over_single(
+            double_param_best,
+            double_param_op,
+            single_best,
+        )
+        double_has_extra = double_extra is not None and double_extra > args.headroom_margin
+        double_param_has_extra = (
+            double_param_extra is not None
+            and double_param_extra > args.headroom_margin
+        )
+        if double_has_extra:
+            double_extra_cases.append(case.case_id)
+        if double_param_has_extra:
+            double_param_extra_cases.append(case.case_id)
 
         ec_decision = ""
-        if not args.no_ec_test and recovered["richer"] and richer_op is not None:
+        if args.ec_test and not args.no_ec_test and recovered["richer"] and richer_op is not None:
             corrected = apply_operator_static(
                 base_ctx,
                 recall,
@@ -292,11 +388,15 @@ def main() -> None:
                 "case_id": case.case_id,
                 "gold_label": case.perturbation_label,
                 "base_gain": f"{base_gain:.4f}",
-                "single_net": f"{single_best:.4f}",
-                "double_net": f"{double_best:.4f}",
-                "param_net": f"{param_best:.4f}",
-                "double_param_net": f"{double_param_best:.4f}",
-                "richer_net": f"{richer_best:.4f}",
+                "single_net": _fmt_score(single_best, single_op),
+                "double_net": _fmt_score(double_best, double_op),
+                "param_net": _fmt_score(param_best, param_op),
+                "double_param_net": _fmt_score(double_param_best, double_param_op),
+                "richer_net": _fmt_score(richer_best, richer_op),
+                "double_extra_over_single": _fmt_optional_score(double_extra),
+                "double_param_extra_over_single": _fmt_optional_score(double_param_extra),
+                "double_headroom_over_single": str(double_has_extra).lower(),
+                "double_param_headroom_over_single": str(double_param_has_extra).lower(),
                 "single_op": _fmt(single_op),
                 "double_op": _fmt(double_op),
                 "param_op": _fmt(param_op),
@@ -310,11 +410,25 @@ def main() -> None:
         flag = "  <== HEADROOM" if is_headroom else ""
         print(
             f"  [{i}/{len(all_cases)}] {case.perturbation_label:28s} "
-            f"single={single_best:+.2f} double={double_best:+.2f} "
-            f"param={param_best:+.2f} double+param={double_param_best:+.2f}{flag}"
+            f"single={_fmt_signed(single_best, single_op)} "
+            f"double={_fmt_signed(double_best, double_op)} "
+            f"(extra={_fmt_optional_signed(double_extra)}) "
+            f"param={_fmt_signed(param_best, param_op)} "
+            f"double+param={_fmt_signed(double_param_best, double_param_op)} "
+            f"(extra={_fmt_optional_signed(double_param_extra)}){flag}"
         )
 
-    _summary(tally, arms, headroom_cases, ec_off, ec_on, ec_both_rec)
+    _summary(
+        tally,
+        arms,
+        headroom_cases,
+        double_extra_cases,
+        double_param_extra_cases,
+        args.headroom_margin,
+        ec_off,
+        ec_on,
+        ec_both_rec,
+    )
     path = write_csv_table(
         args.out,
         [
@@ -326,6 +440,10 @@ def main() -> None:
             "param_net",
             "double_param_net",
             "richer_net",
+            "double_extra_over_single",
+            "double_param_extra_over_single",
+            "double_headroom_over_single",
+            "double_param_headroom_over_single",
             "single_op",
             "double_op",
             "param_op",
@@ -345,13 +463,68 @@ def _fmt(op):
     return op.format() if op else ""
 
 
-def _summary(tally, arms, headroom_cases, ec_off, ec_on, ec_both):
+def _allowed_item_actions(labels: set[str], action_space: str) -> set[str]:
+    stale_conflict = {"item_stale", "item_conflict"}
+    if action_space == "stale-conflict":
+        return stale_conflict
+    if action_space == "all-item":
+        return set(ITEM_LABELS)
+    if labels and labels.issubset(stale_conflict):
+        return stale_conflict
+    return set(ITEM_LABELS)
+
+
+def _fmt_score(score: float, op) -> str:
+    return f"{score:.4f}" if op is not None else "NA"
+
+
+def _fmt_optional_score(score: float | None) -> str:
+    return f"{score:.4f}" if score is not None else "NA"
+
+
+def _fmt_signed(score: float, op) -> str:
+    return f"{score:+.2f}" if op is not None else "NA"
+
+
+def _fmt_optional_signed(score: float | None) -> str:
+    return f"{score:+.2f}" if score is not None else "NA"
+
+
+def _extra_over_single(
+    score: float,
+    op,
+    single_best: float,
+) -> float | None:
+    if op is None:
+        return None
+    return score - single_best
+
+
+def _summary(
+    tally,
+    arms,
+    headroom_cases,
+    double_extra_cases,
+    double_param_extra_cases,
+    headroom_margin,
+    ec_off,
+    ec_on,
+    ec_both,
+):
     print("\n=== Item recovery rate per operator class ===")
     print(f"{'arm':12s} {'recovered':>9s} {'total':>6s} {'rate':>8s}")
     for arm in arms:
         recovered, total = tally[arm]
         print(f"{arm:12s} {recovered:>9d} {total:>6d} {(recovered / total if total else 0):>8.4f}")
     print(f"\nITEM HEADROOM (richer recovers, single does NOT): {len(headroom_cases)}/{tally['single'][1]}")
+    total_single = tally["single"][1]
+    print(
+        "COMPOSITE EXTRA over single "
+        f"(margin>{headroom_margin:g}): "
+        f"double={len(double_extra_cases)}/{total_single}, "
+        f"double_param={len(double_param_extra_cases)}/{total_single}"
+    )
+    print("  Use these EXTRA columns to judge whether double adds information beyond single.")
     if ec_both:
         print(f"\n=== EC-framing on best item operator (n={ec_both}) ===")
         print(f"  ec_off recovered {ec_off}/{ec_both}")

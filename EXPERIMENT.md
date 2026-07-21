@@ -39,6 +39,7 @@ ECS 是机制层，不是 Exp14 的证据路径。Exp14 只使用 `run_single_re
 | **C7**（进化） | ⚠️ **重述：暖机复用，非自我提升** | 恢复率被单点天花板钉在 ~0.81 不动（CA p=0.99）；学习在**成本轴**：seed-hit 冷 0.533→暖 0.786（Fisher p=0.028）、到恢复 rollout 3.77→1.24（MWU p=0.038）、fallback 份额 38%→2%；**无持续斜率**（seed-hit CA p=0.099）。Exp19 二级(0.813)≈Exp18 一级(0.810)，二级抽象不加分。写法："暖机后廉价复用"，并入 C5，**不写"越用越准"**。 |
 | **C8**（ECS 机制） | ⚠️ 重述 | full_ecs 0.368 / raw_corrected 0.328 / corrected_only 0.312 / **solution 0.264（最弱）** / cause_only 0.000。**EC 干净边际 = solution→full_ecs +0.104（p=0.0072，仅 wrong_cause 块差）**；但 full_ecs≈raw_corrected（n.s.）、guidance 单加 −0.048。头条："修正内容 ≫ 解释(cause_only=0)；EC 框有用且即 skill 触发键；结构胜纯内容未证"。 |
 | **C9**（算子进化，新主线） | ✅ **GO** | guidance 文本进化已死（Exp20）；改为**被执行的修复算子**。Exp21：富算子(双点+参数)恢复单点够不着的残差，headroom 三跑稳定 34–37/115（配对 p~1e-10）。Exp22：库机制 `comp_fp_topN` 打平案例自身天花板（vs oracle ns），且**两段增益**——retrieve-N+accept-if-improves 扛主力（random_topN 0.84×oracle），C7 指纹键在同预算随机之上显著加分（26/8，p=2.9e-3）、远胜 query 键（p=6e-6）。生产代码已落地(commit e880010，190 测试)。 |
+| **C10**（item 层 / STALE，新范围，**未进正文待裁决**） | ⚠️ **混合：可修复✅，库迁移✗** | item 单点修复有效（stale 439/600=0.732、conflict 341/600=0.568）；但库迁移 `item_fp_topN` 在同预算随机之上**不显著**（30/22，p=0.33 ns），与 step 层 Exp22（p=2.9e-3）相反——item 算子空间太小、结果可互换，指纹检索无可判别。与 STALE 论文 55.2% 的对比**口径未对齐**（recovery-gain vs 自然准确率）。详见 Exp23 + Exp24 闸。 |
 
 ### Exp20 — Generative guidance（新增，结论：文本指导已死）
 
@@ -100,6 +101,47 @@ Runner: `run_experiment_22_operator_transfer.py`。LOO：从**其他**残差案�
 - 论文表述：**小型可复用算子库 + retrieve-N + accept-if-improves 恢复案例自身穷举天花板的绝大部分；C7 内容指纹检索在同预算随机之上带来显著增量（p=2.9e-3），并远胜 query 键（p=6e-6）。**
 - 跑法：`python -m experiments.run_experiment_22_operator_transfer --operator-bank artifacts/sandbox/operator_headroom_detail.csv`；分析 `python -m experiments.analyze_operator_transfer --csv artifacts/sandbox/operator_transfer_detail.csv`。≥2 次跑，引配对 McNemar 而非漂移的 vs_oracle 比值。
 - 输出：`operator_transfer_detail.csv`。
+
+### Exp23 — Item-Layer Repair + Transfer（STALE，新范围，C10，2026-06-29）
+
+Runner: `run_experiment_23_item_headroom.py`（a，算子库）+ `run_experiment_23_item_transfer.py`（b，LOO 迁移）。数据：`cmd_audit/adapters/stale.py` 把 STALE（arXiv:2605.06527，400 场景 × 3 探针维 = **1200 query**）转成 600 `item_stale` + 600 `item_conflict`。`--max-depth 1`（STALE 单条目协议）、EC test 改 opt-in。data floor 1200/1200（gold item 恒在库）。**单 run，churn ~37%，下结论前需 ≥3 run。**
+
+**Exp23a 单点修复 headroom（GO）**：
+
+| label | recovered(net>0.1) | net 均值 |
+|---|---|---|
+| item_stale | 439/600 = **0.732** | +0.385 |
+| item_conflict | 341/600 = **0.568** | +0.255 |
+
+- 胜出算子常**非** gold label（stale 案例里 `item_compression_distorted` 192 / `item_conflict` 148 / `item_wrong` 133 > `item_stale` 127）。说明 item 算子**结果可互换**（"降坏条/提好条 / 回 raw event"多路同效），且**坐实"label 不进诊断回路、recovery 裁决"**。
+- headroom=0/1200 是构造结果（`--operator-classes single`，未扫 composite），非发现。
+
+**Exp23b LOO 迁移（NO-GO：库机制在 item 层失效）**：
+
+| arm | rate | 关键配对 | p |
+|---|---|---|---|
+| item_oracle | 0.557 | — | — |
+| item_global | 0.452 | — | — |
+| item_fp（一发指纹众数） | 0.432 | vs global | 0.092 ns |
+| **item_fp_topN（库机制）** | **0.652** | **vs random_topN 30/22** | **0.33 ns** |
+| random_topN（同预算随机） | 0.645 | — | — |
+
+- **与 step 层 Exp22 相反**：item 层指纹库**打不过同预算随机**（p=0.33），一发指纹 0.432 还低于全局 0.452/单点 0.472。topN 对单点的增益是**预算/重试假象**（mean cost 2.43），非检索信息。
+- 根因：item 算子空间小且结果可互换，没有链身份可锁，判别式检索键无可判别。
+
+**与 STALE 基线对比（口径未对齐，不可直接 head-to-head）**：STALE 论文最强前沿模型 **55.2% 整体准确率**（~44.8% 处理不了）。本套 ~65% 是**注入失败(≈0)之上的 recovery-gain、G-Eval rubric 打分**，非 STALE 三维(State Resolution/Premise Resistance/Implicit Policy Adaptation)绝对准确率协议。要真比，需补"自然基线(无注入)绝对准确率"重打。
+
+输出：`item_operator_headroom_single.csv`、`item_operator_transfer_detail.csv`。
+
+### Exp24（待跑，决定 item 扩不扩的总闸）— 在线算子轨迹（逐代进化）
+
+**为何需要**：C7/Exp18 的"暖机复用、recovery 不涨"测的是**旧 guidance/label 机制**——`artifacts/sandbox/failure_memory_skill/` 至今是按 diagnosis label 索引的 `Repair Guide` 样板文本（`validation_status: review_required`），即 SKILL_EVOLUTION_DESIGN 标着"MODIFY：`format_pattern` 仍发样板、须改 operator-spec"的**未改旧件**。**算子机制（Exp21/22）只做过 STATIC LOO，从未跑在线/逐代轨迹。** 故"逐代进化"现状是**未测，非否定**。EXPERIMENT.md 自留杠杆：Exp22 库太薄（每案 1 shape）→ oracle 0.58，**每案多 shape 可推向 richer 天花板 0.74**。
+
+**实验**：把 Exp18 轨迹换成新算子机制——`OperatorSpec` + 内容指纹键 + accept-if-improves + **每指纹簇累积多 shape**，在**残差/难案例流**（单点 0.42→richer 0.74 有 headroom 处）上测 recovery 是否随库变厚**逐 bin 爬升**，对照 `fixed-library`（不生长）/ `random-variation`（同预算随机）。
+
+**裁决（接用户规则"不能证逐代进化就写 item"）**：
+- recovery 逐 bin 爬升且胜两对照 → **逐代能力进化证成 → 不扩展 item**（首选）。
+- 仍在天花板钉死（像旧机制）→ **逐代死 → 按分层维度发现写 item**（Exp23 的诚实负结果作贡献）。
 
 ### 生产代码状态（commit e880010）
 
@@ -620,6 +662,8 @@ Ordered by threat to the claim chain.
 | `generative_guidance_residual_detail.csv` | Exp20 | guidance-text negative result (dead) |
 | `operator_headroom_detail.csv` | Exp21 | operator-evolution gate (headroom + EC-on/off) |
 | `operator_transfer_detail.csv` | Exp22 | composite-operator transfer (GO: library ties oracle; fp-key + topN) |
+| `item_operator_headroom_single.csv` | Exp23a | C10 item single-point repair headroom (stale 0.732 / conflict 0.568) |
+| `item_operator_transfer_detail.csv` | Exp23b | C10 item LOO transfer (NO-GO: fp_topN ties random p=0.33) |
 
 Do not add placeholder CSV numbers to the paper. Only cite files that exist under `artifacts/sandbox/` from a completed run.
 

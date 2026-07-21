@@ -9,35 +9,66 @@ from cmd_audit.adapters.stale import (
 )
 
 
-def test_stale_record_to_probe_cases_builds_item_stale_case() -> None:
+def test_stale_record_maps_real_schema_to_three_query_cases() -> None:
     record = {
         "scenario_id": "calendar-1",
-        "type": "stale",
-        "context": "Kai moved the venue after the first reminder.",
-        "old_answer": "Berlin",
-        "current_answer": "Madrid",
-        "queries": [{"query": "Where is Kai's workshop?"}],
+        "type": "T1",
+        "M_old": "Workshop venue is Berlin.",
+        "M_new": "Workshop venue is Madrid.",
+        "explanation": "The venue was updated after the old memory was written.",
+        "haystack_session": [
+            {"role": "user", "content": "Please remember the travel planning notes."},
+            {"role": "assistant", "content": "Dinner remains at 7pm."},
+        ],
+        "probing_queries": {
+            "dim1_query": "Where is the workshop?",
+            "dim2_query": "Which city should I travel to for the workshop?",
+            "dim3_query": "What is the current workshop venue?",
+        },
     }
 
     cases = stale_record_to_probe_cases(record)
 
-    assert len(cases) == 1
-    case = cases[0]
-    assert case.case_id == "stale-calendar-1-q000"
-    assert case.perturbation_label == "item_stale"
-    assert case.primary_baseline.retrieved_memory_ids == ("m_stale", "m_current")
-    assert case.primary_baseline.injected_context.startswith("Earlier remembered")
-    assert case.gold_answer == "Madrid"
-    assert case.gold_evidence[0].source_memory_id == "m_current"
-    assert case.raw_events[-1].text == "Current memory state: Madrid"
+    assert len(cases) == 3
+    assert [case.case_id for case in cases] == [
+        "stale-calendar-1-dim1",
+        "stale-calendar-1-dim2",
+        "stale-calendar-1-dim3",
+    ]
+    assert [case.query for case in cases] == [
+        "Where is the workshop?",
+        "Which city should I travel to for the workshop?",
+        "What is the current workshop venue?",
+    ]
+    first = cases[0]
+    assert first.perturbation_label == "item_stale"
+    assert first.gold_answer == "Workshop venue is Madrid."
+    memory = {item.memory_id: item for item in first.extracted_memory}
+    assert memory["m_stale"].text == "M_old: Workshop venue is Berlin."
+    assert memory["m_current"].text == "M_new: Workshop venue is Madrid."
+    assert "Dinner remains at 7pm" in memory["m_haystack"].text
+    assert memory["m_stale"].source_event_ids == ("e_stale", "e_explanation")
+    assert memory["m_current"].source_event_ids == ("e_current", "e_explanation")
+    assert first.raw_events[3].text == "The venue was updated after the old memory was written."
+    assert first.primary_baseline.retrieved_memory_ids == (
+        "m_stale",
+        "m_current",
+        "m_haystack",
+    )
+    assert "M_old: Workshop venue is Berlin." in first.primary_baseline.injected_context
 
 
-def test_stale_record_defaults_to_item_conflict() -> None:
+def test_stale_type_t2_maps_to_item_conflict() -> None:
     record = {
         "id": "prefs-2",
-        "question": "Which color did Mina choose?",
-        "conflicting_answer": "blue",
-        "answer": "green",
+        "type": "T2",
+        "M_old": "Mina chose blue.",
+        "M_new": "Mina chose green.",
+        "probing_queries": {
+            "dim1_query": "Which color did Mina choose?",
+            "dim2_query": "What is Mina's current color preference?",
+            "dim3_query": "Which color should be used now?",
+        },
     }
 
     case = stale_record_to_probe_cases(record)[0]
@@ -54,26 +85,8 @@ def test_stale_loader_keeps_full_dataset_by_default(tmp_path) -> None:
         json.dumps(
             {
                 "scenarios": [
-                    {
-                        "scenario_id": "a",
-                        "type": "stale",
-                        "old_answer": "old-a",
-                        "current_answer": "new-a",
-                        "queries": [
-                            {"query": "qa1"},
-                            {"query": "qa2"},
-                        ],
-                    },
-                    {
-                        "scenario_id": "b",
-                        "type": "conflict",
-                        "conflicting_answer": "old-b",
-                        "answer": "new-b",
-                        "queries": [
-                            {"query": "qb1"},
-                            {"query": "qb2"},
-                        ],
-                    },
+                    _record("a", "T1"),
+                    _record("b", "T2"),
                 ]
             }
         ),
@@ -82,12 +95,14 @@ def test_stale_loader_keeps_full_dataset_by_default(tmp_path) -> None:
 
     cases = load_stale_probe_cases(source)
 
-    assert len(cases) == 4
+    assert len(cases) == 6
     assert [case.case_id for case in cases] == [
-        "stale-a-q000",
-        "stale-a-q001",
-        "stale-b-q000",
-        "stale-b-q001",
+        "stale-a-dim1",
+        "stale-a-dim2",
+        "stale-a-dim3",
+        "stale-b-dim1",
+        "stale-b-dim2",
+        "stale-b-dim3",
     ]
     assert len(load_stale_probe_cases(source, limit=2)) == 2
 
@@ -95,23 +110,30 @@ def test_stale_loader_keeps_full_dataset_by_default(tmp_path) -> None:
 def test_write_stale_probe_cases_defaults_to_full_output(tmp_path) -> None:
     source = tmp_path / "stale.json"
     out = tmp_path / "probe_cases.json"
-    source.write_text(
-        json.dumps(
-            [
-                {
-                    "id": "s0",
-                    "old_answer": "old-0",
-                    "current_answer": "new-0",
-                    "queries": [{"query": "q0"}, {"query": "q1"}],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
+    source.write_text(json.dumps([_record("s0", "T1")]), encoding="utf-8")
 
     write_stale_probe_cases(source, out)
 
     rows = json.loads(out.read_text(encoding="utf-8"))
-    assert len(rows) == 2
-    assert rows[0]["case_id"] == "stale-s0-q000"
+    assert len(rows) == 3
+    assert rows[0]["case_id"] == "stale-s0-dim1"
+    assert rows[0]["gold_answer"] == "new-s0"
+    assert rows[0]["extracted_memory"][0]["text"] == "M_old: old-s0"
+    assert rows[0]["extracted_memory"][1]["text"] == "M_new: new-s0"
     assert "_cmd_baseline_name" not in rows[0]
+
+
+def _record(scenario_id: str, type_: str) -> dict:
+    return {
+        "scenario_id": scenario_id,
+        "type": type_,
+        "M_old": f"old-{scenario_id}",
+        "M_new": f"new-{scenario_id}",
+        "explanation": f"why-{scenario_id}",
+        "haystack_session": f"noise-{scenario_id}",
+        "probing_queries": {
+            "dim1_query": f"q1-{scenario_id}",
+            "dim2_query": f"q2-{scenario_id}",
+            "dim3_query": f"q3-{scenario_id}",
+        },
+    }

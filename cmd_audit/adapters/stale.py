@@ -1,12 +1,16 @@
-"""Adapter for STALE-style implicit-conflict memory scenarios.
+"""Adapter for STALE implicit-conflict memory scenarios.
 
-The public STALE artifact shape is intentionally not baked into CMD yet. This
-adapter accepts common benchmark JSON layouts and normalizes each scenario/query
-into the existing :class:`ProbeCase` contract:
+The STALE schema maps directly into the existing :class:`ProbeCase` contract:
 
+- ``probing_queries.dim1_query`` / ``dim2_query`` / ``dim3_query`` each become
+  one query-case;
+- ``M_old`` becomes the stale memory item;
+- ``M_new`` becomes the current memory item and gold answer;
+- ``type`` maps T1/T2 to ``item_stale`` / ``item_conflict``;
+- ``explanation`` is preserved as causal/provenance raw evidence;
+- ``haystack_session`` becomes a distractor memory item.
 - recall contains both the stale/conflicting item and the current item;
-- raw events carry the reachable current state;
-- item labels are limited to ``item_stale`` and ``item_conflict``.
+- raw events carry the reachable current state.
 """
 
 from __future__ import annotations
@@ -80,43 +84,51 @@ def _build_case_mapping(
         "uid",
         default=f"stale-{scenario_index:04d}",
     )
-    query = _first_text(
-        query_record,
-        "query",
-        "question",
-        "prompt",
-        default=_first_text(record, "query", "question", "prompt", default=""),
-    )
-    if not query:
-        query = f"What is the current state for scenario {scenario_id}?"
+    query = str(query_record["query"]).strip()
+    query_dim = str(query_record.get("dimension", f"q{query_index + 1}")).strip()
 
-    current = _current_answer(record, query_record)
-    stale = _stale_answer(record, query_record, current)
-    label = _item_label(record, query_record)
+    current = _current_answer(record)
+    stale = _stale_answer(record, current)
+    label = _item_label(record)
     old_ts, new_ts = _timestamps_for_label(label)
+    explanation = _explanation_text(record)
+    haystack = _haystack_text(record)
 
-    context = _context_text(record)
-    stale_text = _memory_sentence(query, stale, stale=True)
-    current_text = _memory_sentence(query, current, stale=False)
-    case_id = f"stale-{scenario_id}-q{query_index:03d}"
+    stale_text = _memory_sentence(stale, stale=True)
+    current_text = _memory_sentence(current, stale=False)
+    haystack_text = _shorten(haystack, 700) if haystack else "No haystack distractor provided."
+    case_id = f"stale-{scenario_id}-{query_dim}"
 
     raw_events = [
-        {"event_id": "e_context", "text": context or f"STALE scenario {scenario_id}."},
-        {"event_id": "e_stale", "text": f"Earlier memory state: {stale}"},
-        {"event_id": "e_current", "text": f"Current memory state: {current}"},
+        {
+            "event_id": "e_haystack",
+            "text": haystack or f"STALE haystack context for scenario {scenario_id}.",
+        },
+        {"event_id": "e_stale", "text": f"M_old: {stale}"},
+        {"event_id": "e_current", "text": f"M_new: {current}"},
+        {
+            "event_id": "e_explanation",
+            "text": explanation or "STALE explanation not provided.",
+        },
     ]
     extracted_memory = [
         {
             "memory_id": "m_stale",
             "text": stale_text,
-            "source_event_ids": ["e_stale"],
+            "source_event_ids": ["e_stale", "e_explanation"],
             "store": old_ts,
         },
         {
             "memory_id": "m_current",
             "text": current_text,
-            "source_event_ids": ["e_current"],
+            "source_event_ids": ["e_current", "e_explanation"],
             "store": new_ts,
+        },
+        {
+            "memory_id": "m_haystack",
+            "text": haystack_text,
+            "source_event_ids": ["e_haystack"],
+            "store": "haystack",
         },
     ]
     return {
@@ -127,7 +139,7 @@ def _build_case_mapping(
         "gold_evidence": [
             {
                 "evidence_id": "ev_current",
-                "text": f"Current memory state: {current}",
+                "text": f"M_new: {current}",
                 "source_memory_id": "m_current",
                 "source_event_id": "e_current",
                 "required_phrases": _required_phrases(str(current)),
@@ -138,10 +150,13 @@ def _build_case_mapping(
             {
                 "baseline_name": "vector_memory",
                 "answer": str(stale),
-                "retrieved_memory_ids": ["m_stale", "m_current"],
+                "retrieved_memory_ids": ["m_stale", "m_current", "m_haystack"],
                 "answer_score": 0.0,
                 "evidence_score": 0.0,
-                "injected_context": stale_text,
+                "injected_context": _shorten(
+                    f"{stale_text}\n\nDistractor context:\n{haystack_text}",
+                    700,
+                ),
             },
             {
                 "baseline_name": "fixed_summary",
@@ -160,6 +175,7 @@ def _build_case_mapping(
         "default_store": "episodic",
         "source": "stale",
         "source_scenario_id": str(scenario_id),
+        "stale_query_dimension": query_dim,
     }
 
 
@@ -176,80 +192,103 @@ def _scenario_rows(payload: Any) -> list[dict[str, Any]]:
 
 
 def _query_records(record: dict[str, Any]) -> list[dict[str, Any]]:
+    probing = record.get("probing_queries")
+    if isinstance(probing, dict):
+        records = []
+        for dimension in ("dim1", "dim2", "dim3"):
+            value = probing.get(f"{dimension}_query")
+            if value is None:
+                continue
+            query = str(value).strip()
+            if query:
+                records.append({"dimension": dimension, "query": query})
+        if records:
+            return records
+
     for key in ("queries", "questions", "examples"):
         raw = record.get(key)
         if isinstance(raw, list) and raw:
             return [
-                item if isinstance(item, dict) else {"query": str(item)}
-                for item in raw
+                {
+                    "dimension": f"q{i + 1}",
+                    "query": (
+                        _first_text(item, "query", "question", "prompt")
+                        if isinstance(item, dict)
+                        else str(item)
+                    ),
+                }
+                for i, item in enumerate(raw)
             ]
-    return [record]
+    query = _first_text(record, "query", "question", "prompt")
+    if query:
+        return [{"dimension": "q1", "query": query}]
+    raise ValueError("STALE record is missing probing_queries.dim*_query fields")
 
 
-def _item_label(record: dict[str, Any], query_record: dict[str, Any]) -> str:
-    raw = " ".join(
-        _first_text(source, "label", "type", "failure_type", "conflict_type")
-        for source in (query_record, record)
-    ).casefold()
+def _item_label(record: dict[str, Any]) -> str:
+    raw = _first_text(record, "type", "label", "failure_type", "conflict_type").casefold()
+    normalized = re.sub(r"[^a-z0-9]+", "", raw)
+    if normalized == "t1":
+        return "item_stale"
+    if normalized == "t2":
+        return "item_conflict"
     if any(token in raw for token in ("stale", "outdated", "old", "newer")):
         return "item_stale"
-    return "item_conflict"
+    if any(token in raw for token in ("conflict", "contradict")):
+        return "item_conflict"
+    raise ValueError(f"unsupported STALE type: {raw!r}")
 
 
-def _current_answer(record: dict[str, Any], query_record: dict[str, Any]) -> str:
-    return _first_text(
-        query_record,
+def _current_answer(record: dict[str, Any]) -> str:
+    current = _first_text(
+        record,
+        "M_new",
+        "m_new",
         "gold_answer",
         "answer",
         "correct_answer",
         "current_answer",
         "current_state",
-        default=_first_text(
-            record,
-            "gold_answer",
-            "answer",
-            "correct_answer",
-            "current_answer",
-            "current_state",
-            default="the current state",
-        ),
     )
+    if not current:
+        raise ValueError("STALE record is missing M_new")
+    return current
 
 
 def _stale_answer(
     record: dict[str, Any],
-    query_record: dict[str, Any],
     current: str,
 ) -> str:
     stale = _first_text(
-        query_record,
+        record,
+        "M_old",
+        "m_old",
         "stale_answer",
         "old_answer",
         "incorrect_answer",
         "conflicting_answer",
         "old_state",
-        default=_first_text(
-            record,
-            "stale_answer",
-            "old_answer",
-            "incorrect_answer",
-            "conflicting_answer",
-            "old_state",
-            default="an outdated or conflicting state",
-        ),
     )
+    if not stale:
+        raise ValueError("STALE record is missing M_old")
     if stale == current:
         return f"not-{current}"
     return stale
 
 
-def _context_text(record: dict[str, Any]) -> str:
-    raw = record.get("context") or record.get("long_context") or record.get("memory_context")
-    if isinstance(raw, str):
-        return _shorten(raw, 900)
-    if isinstance(raw, list):
-        return _shorten(" ".join(str(item) for item in raw), 900)
-    return ""
+def _explanation_text(record: dict[str, Any]) -> str:
+    return _first_text(record, "explanation", "cause", "reason")
+
+
+def _haystack_text(record: dict[str, Any]) -> str:
+    raw = (
+        record.get("haystack_session")
+        or record.get("haystack")
+        or record.get("context")
+        or record.get("long_context")
+        or record.get("memory_context")
+    )
+    return _stringify_context(raw)
 
 
 def _first_text(
@@ -277,9 +316,9 @@ def _timestamps_for_label(label: str) -> tuple[str, str]:
     return "2026-01-01T00:00:00Z", "2026-01-03T00:00:00Z"
 
 
-def _memory_sentence(query: str, answer: str, *, stale: bool) -> str:
-    state = "Earlier remembered answer" if stale else "Current remembered answer"
-    return _shorten(f"{state} for '{query}': {answer}", 700)
+def _memory_sentence(answer: str, *, stale: bool) -> str:
+    state = "M_old" if stale else "M_new"
+    return _shorten(f"{state}: {answer}", 700)
 
 
 def _required_phrases(text: str) -> list[str]:
@@ -296,6 +335,30 @@ def _shorten(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len].rsplit(" ", 1)[0] + "..."
+
+
+def _stringify_context(raw: Any) -> str:
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return _shorten(raw, 900)
+    if isinstance(raw, list):
+        parts: list[str] = []
+        for item in raw:
+            if isinstance(item, dict):
+                role = item.get("role") or item.get("speaker") or item.get("name") or "context"
+                content = item.get("content") or item.get("text") or item.get("message") or ""
+                content_text = _stringify_context(content)
+                if content_text:
+                    parts.append(f"[{role}] {content_text}")
+            else:
+                text = _stringify_context(item)
+                if text:
+                    parts.append(text)
+        return _shorten(" ".join(parts), 900)
+    if isinstance(raw, dict):
+        return _shorten(json.dumps(raw, ensure_ascii=False, sort_keys=True), 900)
+    return _shorten(str(raw), 900)
 
 
 def _case_to_mapping(case: ProbeCase) -> dict[str, Any]:

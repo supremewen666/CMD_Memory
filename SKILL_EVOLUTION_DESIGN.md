@@ -28,7 +28,7 @@ the skill *form* (an evolving notebook is shared with MNL/RIMRULE).
 CMD = **an agent with memory-repair tools + an evolvable memory-repair skill library.**
 
 ```
-recall → hook (Fill/Fix confidence gate)
+recall → (Fill/Fix confidence gate)
   └─ Fix → retrieve SKILL by failure fingerprint
             → execute skill.body = a memory-repair OPERATOR (structural)
             → re-answer over the repaired context
@@ -71,6 +71,34 @@ single-point.
 - **No headroom (C6 wall holds; C6 saw coupled 1/30) → fall back:** skill library
   becomes the *reuse/efficiency* mechanism only (Exp18/19), evolution claim = "faster
   cheaper repair from experience," not "extends what's fixable." Still honest, less novel.
+
+### Gate 1 result (Exp21/22): PASSED — but STATIC only
+
+Exp21 headroom (34–37/115, p~1e-10) and Exp22 LOO transfer (`comp_fp_topN`≈oracle,
+fp-key vs random 26/8 p=2.9e-3) confirm the operator library *extends fixability* and
+*transfers*. Both are **static** measures.
+
+### Gate 2 (next, UNRUN): online operator trajectory = the "逐代进化" claim
+
+C7/Exp18's "warm-up reuse, recovery flat" was measured on the **OLD guidance/label
+mechanism** (`failure_memory_skill/` is still boilerplate `Repair Guide` keyed by
+diagnosis label — the unmodified `format_pattern`). The **operator** mechanism has
+never been run as an online trajectory. So "per-generation evolution" is **untested,
+not refuted**. Run Exp24: online operator stream with fingerprint key +
+accept-if-improves + **multi-shape-per-fingerprint accumulation** on the residual
+stream; measure whether recovery climbs toward the richer ceiling (0.74) as the
+library thickens (Exp22 lever: thin 1-shape library = 0.58).
+- **Recovery climbs → 逐代 capability evolution proven → ship step-only; do NOT extend to item.**
+- **Recovery flat → write the item layer (Exp23) as a layered-dimensionality finding.**
+
+### Item layer (Exp23) status: repairable, library FAILS to transfer
+
+Single-point item repair works (stale 0.732 / conflict 0.568), but the fingerprint
+library does NOT beat same-budget random at the item layer (`item_fp_topN` vs random
+p=0.33 ns) — the opposite of step (Exp22). Item operators are outcome-redundant
+(small space), so there is nothing for retrieval to discriminate. Item is a DOMAIN-
+breadth contribution, **not** a substitute for the 逐代 evolution claim, and is gated
+on Exp24 (only write it if Gate 2 fails).
 
 ## 4. Code audit — KEEP / MODIFY / RETIRE
 
