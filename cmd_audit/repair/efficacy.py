@@ -32,13 +32,28 @@ from ..counterfactual.rollout import rollout_to_terminal
 LABEL_TO_ACTION = {action.value: action for action in PipelineAction}
 
 
+def _consumer_gain(result: Any) -> float:
+    """Shared status->gain mapping for RolloutResult consumers.
+
+    timeout -> NaN (excluded from aggregation, never wins a maximisation);
+    any other non-ok status -> 0.0 (unchanged prior behavior); ok -> the
+    rollout's recovery_gain.
+    """
+    if result.status == "timeout":
+        return float("nan")
+    return result.recovery_gain if result.rollout_successful else 0.0
+
+
 @dataclass(frozen=True)
 class RepairResult:
     """Outcome of one gold-free repair execution on one case.
 
     ``recovery_gain`` is the ABSOLUTE terminal answer score (rollout does not
     subtract any baseline — see ``rollout._compute_recovery_gain``). Baseline
-    subtraction / net-gain bookkeeping is the caller's concern.
+    subtraction / net-gain bookkeeping is the caller's concern. On a rollout
+    timeout, ``recovery_gain`` is ``NaN`` (mirrors ``RolloutResult.status``)
+    so it is excluded from mean/rate aggregation and can never win a
+    maximisation; ``status`` carries the reason string.
     """
 
     case_id: str
@@ -46,6 +61,7 @@ class RepairResult:
     selected_action: str | None
     generation_point: int | None
     recovery_gain: float  # absolute terminal score
+    status: str = "ok"
 
 
 def select_label_cmd(
@@ -100,11 +116,11 @@ def run_single_repair(
             client, base_context, 0, max_depth, recall_set, case.gold_answer,
             answer_verifier=answer_verifier, baseline_answer_score=baseline,
         )
-        gain = result.recovery_gain if result.rollout_successful else 0.0
+        gain = _consumer_gain(result)
         return RepairResult(
             case_id=case.case_id, selected_label=None,
             selected_action=None, generation_point=None,
-            recovery_gain=gain,
+            recovery_gain=gain, status=result.status,
         )
 
     gen_point, action = choice
@@ -117,9 +133,9 @@ def run_single_repair(
         client, repaired, gen_point + 1, max_depth, recall_set, case.gold_answer,
         answer_verifier=answer_verifier, baseline_answer_score=baseline,
     )
-    gain = result.recovery_gain if result.rollout_successful else 0.0
+    gain = _consumer_gain(result)
     return RepairResult(
         case_id=case.case_id, selected_label=action.value,
         selected_action=action.value, generation_point=gen_point,
-        recovery_gain=gain,
+        recovery_gain=gain, status=result.status,
     )

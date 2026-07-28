@@ -57,9 +57,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases
-from cmd_audit.eval.writers import write_csv_table
+from cmd_audit.eval.writers import (
+    format_recovery_value,
+    is_timeout_value,
+    write_csv_table,
+)
 from cmd_audit.counterfactual.actions import PipelineAction, get_legal_actions
 from cmd_audit.repair.efficacy import LABEL_TO_ACTION
 from cmd_audit.scoring.retrieval import compute_bm25_scores, tokenize
@@ -72,6 +75,7 @@ from cmd_audit.repair.failure_memory import (
 from experiments.experiment_runner_common import (
     DATA, OUT, assert_g_eval_available, build_answer_verifier,
 )
+from experiments.experiment_runner_common import build_clients
 from experiments.probe_exhaustive import _step_context, _own_recovery
 
 _ACTION_BY_NAME = {a.value: a for a in PipelineAction}
@@ -175,9 +179,9 @@ def main() -> None:
         raise SystemExit(f"operator bank not found: {bank_path} (run Exp21 first).")
     bank = _load_bank(bank_path)
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="operator-transfer")
-    verifier = build_answer_verifier(client, answer_mode="answer-rubric")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="operator-transfer")
+    verifier = build_answer_verifier(judge_client, answer_mode="answer-rubric")
 
     all_cases = {c.case_id: c for c in load_probe_cases(args.cases)
                  if c.perturbation_label in PIPELINE_STEP_ACTIONS}
@@ -207,6 +211,7 @@ def main() -> None:
     ]
     tally = defaultdict(lambda: [0, 0])
     detail = []
+    excluded_cases: list[str] = []
     print(f"Operator transfer (LOO) over {len(residual)} residual cases\n")
 
     for i, case in enumerate(residual, start=1):
@@ -227,6 +232,25 @@ def main() -> None:
             return _own_recovery(client, ctx, max_depth, max_depth, recall, gold, verifier, baseline)
 
         base_gain = run_ops([])
+        if is_timeout_value(base_gain):
+            # Identity-backbone rollout timed out: every arm's net would be
+            # `score - NaN == NaN`, every `net > threshold` False, so every arm
+            # would be tallied as "not recovered". Exclude the case instead.
+            excluded_cases.append(cid)
+            detail.append(_excluded_detail_row(case, arms))
+            print(f"  [{i}/{len(residual)}] {case.perturbation_label:16s} "
+                  "EXCLUDED (identity-backbone rollout timed out)")
+            continue
+
+        arm_timeouts = 0
+
+        def net_of(score):
+            """NaN-safe net gain: a timed-out arm rollout stays NaN and is tallied."""
+            nonlocal arm_timeouts
+            if is_timeout_value(score):
+                arm_timeouts += 1
+                return float("nan")
+            return score - base_gain
 
         # transfer seeds (LOO: never this case's own bank row)
         others = [(c2, b2) for c2, b2 in bank.items() if c2 != cid]
@@ -286,8 +310,8 @@ def main() -> None:
         for arm in arms:
             if arm in {"comp_fp_topN", "random_topN"}:
                 continue  # handled separately below (retrieve-execute-keep-best)
-            net = (run_ops(arm_ops[arm]) - base_gain) if arm_ops[arm] else 0.0
-            recd = net > args.recovered_threshold
+            net = net_of(run_ops(arm_ops[arm])) if arm_ops[arm] else 0.0
+            recd = (not is_timeout_value(net)) and net > args.recovered_threshold
             per[arm] = (net, recd)
             tally[arm][0] += int(recd); tally[arm][1] += 1
 
@@ -301,7 +325,9 @@ def main() -> None:
                 if not ops:
                     continue
                 cost = rank
-                cand_net = run_ops(ops) - base_gain
+                cand_net = net_of(run_ops(ops))
+                # NaN compares False here, so a timed-out candidate never wins
+                # and never triggers the accept-if-improves break.
                 if cand_net > best_net:
                     best_net, best_op = cand_net, ops
                 if cand_net > args.recovered_threshold:
@@ -326,7 +352,9 @@ def main() -> None:
 
         detail.append({
             "case_id": cid, "gold_label": case.perturbation_label,
-            **{f"{a}_net": f"{per[a][0]:.4f}" for a in arms},
+            "status": "ok", "excluded": "false",
+            "timeout_count": str(arm_timeouts),
+            **{f"{a}_net": format_recovery_value(per[a][0], digits=4) for a in arms},
             **{f"{a}_rec": str(per[a][1]).lower() for a in arms},
             "topn_cost": str(topn_cost), "topn_candidates": str(len(fp_topn_shapes)),
             "random_topn_cost": str(random_cost),
@@ -344,20 +372,43 @@ def main() -> None:
               f"bm25={'Y' if per['comp_bm25'][1] else '.'} "
               f"single={'Y' if per['single_xfer'][1] else '.'}")
 
-    _summary(tally, arms)
+    _summary(tally, arms, excluded_cases)
     path = write_csv_table(
         Path(args.out),
-        ["case_id", "gold_label",
+        ["case_id", "gold_label", "status", "excluded", "timeout_count",
          *[f"{a}_net" for a in arms], *[f"{a}_rec" for a in arms],
          "topn_cost", "topn_candidates",
          "random_topn_cost", "random_topn_candidates",
          "comp_oracle_op", "comp_fp_op", "comp_fp_topN_op", "random_topN_op"],
-        detail, sandbox_root=OUT,
+        detail, sandbox_root=OUT, judge_client=judge_client,
     )
     print(f"\nWrote {path}")
 
 
-def _summary(tally, arms):
+def _excluded_detail_row(case, arms) -> dict[str, str]:
+    """Detail row for a case whose identity-backbone rollout timed out."""
+    row = {
+        "case_id": case.case_id,
+        "gold_label": case.perturbation_label,
+        "status": "base_gain_timeout",
+        "excluded": "true",
+        "timeout_count": "1",
+        "topn_cost": "0",
+        "topn_candidates": "0",
+        "random_topn_cost": "0",
+        "random_topn_candidates": "0",
+        "comp_oracle_op": "",
+        "comp_fp_op": "",
+        "comp_fp_topN_op": "",
+        "random_topN_op": "",
+    }
+    for arm in arms:
+        row[f"{arm}_net"] = ""
+        row[f"{arm}_rec"] = "false"
+    return row
+
+
+def _summary(tally, arms, excluded_cases=()):
     print("\n=== Recovery rate per transfer arm (residual) ===")
     print(f"{'arm':14s} {'recovered':>9s} {'total':>6s} {'rate':>8s} {'vs_oracle':>10s}")
     orate = (tally["comp_oracle"][0] / tally["comp_oracle"][1]) if tally["comp_oracle"][1] else 0.0
@@ -366,6 +417,9 @@ def _summary(tally, arms):
         rate = r / t if t else 0.0
         frac = f"{rate / orate:.2f}" if orate and a != "no_repair" else "-"
         print(f"{a:14s} {r:>9d} {t:>6d} {rate:>8.4f} {frac:>10s}")
+    if excluded_cases:
+        print(f"\n  EXCLUDED (identity-backbone rollout timed out): {len(excluded_cases)} "
+              "-- not counted as recovered or not-recovered in any arm.")
     print("\n  DECISION ARM = comp_fp_topN (deployable library: retrieve top-N fp-nearest")
     print("  operators, execute each, keep first that recovers = accept-if-improves).")
     print("  random_topN = same execution budget, random OTHER-case operators.")

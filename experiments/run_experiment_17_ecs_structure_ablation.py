@@ -20,13 +20,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases
-from cmd_audit.eval.writers import write_csv_table
-from cmd_audit.counterfactual.actions import PipelineAction, apply_pipeline_action
+from cmd_audit.eval.writers import is_timeout_value, write_csv_table
+from cmd_audit.counterfactual.actions import apply_pipeline_action
 from cmd_audit.repair.actions import get_targeted_repair_action_v1
 from cmd_audit.repair.efficacy import run_single_repair
-from cmd_audit.scoring import evidence_recall_from_text, score_answer_with_verifier
+from cmd_audit.scoring import score_answer_with_verifier
 from experiments.experiment_runner_common import (
     DATA,
     OUT,
@@ -35,6 +34,7 @@ from experiments.experiment_runner_common import (
     build_answer_verifier,
     build_evidence_scorer,
 )
+from experiments.experiment_runner_common import build_clients
 from experiments.probe_exhaustive import _evaluate_case
 
 
@@ -63,10 +63,14 @@ def main() -> None:
     parser.add_argument("--partial-threshold", type=float, default=0.5)
     args = parser.parse_args()
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="ecs-structure-ablation")
-    answer_verifier = build_answer_verifier(client, answer_mode="answer-rubric")
-    evidence_scorer = build_evidence_scorer(client, scorer_mode="g-eval-hybrid")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="ecs-structure-ablation")
+    answer_verifier = build_answer_verifier(
+        judge_client, answer_mode="answer-rubric"
+    )
+    evidence_scorer = build_evidence_scorer(
+        judge_client, scorer_mode="g-eval-hybrid"
+    )
 
     cases = [
         c
@@ -98,6 +102,14 @@ def main() -> None:
             max_depth=max_depth,
             intervention_config=cfg,
         ).recovery_gain
+        if is_timeout_value(baseline_gain):
+            excluded += 1
+            detail_rows.extend(_excluded_rows(case, "base_gain_timeout"))
+            print(
+                f"  [{i}/{len(cases)}] {case.perturbation_label:20s} "
+                "EXCLUDED (identity-backbone rollout timed out)"
+            )
+            continue
         _credits, culprit = _evaluate_case(
             case,
             client,
@@ -121,6 +133,14 @@ def main() -> None:
             max_depth=max_depth,
             intervention_config=cfg,
         )
+        if is_timeout_value(repair_check.recovery_gain):
+            excluded += 1
+            detail_rows.extend(_excluded_rows(case, "repair_check_timeout"))
+            print(
+                f"  [{i}/{len(cases)}] {case.perturbation_label:20s} "
+                "excluded (repair-check rollout timed out)"
+            )
+            continue
         if repair_check.recovery_gain - baseline_gain <= args.recovered_threshold:
             excluded += 1
             detail_rows.extend(_excluded_rows(case, "single_point_below_recovery_threshold"))
@@ -181,6 +201,7 @@ def main() -> None:
         _detail_fieldnames(),
         detail_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     summary_rows = _summary_rows(detail_rows)
     summary_path = write_csv_table(
@@ -188,6 +209,7 @@ def main() -> None:
         _summary_fieldnames(),
         summary_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     _print_summary(summary_rows, included=included, excluded=excluded)
     print(f"\nWrote {detail_path}")

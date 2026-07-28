@@ -38,9 +38,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.baselines.comparators import run_llm_judge_baseline
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases
-from cmd_audit.eval.writers import write_csv_table
+from cmd_audit.eval.writers import (
+    format_recovery_value,
+    is_timeout_value,
+    write_csv_table,
+)
 from cmd_audit.counterfactual.actions import PipelineAction, get_legal_actions
 from cmd_audit.repair.efficacy import run_single_repair, select_label_cmd
 from experiments.experiment_runner_common import (
@@ -50,6 +53,7 @@ from experiments.experiment_runner_common import (
     build_answer_verifier,
     run_mcts_for_case,
 )
+from experiments.experiment_runner_common import build_clients
 from experiments.probe_exhaustive import _evaluate_case
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -210,9 +214,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="repair-efficacy")
-    verifier = build_answer_verifier(client, answer_mode="answer-rubric")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="repair-efficacy")
+    verifier = build_answer_verifier(judge_client, answer_mode="answer-rubric")
 
     cases = [
         c
@@ -232,6 +236,7 @@ def main() -> None:
     # arm -> gold_label -> [recovered_count, total]
     tally = defaultdict(lambda: defaultdict(lambda: [0, 0]))
     detail_rows = []
+    excluded_cases = []
 
     print(f"Repair efficacy: 4 arms over {len(cases)} cases\n")
     for i, case in enumerate(cases):
@@ -267,21 +272,35 @@ def main() -> None:
         # subtracts. recovered is judged on net_gain (E2 contract).
         baseline_res = _run("no_repair")
         baseline_gain = baseline_res.recovery_gain
+        if is_timeout_value(baseline_gain):
+            excluded_cases.append(case.case_id)
+            detail_rows.extend(_excluded_rows(case, gold))
+            print(
+                f"  [{i+1}/{len(cases)}] {gold:20s} "
+                "EXCLUDED (identity-backbone rollout timed out)"
+            )
+            continue
 
         for arm in REPAIR_ARMS:
             res = baseline_res if arm == "no_repair" else _run(arm)
             net = 0.0 if arm == "no_repair" else res.recovery_gain - baseline_gain
-            recovered = net > args.recovered_threshold
+            timed_out = is_timeout_value(net)
+            recovered = not timed_out and net > args.recovered_threshold
             tally[arm][gold][0] += int(recovered)
             tally[arm][gold][1] += 1
             detail_rows.append({
                 "case_id": case.case_id,
                 "gold_label": gold,
+                "status": "ok",
+                "excluded": "false",
+                "timeout_count": "1" if timed_out else "0",
                 "arm": arm,
                 "selected_action": res.selected_action or "",
                 "generation_point": "" if res.generation_point is None else str(res.generation_point),
-                "recovery_gain": f"{res.recovery_gain:.4f}",
-                "net_gain": f"{net:.4f}",
+                "recovery_gain": format_recovery_value(
+                    res.recovery_gain, digits=4
+                ),
+                "net_gain": format_recovery_value(net, digits=4),
                 "recovered": str(recovered).lower(),
             })
         print(
@@ -290,13 +309,20 @@ def main() -> None:
         )
 
     _print_summary(tally)
+    if excluded_cases:
+        print(
+            "\nEXCLUDED (identity-backbone rollout timed out): "
+            f"{len(excluded_cases)} -- absent from every arm denominator."
+        )
 
     detail_path = write_csv_table(
         OUT / "repair_efficacy_detail.csv",
-        ["case_id", "gold_label", "arm", "selected_action",
+        ["case_id", "gold_label", "status", "excluded", "timeout_count",
+         "arm", "selected_action",
          "generation_point", "recovery_gain", "net_gain", "recovered"],
         detail_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     print(f"\nWrote {detail_path}")
 
@@ -315,8 +341,28 @@ def main() -> None:
         ["arm", "recovered", "total", "recovered_rate"],
         summary_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     print(f"Wrote {summary_path}")
+
+
+def _excluded_rows(case, gold):
+    return [
+        {
+            "case_id": case.case_id,
+            "gold_label": gold,
+            "status": "base_gain_timeout",
+            "excluded": "true",
+            "timeout_count": "1",
+            "arm": arm,
+            "selected_action": "",
+            "generation_point": "",
+            "recovery_gain": "nan" if arm == "no_repair" else "",
+            "net_gain": "",
+            "recovered": "false",
+        }
+        for arm in REPAIR_ARMS
+    ]
 
 
 def _print_summary(tally) -> None:

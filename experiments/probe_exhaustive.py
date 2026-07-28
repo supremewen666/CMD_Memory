@@ -27,7 +27,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases
 from cmd_audit.counterfactual.actions import (
     PipelineAction,
@@ -38,11 +37,11 @@ from cmd_audit.counterfactual.rollout import rollout_to_terminal
 from cmd_audit.counterfactual.context import generate_conditioned_context
 from cmd_audit.eval.writers import write_csv_table
 from experiments.experiment_runner_common import (
-    OUT,
     assert_g_eval_available,
     build_answer_verifier,
     load_raw_rows,
 )
+from experiments.experiment_runner_common import build_clients
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "probe_cases"
@@ -74,9 +73,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="probe-exhaustive")
-    verifier = build_answer_verifier(client, answer_mode="answer-rubric")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="probe-exhaustive")
+    verifier = build_answer_verifier(judge_client, answer_mode="answer-rubric")
 
     cases = [
         c
@@ -145,7 +144,7 @@ def main() -> None:
     _print_transferability(joint_by_label)
 
     if args.out:
-        _write_detail_csv(args.out, detail_rows)
+        _write_detail_csv(args.out, detail_rows, judge_client=judge_client)
         print(f"\nWrote {args.out}")
 
 
@@ -167,6 +166,8 @@ def _own_recovery(client, context, start_gp, max_depth, recall_set, gold_answer,
         client, context, start_gp, max_depth, recall_set, gold_answer,
         answer_verifier=verifier, baseline_answer_score=baseline,
     )
+    if result.status == "timeout":
+        return float("nan")
     return result.recovery_gain if result.rollout_successful else 0.0
 
 
@@ -306,18 +307,17 @@ def _print_transferability(joint_by_label):
     )
 
 
-def _write_detail_csv(path, rows):
-    import csv
-
+def _write_detail_csv(path, rows, *, judge_client):
     fieldnames = [
         "case_id", "gold_label", "expected_hop",
         "culprit_gen_point", "culprit_action", "culprit_credit",
     ]
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+    write_csv_table(
+        path,
+        fieldnames,
+        rows,
+        judge_client=judge_client,
+    )
 
 
 if __name__ == "__main__":

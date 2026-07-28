@@ -40,7 +40,12 @@ def _rec(row, arm):
     if rk in row and row[rk] != "":
         return row[rk].strip().lower() == "true"
     nk = f"{arm}_net"
-    return nk in row and row[nk] not in ("", None) and float(row[nk]) > 0.0
+    # "nan" is the explicit timed-out-rollout token: unmeasured, not recovered.
+    return (
+        nk in row
+        and row[nk] not in ("", None, "nan", "NA")
+        and float(row[nk]) > 0.0
+    )
 
 
 _COMPARISONS = [
@@ -72,12 +77,18 @@ def _sig(p_value: float) -> str:
 
 
 def _analyze_one(path: str) -> dict:
-    rows = list(csv.DictReader(open(path, encoding="utf-8")))
+    all_rows = list(csv.DictReader(open(path, encoding="utf-8")))
+    # Drop rows the runner excluded (identity-backbone rollout timed out); they
+    # have no measured net gain and would otherwise count as "not recovered".
+    rows = [r for r in all_rows if r.get("excluded", "false") != "true"]
+    excluded = len(all_rows) - len(rows)
     n = len(rows)
     arms = [k[:-4] for k in rows[0].keys() if k.endswith("_rec")] if rows else []
     if not arms and rows:
         arms = [k[:-4] for k in rows[0].keys() if k.endswith("_net")]
-    print(f"loaded {n} cases from {path}\narms present: {arms}\n")
+    print(f"loaded {n} cases from {path}"
+          + (f" ({excluded} excluded: base_gain timeout)" if excluded else "")
+          + f"\narms present: {arms}\n")
 
     print("=== Recovery rate per arm (this run) ===")
     rates = {}

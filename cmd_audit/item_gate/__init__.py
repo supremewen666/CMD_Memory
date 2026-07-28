@@ -22,11 +22,17 @@ from .gate import (
     run_item_gate_for_recall_set,
 )
 from .loo import leave_one_out_reconstruct, compute_loo_divergence, order_items_by_experience
+from .bucketing import MemoryBucket, bucket_memory_items
+from .freshness import FreshnessDecision, arbitrate_freshness
 
 __all__ = [
     "DirectedDivergence",
     "ItemGateResult",
     "ItemGateStatus",
+    "MemoryBucket",
+    "FreshnessDecision",
+    "arbitrate_freshness",
+    "bucket_memory_items",
     "compute_directed_divergence",
     "compute_symmetric_divergence",
     "compute_loo_divergence",

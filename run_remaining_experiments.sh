@@ -6,12 +6,12 @@
 #     Exp21 ×3 (churn 复测) -> Exp22 ×3 (bank=同 run 的 Exp21 输出)
 #     Exp23a single-param 补充臂 -> Exp23b ×3
 #     Exp18 ×3 (B-full: fingerprint 键下的轨迹曲线; 固定输出路径, 加全局锁)
-#     Exp24 (总闸门, runner 未建 -> 存在性门控, 见 SPEC_A §2)
+#     Exp24 ×3 (总闸门; 与同 run 的 Exp21 residual 集合绑定)
 #     Exp25 durability (runner 未建 -> 门控, 见 SPEC_A §5)
 #   lane 1..N(每 GPU 一个 vLLM 端点, 换 answering 模型):
 #     Exp14 ×3 (C4 headline) -> Exp21 ×3 -> Exp22 ×3
-#     [PROVISIONAL] judge/answerer 拆分未落地(SPEC_A §3), 目前为整栈换端点;
-#     judge 冻结前这些数字仅作趋势参考, 不进正文。
+#     [PROVISIONAL] judge/answerer 拆分已接线但尚未按冻结 judge 重跑;
+#     既有数字仅作趋势参考, 重跑验收前不进正文。
 #
 # 用法:
 #   export CMD_ENDPOINTS="http://localhost:8000/v1|http://localhost:8001/v1"
@@ -47,6 +47,13 @@ IFS='|' read -r -a ENDPOINTS <<< "${CMD_ENDPOINTS:-http://localhost:8000/v1}"
 IFS='|' read -r -a MODELS <<< "${CMD_MODELS:-qwen2.5-7b-instruct}"
 RUNS="${CMD_RUNS:-3}"
 ONLY="${CMD_ONLY:-}"
+
+# Resolve the frozen judge exactly once, before any lane replaces LLM_* with
+# its varying answer endpoint/model. Explicit LLM_JUDGE_* values win; otherwise
+# lane 0 is the study-wide judge.
+JUDGE_BASE_URL="${LLM_JUDGE_BASE_URL:-${ENDPOINTS[0]}}"
+JUDGE_MODEL="${LLM_JUDGE_MODEL:-${MODELS[0]}}"
+JUDGE_API_KEY="${LLM_JUDGE_API_KEY:-${LLM_API_KEY:-dummy}}"
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
@@ -95,13 +102,18 @@ import sys
 sys.path.insert(0, ".")
 from experiments.experiment_runner_common import assert_g_eval_available
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
-assert_g_eval_available(LLMClient(LLMClientConfig()), role="preflight")
+# G0 is a judge-endpoint gate: top_logprobs is a judge-only requirement
+# (SPEC_A §3). With no LLM_JUDGE_* set, this falls back to the LLM_* lane
+# endpoint field by field, so single-endpoint lanes are unaffected.
+assert_g_eval_available(LLMClient(LLMClientConfig.for_role("judge")), role="preflight-judge")
 print("G0 logprob gate: OK")
 PY
 }
 
 lane_env() {  # $1=endpoint $2=model
   export LLM_BASE_URL="$1" LLM_MODEL="$2" LLM_API_KEY="dummy" LLM_TIMEOUT=120
+  export LLM_JUDGE_BASE_URL="$JUDGE_BASE_URL" LLM_JUDGE_MODEL="$JUDGE_MODEL"
+  export LLM_JUDGE_API_KEY="$JUDGE_API_KEY" LLM_JUDGE_TIMEOUT=120
   export NO_PROXY="localhost,127.0.0.1" no_proxy="localhost,127.0.0.1"
 }
 
@@ -151,7 +163,9 @@ lane_local() {
   if [ -f experiments/run_experiment_24_operator_trajectory.py ]; then
     for r in $(seq 1 "$RUNS"); do
       run_job "exp24" python experiments/run_experiment_24_operator_trajectory.py \
-        --seed $((24 + (r - 1) * 100)) --out "$D/operator_trajectory_run${r}.csv"
+        --residual-from "$D/operator_headroom_detail_run${r}.csv" \
+        --seed $((24 + (r - 1) * 100)) \
+        --out "$D/operator_trajectory_run${r}.csv"
     done
   else
     log "GATED exp24: runner 不存在 — 先按 IMPROVEMENT_SPEC_A §2 建 runner, 再 CMD_ONLY=exp24 重跑"
@@ -171,8 +185,8 @@ lane_model() {  # $1=endpoint $2=model $3=lane_idx
   lane_env "$1" "$2"
   local D="$RUN_ROOT/lane$3_$2"
   mkdir -p "$D"
-  log "lane$3 [$2] PROVISIONAL: judge/answerer 拆分未落地(SPEC_A §3), 整栈换端点, 数字不进正文"
-  g0_gate || { log "lane$3: G0 gate FAILED — $2 端点无 top_logprobs, 只能当 answerer 不能当 judge; lane 终止"; return 1; }
+  log "lane$3 [$2] PROVISIONAL: frozen judge 已接线, 待本 lane 重跑验收后再转正式数字"
+  g0_gate || { log "lane$3: G0 gate FAILED — frozen judge 端点无 top_logprobs; lane 终止"; return 1; }
 
   for r in $(seq 1 "$RUNS"); do
     run_fixed_out_job "exp14" "$D/exp14_run${r}" \
@@ -193,6 +207,8 @@ lane_model() {  # $1=endpoint $2=model $3=lane_idx
   echo "commit: $(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "endpoints: ${ENDPOINTS[*]}"
   echo "models: ${MODELS[*]}"
+  echo "frozen_judge_endpoint: $JUDGE_BASE_URL"
+  echo "frozen_judge_model: $JUDGE_MODEL"
   echo "runs_per_exp: $RUNS  only: ${ONLY:-<all>}"
 } > "$RUN_ROOT/MANIFEST.txt"
 

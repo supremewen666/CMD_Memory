@@ -40,14 +40,23 @@ def main() -> None:
     p.add_argument("--recovered-threshold", type=float, default=0.1)
     args = p.parse_args()
 
-    rows = list(csv.DictReader(open(args.csv, encoding="utf-8")))
+    all_rows = list(csv.DictReader(open(args.csv, encoding="utf-8")))
+    # Rows the runner excluded (identity-backbone rollout timed out) carry no
+    # measured net gain. Keeping them would re-count each as "not recovered"
+    # here, reintroducing the same downward bias the runner just removed.
+    rows = [r for r in all_rows if r.get("excluded", "false") != "true"]
+    excluded = len(all_rows) - len(rows)
     thr = args.recovered_threshold
     n = len(rows)
-    print(f"loaded {n} residual cases from {args.csv}\n")
+    print(f"loaded {n} residual cases from {args.csv}"
+          + (f" ({excluded} excluded: base_gain timeout)" if excluded else "")
+          + "\n")
 
     def net(r, k):
         v = r.get(k, "")
-        return float(v) if v not in ("", None) else -1.0
+        if v in ("", None, "nan", "NA"):
+            return -1.0
+        return float(v)
 
     def rec(r, k):
         return net(r, k) > thr

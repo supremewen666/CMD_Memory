@@ -40,6 +40,10 @@ from .replays import (
 )
 from .scoring import answer_score, evidence_recall_from_text
 from .eval import (
+    is_timeout_value,
+    recovery_mean,
+    recovery_positive_rate,
+    recovery_timeout_count,
     write_attribution_table,
     write_csv_table,
     write_post_repair_table,
@@ -394,23 +398,46 @@ def write_comparison_metrics_table(
     output_path: str | Path,
     *,
     memory_probe_best_accuracy: float | None = None,
+    judge_client: Any = None,
+    rubric_version: str | None = None,
 ) -> None:
+    """Write the paper-facing operator recovery metrics table.
+
+    ``judge_client`` is optional and defaults to ``None`` for backward
+    compatibility (existing callers keep writing the same columns). When
+    provided (the judge client from
+    ``experiments.experiment_runner_common.build_clients`` — see SPEC_A §3),
+    every row also records the judge endpoint identity and rubric version
+    (Red Queen GM 2606.26294) so cross-arm / cross-generation comparisons can
+    verify the evaluator was frozen and detect drift.
+    """
     fieldnames = [
         "system_name",
         "cases",
         "triggered_cases",
         "positive_recovery_rate",
         "mean_recovery_gain",
+        "timeout_count",
         "cost_per_diagnosis",
         "provenance_completeness",
     ]
     if memory_probe_best_accuracy is not None:
         fieldnames.append("memory_probe_best_accuracy")
 
+    judge_fields: dict[str, str] = {}
+    if judge_client is not None:
+        from .eval import judge_provenance_fields
+
+        judge_fields = judge_provenance_fields(
+            judge_client, rubric_version=rubric_version
+        )
+        fieldnames.extend(["judge_base_url", "judge_model", "rubric_version"])
+
     attributed_results = [result for result in results if result.attribution is not None]
     recovery_gains = [
         float(result.attribution.recovery_gain) for result in attributed_results
     ]
+    timeout_count = recovery_timeout_count(recovery_gains)
     total_replays = sum(len(result.replays) for result in results)
     replays_with_prov = sum(
         sum(1 for replay in result.replays if replay.provenance_edges)
@@ -427,6 +454,7 @@ def write_comparison_metrics_table(
             "triggered_cases": str(len(attributed_results)),
             "positive_recovery_rate": f"{_positive_rate(recovery_gains):.3f}",
             "mean_recovery_gain": f"{_mean(recovery_gains):.3f}",
+            "timeout_count": str(timeout_count),
             "cost_per_diagnosis": f"{_mean([r.diagnosis_cost for r in results]):.3f}",
             "provenance_completeness": f"{provenance_completeness:.3f}",
             **(
@@ -434,6 +462,7 @@ def write_comparison_metrics_table(
                 if memory_probe_best_accuracy is not None
                 else {}
             ),
+            **judge_fields,
         }
     ]
 
@@ -452,6 +481,7 @@ def write_comparison_metrics_table(
                 "triggered_cases": "0",
                 "positive_recovery_rate": "0.000",
                 "mean_recovery_gain": "0.000",
+                "timeout_count": "0",
                 "cost_per_diagnosis": f"{_mean(comparator_costs[comparator_name]):.3f}",
                 "provenance_completeness": "0.000",
                 **(
@@ -463,6 +493,7 @@ def write_comparison_metrics_table(
                     if memory_probe_best_accuracy is not None
                     else {}
                 ),
+                **judge_fields,
             }
         )
 
@@ -470,11 +501,16 @@ def write_comparison_metrics_table(
 
 
 def _mean(values: list[float]) -> float:
-    return sum(values) / len(values) if values else 0.0
+    # Excludes NaN (timed-out rollouts): a single NaN in sum() poisons the whole
+    # mean, understating recovery for every other case in the batch. Shared with
+    # the writers so the timeout rule has one definition.
+    return recovery_mean(values)
 
 
 def _positive_rate(values: list[float]) -> float:
-    return sum(1 for value in values if value > 0.0) / len(values) if values else 0.0
+    # Excludes NaN from both numerator and denominator so timeouts don't
+    # understate the true positive rate.
+    return recovery_positive_rate(values)
 
 
 # ── Private pipeline helpers ────────────────────────────────────────────
@@ -957,6 +993,12 @@ def _attribution_from_mcts(attribution_result: SearchResult | None) -> Attributi
     for action_credits in attribution_result.action_credits.values():
         for action, credit in action_credits.items():
             if action == PipelineAction.IDENTITY:
+                continue
+            # Exclude NaN (timed-out rollout) credits before sort: sort() with
+            # NaN present does not guarantee NaN loses, unlike a scalar `>`
+            # comparison, so a timed-out operator could otherwise slip into
+            # credits[0] and defeat the `<= 0.0` abstention check below.
+            if is_timeout_value(credit):
                 continue
             credits.append((action.value, credit))
     credits.sort(key=lambda item: item[1], reverse=True)

@@ -91,6 +91,55 @@ class LLMClientConfig:
             return f"{base}/chat/completions"
         return f"{base}/chat/completions"
 
+    @classmethod
+    def for_role(cls, role: str = "answer") -> "LLMClientConfig":
+        """Build a config for a named client role: ``"answer"`` or ``"judge"``.
+
+        Standing principle (decided 2026-07-13, do not revisit): the
+        answering model varies across experiment arms; the judge is frozen
+        for the entire study so that arms stay comparable and scoring never
+        folds into a self-evaluation loop.
+
+        ``role="answer"`` is exactly the plain constructor — reads
+        ``LLM_BASE_URL`` / ``LLM_MODEL`` / ``LLM_TIMEOUT`` / ``LLM_API_KEY``
+        (or ``OPENAI_API_KEY`` / ``DEEPSEEK_API_KEY``), unchanged.
+
+        ``role="judge"`` reads ``LLM_JUDGE_BASE_URL`` / ``LLM_JUDGE_MODEL`` /
+        ``LLM_JUDGE_TIMEOUT`` / ``LLM_JUDGE_API_KEY``, each falling back
+        independently — field by field, not all-or-nothing — to its ``LLM_*``
+        counterpart when unset. With only the base ``LLM_*`` vars set, the
+        judge config is therefore identical to the answer config: this is
+        the backward-compatibility guarantee that lets every existing
+        experiment runner keep constructing a single shared client.
+        """
+        if role == "answer":
+            return cls()
+        if role != "judge":
+            raise ValueError(f"unknown LLMClientConfig role: {role!r}")
+
+        base_url = os.environ.get("LLM_JUDGE_BASE_URL") or os.environ.get(
+            "LLM_BASE_URL", "http://localhost:11434/v1"
+        )
+        model = os.environ.get("LLM_JUDGE_MODEL") or os.environ.get(
+            "LLM_MODEL", "qwen2.5:7b"
+        )
+        timeout_raw = os.environ.get("LLM_JUDGE_TIMEOUT") or os.environ.get(
+            "LLM_TIMEOUT", "60"
+        )
+        api_key = (
+            os.environ.get("LLM_JUDGE_API_KEY")
+            or os.environ.get("LLM_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("DEEPSEEK_API_KEY")
+            or ""
+        )
+        return cls(
+            base_url=base_url,
+            model=model,
+            timeout_seconds=float(timeout_raw),
+            api_key=api_key,
+        )
+
 
 class LLMClient:
     """Provider-agnostic LLM API client.

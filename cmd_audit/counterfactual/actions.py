@@ -476,27 +476,30 @@ def _repair_item_stale_context(
     intervention_config: dict[str, Any] | None,
 ) -> str:
     """Prefer the newest recalled version and explicitly demote older versions."""
-    versioned = _timestamped_items(recall_set)
-    if len(versioned) < 2:
-        return context
     tolerance_days = int(
         (intervention_config or {}).get("item_timestamp_tolerance_days", 7)
     )
-    newest_ts, newest_item = max(versioned, key=lambda entry: entry[0])
-    older = tuple(
-        item
-        for ts, item in versioned
-        if item.memory_id != newest_item.memory_id
-        and (newest_ts - ts).total_seconds() > tolerance_days * 24 * 60 * 60
+    from ..item_gate.freshness import arbitrate_freshness
+
+    decision = arbitrate_freshness(
+        recall_set,
+        tolerance_days=tolerance_days,
     )
-    if not older:
+    if not decision.applicable:
         return context
+    by_id = {item.memory_id: item for item in recall_set}
+    newest_id = next(
+        memory_id
+        for memory_id, weight in decision.item_signal_hints
+        if weight > 0.0
+    )
+    newest_item = by_id[newest_id]
     body = "\n".join(
         [
             f"- [{newest_item.memory_id} priority] {newest_item.text}",
             *(
-                f"- [{item.memory_id} downweighted] older version retained only for audit"
-                for item in older
+                f"- [{memory_id} downweighted] older version retained only for audit"
+                for memory_id in decision.demoted_ids
             ),
         ]
     )

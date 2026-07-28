@@ -45,9 +45,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases
-from cmd_audit.eval.writers import write_csv_table
+from cmd_audit.eval.writers import (
+    best_scored_pair,
+    format_recovery_value,
+    is_timeout_value,
+    nan_safe_max,
+    recovery_case_outcomes,
+    write_csv_table,
+)
 from cmd_audit.counterfactual.actions import (
     PipelineAction,
     get_legal_actions,
@@ -62,6 +68,7 @@ from experiments.experiment_runner_common import (
     assert_g_eval_available,
     build_answer_verifier,
 )
+from experiments.experiment_runner_common import build_clients
 from experiments.probe_exhaustive import _step_context, _own_recovery
 
 
@@ -147,9 +154,9 @@ def main() -> None:
     if not residual_ids:
         raise SystemExit(f"no residual cases for labels={labels} in {ecs_path}")
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="operator-headroom")
-    verifier = build_answer_verifier(client, answer_mode="answer-rubric")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="operator-headroom")
+    verifier = build_answer_verifier(judge_client, answer_mode="answer-rubric")
 
     all_cases = [c for c in load_probe_cases(args.cases) if c.perturbation_label in PIPELINE_STEP_ACTIONS]
     residual = [c for c in all_cases if c.case_id in residual_ids]
@@ -161,6 +168,7 @@ def main() -> None:
     arms = ("single", "double", "param", "double_param", "richer")
     tally = defaultdict(lambda: [0, 0])
     headroom_cases = []
+    excluded_cases: list[str] = []
     ec_on = ec_off = ec_both_rec = 0
     detail_rows = []
     print(f"Operator headroom over {len(residual)} residual cases, labels={sorted(labels)}\n")
@@ -180,7 +188,29 @@ def main() -> None:
                                    op, gold, verifier, baseline)
 
         base_gain = rec()  # identity backbone
-        def net(g): return g - base_gain
+        if is_timeout_value(base_gain):
+            # The identity-backbone rollout timed out, so every net gain for this
+            # case would be `score - NaN == NaN`: every `net > thr` test is False
+            # and every seeded maximisation keeps its -1.0 sentinel, so the case
+            # would be tallied as "not recovered". Exclude it instead -- counting
+            # a timeout as a failure is exactly the downward bias the NaN
+            # sentinel exists to remove.
+            excluded_cases.append(case.case_id)
+            detail_rows.append(_excluded_detail_row(case))
+            print(f"  [{i}/{len(residual)}] {case.perturbation_label:16s} "
+                  "EXCLUDED (identity-backbone rollout timed out)")
+            continue
+
+        arm_timeouts = 0
+
+        def net(g):
+            # NaN-safe: a timed-out operator rollout stays NaN (never wins a
+            # maximisation, never counted as recovered) and is tallied.
+            nonlocal arm_timeouts
+            if is_timeout_value(g):
+                arm_timeouts += 1
+                return float("nan")
+            return g - base_gain
 
         # ---- single ----
         single_best, single_op = -1.0, None
@@ -229,21 +259,23 @@ def main() -> None:
                     if g > double_param_best:
                         double_param_best, double_param_op = g, op
 
-        richer_best = max(double_best, param_best, double_param_best)
+        richer_best = _nan_safe_max(double_best, param_best, double_param_best)
         richer_candidates = [
             (single_best, single_op),
             (double_best, double_op),
             (param_best, param_op),
             (double_param_best, double_param_op),
         ]
-        _richer_score, richer_op = max(
-            (pair for pair in richer_candidates if pair[1] is not None),
-            key=lambda pair: pair[0],
-        )
+        _richer_score, richer_op = _best_pair(richer_candidates)
         thr = args.recovered_threshold
-        recd = {"single": single_best > thr, "double": double_best > thr,
-                "param": param_best > thr, "double_param": double_param_best > thr,
-                "richer": richer_best > thr}
+        recd = recovery_case_outcomes(
+            base_gain,
+            {"single": single_best, "double": double_best,
+             "param": param_best, "double_param": double_param_best,
+             "richer": richer_best},
+            threshold=thr,
+        )
+        assert recd is not None  # NaN base_gain already excluded above
         for a in arms:
             tally[a][0] += int(recd[a]); tally[a][1] += 1
 
@@ -268,11 +300,14 @@ def main() -> None:
 
         detail_rows.append({
             "case_id": case.case_id, "gold_label": case.perturbation_label,
-            "base_gain": f"{base_gain:.4f}",
-            "single_net": f"{single_best:.4f}", "double_net": f"{double_best:.4f}",
-            "param_net": f"{param_best:.4f}",
-            "double_param_net": f"{double_param_best:.4f}",
-            "richer_net": f"{richer_best:.4f}",
+            "status": "ok", "excluded": "false",
+            "timeout_count": str(arm_timeouts),
+            "base_gain": format_recovery_value(base_gain, digits=4),
+            "single_net": format_recovery_value(single_best, digits=4),
+            "double_net": format_recovery_value(double_best, digits=4),
+            "param_net": format_recovery_value(param_best, digits=4),
+            "double_param_net": format_recovery_value(double_param_best, digits=4),
+            "richer_net": format_recovery_value(richer_best, digits=4),
             "single_op": _fmt(single_op), "double_op": _fmt(double_op),
             "param_op": _fmt(param_op), "double_param_op": _fmt(double_param_op),
             "richer_op": _fmt(richer_op),
@@ -283,13 +318,14 @@ def main() -> None:
               f"single={single_best:+.2f} double={double_best:+.2f} "
               f"param={param_best:+.2f} double+param={double_param_best:+.2f}{flag}")
 
-    _summary(tally, arms, headroom_cases, ec_off, ec_on, ec_both_rec)
+    _summary(tally, arms, headroom_cases, ec_off, ec_on, ec_both_rec, excluded_cases)
     path = write_csv_table(
         args.out,
-        ["case_id", "gold_label", "base_gain", "single_net", "double_net", "param_net",
+        ["case_id", "gold_label", "status", "excluded", "timeout_count",
+         "base_gain", "single_net", "double_net", "param_net",
          "double_param_net", "richer_net", "single_op", "double_op", "param_op",
          "double_param_op", "richer_op", "headroom", "ec_test"],
-        detail_rows, sandbox_root=OUT.parent,
+        detail_rows, sandbox_root=OUT.parent, judge_client=judge_client,
     )
     print(f"\nWrote {path}")
 
@@ -300,12 +336,57 @@ def _fmt(op):
     return op.format()
 
 
-def _summary(tally, arms, headroom_cases, ec_off, ec_on, ec_both):
+def _excluded_detail_row(case) -> dict[str, str]:
+    """Detail row for a case excluded because its identity backbone timed out.
+
+    Recorded distinctly (status/excluded + timeout_count) so the exclusion is
+    visible downstream and never read as a 0-recovery case.
+    """
+    row = {
+        "case_id": case.case_id,
+        "gold_label": case.perturbation_label,
+        "status": "base_gain_timeout",
+        "excluded": "true",
+        "timeout_count": "1",
+        "base_gain": format_recovery_value(float("nan")),
+        "headroom": "false",
+        "ec_test": "",
+    }
+    for col in ("single_net", "double_net", "param_net", "double_param_net",
+                "richer_net"):
+        row[col] = ""
+    for col in ("single_op", "double_op", "param_op", "double_param_op",
+                "richer_op"):
+        row[col] = ""
+    return row
+
+
+def _best_pair(candidates):
+    """NaN-safe argmax over (score, op) pairs, skipping op=None entries.
+
+    ``max(..., key=...)`` is order-dependent once NaN scores are present
+    (Python's total-order comparisons make NaN "win" or "lose" depending on
+    which element it is compared against first) so it cannot be trusted to
+    keep a timed-out (NaN) operator from being selected as best. This mirrors
+    the NaN-safe semantics of a plain ``if score > best`` loop.
+    """
+    return best_scored_pair(candidates)
+
+
+def _nan_safe_max(*values: float) -> float:
+    """NaN-safe max: excludes NaN unless every value is NaN."""
+    return nan_safe_max(*values)
+
+
+def _summary(tally, arms, headroom_cases, ec_off, ec_on, ec_both, excluded_cases=()):
     print("\n=== Recovery rate per operator class (residual) ===")
     print(f"{'arm':10s} {'recovered':>9s} {'total':>6s} {'rate':>8s}")
     for a in arms:
         r, t = tally[a]
         print(f"{a:10s} {r:>9d} {t:>6d} {(r/t if t else 0):>8.4f}")
+    if excluded_cases:
+        print(f"\nEXCLUDED (identity-backbone rollout timed out): {len(excluded_cases)} "
+              "-- not counted as recovered or not-recovered in any arm.")
     print(f"\nHEADROOM (richer recovers, single does NOT): {len(headroom_cases)}/{tally['single'][1]}")
     print("  -> >0 and meaningful: operator evolution extends what is fixable; build the skill library.")
     print("  -> ~0: C6 wall holds; evolution = reuse/efficiency only (Exp18/19).")

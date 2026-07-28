@@ -391,6 +391,12 @@ def _phrase_fallback(
 
 RUBRIC_MAX_SCORE = 4
 
+# Bumped whenever _RUBRIC_SYSTEM_PROMPT / _ANSWER_RUBRIC_SYSTEM_PROMPT or the
+# scoring rules they encode change. Recorded in provenance (SPEC_A §3, Red
+# Queen GM 2606.26294) so cross-arm / cross-generation comparisons can detect
+# an evaluator that silently drifted.
+RUBRIC_VERSION = "rubric-v1"
+
 _RUBRIC_SYSTEM_PROMPT = """\
 TASK: Rate how completely the FACT is communicated by TEXT, on a 0–4 scale.
 

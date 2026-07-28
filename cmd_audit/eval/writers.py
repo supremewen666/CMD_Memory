@@ -8,12 +8,13 @@ writers for summary and ledger artifacts.
 from __future__ import annotations
 
 import csv
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
 from cmd_audit.core.labels import ITEM_LABELS, PIPELINE_LABEL_ORDER, PIPELINE_STEP_ACTIONS
 from cmd_audit.core.models import MemoryItem
-from .provenance import compute_provenance_completeness
+from .provenance import compute_provenance_completeness, judge_provenance_fields
 
 if TYPE_CHECKING:
     from cmd_audit.harness import AuditResult
@@ -30,6 +31,111 @@ REPLAY_TABLE_ORDER = (
 )
 
 
+# ── Recovery-value aggregation (NaN = timed-out rollout) ─────────────────
+#
+# A timed-out rollout carries ``recovery_gain = NaN`` (see
+# ``counterfactual.rollout.RolloutResult.status``). NaN must never reach a
+# mean/rate as if it were 0.0 — that understates recovery for the whole batch —
+# and must never be written into a CSV cell as a bare float, where downstream
+# averaging could silently coerce it. Every recovery aggregation in this module
+# goes through these helpers, and every recovery table carries the matching
+# ``timeout_count`` so an excluded value is always visible.
+
+RECOVERY_TIMEOUT_TOKEN = "nan"
+
+
+def is_timeout_value(value: object) -> bool:
+    """True if ``value`` is the NaN sentinel written by a timed-out rollout."""
+    return isinstance(value, float) and math.isnan(value)
+
+
+def format_recovery_value(value: float | None, *, digits: int = 3) -> str:
+    """Format a recovery value for a CSV cell.
+
+    ``None`` (no value) becomes an empty string; a timed-out (NaN) value
+    becomes the explicit ``nan`` token so it is never mistaken for 0.0.
+    """
+    if value is None:
+        return ""
+    if is_timeout_value(value):
+        return RECOVERY_TIMEOUT_TOKEN
+    return f"{float(value):.{digits}f}"
+
+
+def recovery_timeout_count(values: Iterable[float]) -> int:
+    """Number of timed-out (NaN) recovery values."""
+    return sum(1 for value in values if is_timeout_value(value))
+
+
+def finite_recovery_values(values: Iterable[float]) -> list[float]:
+    """Recovery values with timed-out (NaN) entries dropped."""
+    return [float(value) for value in values if not is_timeout_value(value)]
+
+
+def recovery_mean(values: Iterable[float]) -> float:
+    """Mean recovery gain over non-timed-out values (0.0 when none remain)."""
+    finite = finite_recovery_values(values)
+    return sum(finite) / len(finite) if finite else 0.0
+
+
+def recovery_positive_rate(values: Iterable[float]) -> float:
+    """Share of non-timed-out recovery values that are strictly positive."""
+    finite = finite_recovery_values(values)
+    return sum(1 for value in finite if value > 0.0) / len(finite) if finite else 0.0
+
+
+def nan_safe_max(*values: float) -> float:
+    """Max over recovery values, excluding timeouts unless every value is NaN."""
+    finite = finite_recovery_values(values)
+    return max(finite) if finite else float("nan")
+
+
+def best_scored_pair(
+    candidates: Iterable[tuple[float, object]],
+) -> tuple[float, object | None]:
+    """NaN-safe argmax over ``(score, payload)`` pairs, skipping ``payload=None``.
+
+    ``max(..., key=...)`` is order-dependent once NaN scores are present, so it
+    cannot be trusted to keep a timed-out operator from winning. This mirrors the
+    semantics of a plain ``if score > best`` loop.
+    """
+    best_score: float | None = None
+    best_payload: object | None = None
+    for score, payload in candidates:
+        if payload is None or is_timeout_value(score):
+            continue
+        if best_score is None or score > best_score:
+            best_score, best_payload = score, payload
+    if best_payload is None:
+        return float("nan"), None
+    return best_score, best_payload
+
+
+def recovery_case_outcomes(
+    base_gain: float,
+    arm_scores: dict[str, float],
+    *,
+    threshold: float,
+) -> dict[str, bool] | None:
+    """Per-arm recovered flags for one case, or ``None`` when it must be excluded.
+
+    ``None`` means the case's identity-backbone rollout timed out
+    (``base_gain`` is NaN). Every net gain for the case is then
+    ``score - NaN == NaN``, so every ``net > threshold`` test is False and every
+    seeded maximisation keeps its ``-1.0`` sentinel: the case would be tallied
+    as "not recovered" instead of excluded — reintroducing exactly the downward
+    bias the NaN timeout sentinel exists to remove. Callers must drop such cases
+    from recovered/headroom tallies and record them distinctly in their detail
+    table.
+    """
+    if is_timeout_value(base_gain):
+        return None
+    return {
+        arm: (not is_timeout_value(score)) and score > threshold
+        for arm, score in arm_scores.items()
+    }
+
+
 # ── Shared primitives ────────────────────────────────────────────────────
 
 
@@ -39,17 +145,28 @@ def write_csv_table(
     rows: Iterable[dict[str, str]],
     *,
     sandbox_root: str | Path | None = None,
+    judge_client: object | None = None,
+    rubric_version: str | None = None,
 ) -> Path:
-    """Write a CSV table, optionally enforcing the sandbox write boundary."""
+    """Write a CSV table, optionally stamping the frozen judge identity."""
     output = Path(path)
     if sandbox_root is not None:
         from cmd_audit.repair.post_repair import validate_sandbox_path
         validate_sandbox_path(output, sandbox_root)
     output.parent.mkdir(parents=True, exist_ok=True)
+    output_fieldnames = list(fieldnames)
+    output_rows = list(rows)
+    if judge_client is not None:
+        judge_fields = judge_provenance_fields(
+            judge_client,
+            rubric_version=rubric_version,
+        )
+        output_fieldnames.extend(["judge_base_url", "judge_model", "rubric_version"])
+        output_rows = [{**row, **judge_fields} for row in output_rows]
     with output.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=output_fieldnames)
         writer.writeheader()
-        for row in rows:
+        for row in output_rows:
             writer.writerow(row)
     return output
 
@@ -70,12 +187,34 @@ def write_text_artifact(
     return output
 
 
+def _append_judge_provenance(
+    fieldnames: list[str],
+    rows: list[dict[str, str]],
+    *,
+    judge_client: object | None,
+    rubric_version: str | None,
+) -> None:
+    """Append frozen-judge identity to every row when explicitly requested."""
+    if judge_client is None:
+        return
+    fields = judge_provenance_fields(
+        judge_client,
+        rubric_version=rubric_version,
+    )
+    fieldnames.extend(["judge_base_url", "judge_model", "rubric_version"])
+    for row in rows:
+        row.update(fields)
+
+
 # ── Attribution table ────────────────────────────────────────────────────
 
 
 def write_attribution_table(
     results: list[AuditResult],
     output_path: str | Path,
+    *,
+    judge_client: object | None = None,
+    rubric_version: str | None = None,
 ) -> None:
     """Write the attribution table CSV."""
     fieldnames = [
@@ -109,6 +248,10 @@ def write_attribution_table(
             "distractor_provenance_ids",
             "diagnosis_cost",
             "attribution_correct",
+            # Per-row count of recovery values that timed out (written as the
+            # explicit `nan` token, never as 0.0), so downstream averaging over
+            # this table can drop them deliberately instead of silently.
+            "timeout_count",
         ]
     )
 
@@ -121,6 +264,9 @@ def write_attribution_table(
                 replay = result.replay
             except KeyError:
                 replay = None
+        row_recovery_values: list[float] = []
+        if attribution is not None:
+            row_recovery_values.append(float(attribution.recovery_gain))
         row = {
             "case_id": result.case_id,
             "perturbation_label": result.perturbation_label,
@@ -141,7 +287,9 @@ def write_attribution_table(
             ),
             "replay_answer_score": f"{replay.answer_score:.3f}" if replay else "",
             "replay_evidence_score": f"{replay.evidence_score:.3f}" if replay else "",
-            "recovery_gain": f"{attribution.recovery_gain:.3f}" if attribution else "",
+            "recovery_gain": format_recovery_value(
+                attribution.recovery_gain if attribution else None
+            ),
             "top2_labels": "|".join(attribution.top2_labels) if attribution else "",
             "is_ambiguous": str(attribution.is_ambiguous).lower() if attribution else "",
             "top_k_labels": "|".join(attribution.top_k_labels) if attribution else "",
@@ -165,9 +313,19 @@ def write_attribution_table(
                 continue
             row[f"{replay_name}_answer_score"] = f"{replay.answer_score:.3f}"
             row[f"{replay_name}_evidence_score"] = f"{replay.evidence_score:.3f}"
-            row[f"{replay_name}_recovery_gain"] = f"{replay.recovery_gain:.3f}"
+            row[f"{replay_name}_recovery_gain"] = format_recovery_value(
+                replay.recovery_gain
+            )
+            row_recovery_values.append(float(replay.recovery_gain))
+        row["timeout_count"] = str(recovery_timeout_count(row_recovery_values))
         rows.append(row)
 
+    _append_judge_provenance(
+        fieldnames,
+        rows,
+        judge_client=judge_client,
+        rubric_version=rubric_version,
+    )
     write_csv_table(output_path, fieldnames, rows)
 
 
@@ -177,6 +335,9 @@ def write_attribution_table(
 def write_confusion_matrix_table(
     results: list[AuditResult],
     output_path: str | Path,
+    *,
+    judge_client: object | None = None,
+    rubric_version: str | None = None,
 ) -> None:
     """Write the CMD-Audit attribution confusion matrix CSV."""
     diagnosis_order = (*PIPELINE_LABEL_ORDER, *tuple(sorted(ITEM_LABELS)))
@@ -201,12 +362,21 @@ def write_confusion_matrix_table(
         row.update({k: str(v) for k, v in counts[gold_label].items()})
         rows.append(row)
 
+    _append_judge_provenance(
+        fieldnames,
+        rows,
+        judge_client=judge_client,
+        rubric_version=rubric_version,
+    )
     write_csv_table(output_path, fieldnames, rows)
 
 
 def write_provenance_completeness_summary(
     results: list[AuditResult],
     output_path: str | Path,
+    *,
+    judge_client: object | None = None,
+    rubric_version: str | None = None,
 ) -> None:
     """Write per-case provenance completeness over replay evidence artifacts."""
     fieldnames = [
@@ -237,6 +407,12 @@ def write_provenance_completeness_summary(
             }
         )
 
+    _append_judge_provenance(
+        fieldnames,
+        rows,
+        judge_client=judge_client,
+        rubric_version=rubric_version,
+    )
     write_csv_table(output_path, fieldnames, rows)
 
 
@@ -246,6 +422,9 @@ def write_provenance_completeness_summary(
 def write_step_level_metrics_table(
     results: list[AuditResult],
     output_path: str | Path,
+    *,
+    judge_client: object | None = None,
+    rubric_version: str | None = None,
 ) -> None:
     """Write aggregate step-level attribution metrics."""
     step_fix_cases = [
@@ -263,9 +442,10 @@ def write_step_level_metrics_table(
     identity_baseline_count = sum(
         1 for result in mcts_primary_cases if _mcts_has_identity_baseline(result)
     )
-    positive_credit_count = sum(
-        1 for result in mcts_primary_cases if _mcts_primary_credit(result) > 0.0
-    )
+    primary_credits = [_mcts_primary_credit(result) for result in mcts_primary_cases]
+    timeout_count = recovery_timeout_count(primary_credits)
+    finite_credits = finite_recovery_values(primary_credits)
+    positive_credit_count = sum(1 for credit in finite_credits if credit > 0.0)
     primary_correct_count = sum(
         1
         for result in mcts_primary_cases
@@ -288,8 +468,11 @@ def write_step_level_metrics_table(
         _metric_row(
             "positive_credit_rate",
             positive_credit_count,
-            len(mcts_primary_cases),
-            "Share of attributed cases whose primary action has positive credit.",
+            len(finite_credits),
+            "Share of attributed cases whose primary action has positive credit "
+            "(timed-out credits excluded from both numerator and denominator; "
+            "see timeout_count).",
+            timeout_count=timeout_count,
         ),
         _metric_row(
             "primary_label_correctness",
@@ -299,11 +482,21 @@ def write_step_level_metrics_table(
         ),
     ]
 
-    write_csv_table(
-        output_path,
-        ["metric_name", "value", "numerator", "denominator", "description"],
+    fieldnames = [
+        "metric_name",
+        "value",
+        "numerator",
+        "denominator",
+        "timeout_count",
+        "description",
+    ]
+    _append_judge_provenance(
+        fieldnames,
         rows,
+        judge_client=judge_client,
+        rubric_version=rubric_version,
     )
+    write_csv_table(output_path, fieldnames, rows)
 
 
 def _metric_row(
@@ -311,6 +504,8 @@ def _metric_row(
     numerator: int,
     denominator: int,
     description: str,
+    *,
+    timeout_count: int = 0,
 ) -> dict[str, str]:
     value = numerator / denominator if denominator else 0.0
     return {
@@ -318,6 +513,7 @@ def _metric_row(
         "value": f"{value:.6f}",
         "numerator": str(numerator),
         "denominator": str(denominator),
+        "timeout_count": str(timeout_count),
         "description": description,
     }
 
@@ -363,6 +559,8 @@ def write_post_repair_table(
     output_path: str | Path,
     *,
     sandbox_root: str | Path | None = None,
+    judge_client: object | None = None,
+    rubric_version: str | None = None,
 ) -> None:
     """Write the Post-Repair Context Replay table to the sandbox."""
     fieldnames = [
@@ -402,6 +600,12 @@ def write_post_repair_table(
             }
         )
 
+    _append_judge_provenance(
+        fieldnames,
+        rows,
+        judge_client=judge_client,
+        rubric_version=rubric_version,
+    )
     write_csv_table(output_path, fieldnames, rows, sandbox_root=sandbox_root)
 
 
@@ -454,6 +658,9 @@ def write_retrieval_trace_table(
 def write_retrieval_metrics_table(
     suite_results: list[RetrievalBaselineSuiteResult],
     output_path: str | Path,
+    *,
+    judge_client: object | None = None,
+    rubric_version: str | None = None,
 ) -> None:
     """Write retrieval metrics table comparing both retrievers across all cases."""
     fieldnames = [
@@ -495,4 +702,10 @@ def write_retrieval_metrics_table(
                 }
             )
 
+    _append_judge_provenance(
+        fieldnames,
+        rows,
+        judge_client=judge_client,
+        rubric_version=rubric_version,
+    )
     write_csv_table(output_path, fieldnames, rows)

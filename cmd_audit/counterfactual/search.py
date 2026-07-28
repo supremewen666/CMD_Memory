@@ -220,6 +220,8 @@ class SinglePointAttributor:
         )
         self._rollout_times.append(time.time() - rollout_start)
         self._rollouts += 1
+        if result.status == "timeout":
+            return float("nan")
         return result.recovery_gain if result.rollout_successful else 0.0
 
 

@@ -9,6 +9,8 @@ pass around ad hoc tuples and side dictionaries.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import Any, Iterable
 
 from ..core.models import MemoryItem
@@ -148,6 +150,43 @@ class OperatorSpec:
             "params": {"item_signal_hints": self.item_signal_hints_dict()},
         }
 
+    def content_hash(self) -> str:
+        """Return a stable hash for governance deduplication.
+
+        The canonical payload contains only executable structure. Presentation
+        fields and insertion order therefore cannot create duplicate shapes.
+        """
+        payload = {
+            "steps": [
+                {
+                    "generation_point": step.generation_point,
+                    "action": step.action.value,
+                    "select": step.selector,
+                    "transform": step.transform,
+                }
+                for step in sorted(
+                    self.steps,
+                    key=lambda item: (
+                        item.generation_point,
+                        item.action.value,
+                        item.selector,
+                        item.transform,
+                    ),
+                )
+            ],
+            "item_signal_hints": [
+                [memory_id, weight]
+                for memory_id, weight in sorted(self.item_signal_hints)
+            ],
+        }
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
     def intervention_config(
         self,
         base_config: dict[str, Any] | None,
@@ -227,7 +266,11 @@ def apply_operator_static(
 
 @dataclass(frozen=True)
 class OperatorExecutionResult:
-    """Terminal score for one executed operator."""
+    """Terminal score for one executed operator.
+
+    ``status`` mirrors ``RolloutResult.status``; on ``"timeout"`` ``score``
+    is ``NaN`` (never wins a maximisation) and ``successful`` is ``False``.
+    """
 
     operator: OperatorSpec
     terminal_context: str
@@ -235,6 +278,7 @@ class OperatorExecutionResult:
     score: float
     successful: bool
     generation_points_completed: int
+    status: str = "ok"
 
 
 def evaluate_operator_spec(
@@ -281,13 +325,15 @@ def evaluate_operator_spec(
         gold_answer,
         answer_verifier=answer_verifier,
     )
+    score = float("nan") if result.status == "timeout" else result.recovery_gain
     return OperatorExecutionResult(
         operator=operator,
         terminal_context=result.terminal_context,
         terminal_answer=result.terminal_answer,
-        score=result.recovery_gain,
+        score=score,
         successful=result.rollout_successful,
         generation_points_completed=result.generation_points_completed,
+        status=result.status,
     )
 
 

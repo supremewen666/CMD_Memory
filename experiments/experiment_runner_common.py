@@ -111,6 +111,32 @@ RUBRIC_PAIRS = (
 )
 
 
+def build_clients() -> tuple[Any, Any]:
+    """Construct the ``(answer_client, judge_client)`` pair for experiment runners.
+
+    Standing principle (decided 2026-07-13, do not revisit): the answering
+    model varies across experiment arms; the judge is frozen for the entire
+    study, so arms stay comparable and scoring never folds into a
+    self-evaluation loop. ``answer_client`` drives context generation and
+    terminal answer generation; ``judge_client`` drives all scoring and
+    verification (``build_evidence_scorer``, ``build_answer_verifier``,
+    ``AnswerRubricScorer``, ``RubricScorer``, the ``g-eval-strict`` path) and
+    is the only client ``assert_g_eval_available`` should ever be asserted
+    against.
+
+    With only the base ``LLM_*`` env vars set, ``judge_client`` is configured
+    identically to ``answer_client`` (see ``LLMClientConfig.for_role``) —
+    every existing single-client experiment runner keeps working unchanged.
+    Setting ``LLM_JUDGE_BASE_URL`` / ``LLM_JUDGE_MODEL`` / ``LLM_JUDGE_API_KEY``
+    / ``LLM_JUDGE_TIMEOUT`` splits the two, field by field.
+    """
+    from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
+
+    answer_client = LLMClient(LLMClientConfig.for_role("answer"))
+    judge_client = LLMClient(LLMClientConfig.for_role("judge"))
+    return answer_client, judge_client
+
+
 def build_evidence_scorer(
     client: Any,
     *,
@@ -118,6 +144,9 @@ def build_evidence_scorer(
     max_workers: int = 4,
     max_retries: int = 1,
 ):
+    """Build an evidence scorer. ``client`` should be the judge client (see
+    :func:`build_clients`) — evidence scoring is judge work, not answering
+    work."""
     from cmd_audit.scoring.llm import RubricScorer, SubagentScorer
 
     if scorer_mode == "binary":
@@ -143,22 +172,46 @@ def build_answer_verifier(
     max_workers: int = 1,
     max_retries: int = 1,
 ):
+    """Build an answer verifier. ``client`` should be the judge client (see
+    :func:`build_clients`) — answer verification is judge work, not
+    answering work.
+
+    ``max_workers`` is threaded through to the underlying scorer only for
+    ``"rubric"`` mode, which is backed by :class:`RubricScorer` — the only
+    verifier class here that accepts ``max_workers``. Every other mode stays
+    single-threaded regardless of the value passed here: ``AnswerVerifier``
+    (``"binary"``) and ``AnswerRubricScorer`` (``"answer-rubric"`` /
+    ``"rubric-continuous"`` / ``"g-eval"`` / ``"g-eval-hybrid"``) evaluate
+    each case as a single call with no internal thread pool and no
+    ``max_workers`` parameter to accept; ``"g-eval-strict"`` is backed by
+    :func:`_strict_g_eval_scorer`, which loops over gold evidence with plain
+    synchronous calls (no :class:`RubricScorer`, no thread pool either).
+    """
     from cmd_audit.scoring.llm import AnswerRubricScorer, AnswerVerifier, RubricScorer
 
-    del max_workers
     if answer_mode == "binary":
         return AnswerVerifier(client, max_retries=max_retries)
     if answer_mode in {"answer-rubric", "rubric-continuous", "g-eval", "g-eval-hybrid"}:
         return AnswerRubricScorer(client, max_retries=max_retries)
     if answer_mode == "rubric":
-        rubric = RubricScorer(client, max_workers=1, max_retries=max_retries)
+        rubric = RubricScorer(client, max_workers=max_workers, max_retries=max_retries)
         return _rubric_answer_callable(rubric)
     if answer_mode == "g-eval-strict":
         return _rubric_answer_callable(_strict_g_eval_scorer(client))
     raise ValueError(f"unknown answer mode: {answer_mode}")
 
 
-def assert_g_eval_available(client: Any, *, role: str) -> None:
+def assert_g_eval_available(client: Any, *, role: str = "judge") -> None:
+    """Assert the given client's endpoint returns parseable G-Eval logprobs.
+
+    This must always be asserted against the judge client (see
+    :func:`build_clients`), never the answer client: the ``top_logprobs``
+    requirement is a judge-only constraint. An answering model without
+    ``top_logprobs`` support is legal (Decision 2026-07-13); a judge without
+    it is not. ``role`` is used only in the error message and should
+    describe the calling experiment (e.g. ``"repair-efficacy-judge"``), not
+    override which client is checked.
+    """
     from cmd_audit.scoring.llm import _continuous_verify
 
     expected = _continuous_verify(client, "Paris is in France.", "Paris is in France.")

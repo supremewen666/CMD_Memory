@@ -1,6 +1,7 @@
 .DS_Store
 .venv/
 __pycache__/
+*.egg-info/
 *.py[cod]
 artifacts/
 .codegraph/
@@ -35,3 +36,4 @@ RESEARCH_SURVEY_RSI_2026-07.md
 SKILL_EVOLUTION_DESIGN.md
 SKILL_MODE_DEPLOYMENT.md
 data/raw_cases/
+data/probe_cases.bak.*/

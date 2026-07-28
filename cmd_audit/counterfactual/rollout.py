@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from ..core.llm_client import LLMTimeoutError
 from ..core.models import GoldEvidence, MemoryItem
 from ..scoring.llm import score_answer_with_verifier
 from .actions import PipelineAction, apply_pipeline_action
@@ -14,12 +15,22 @@ _logger = logging.getLogger(__name__)
 
 @dataclass
 class RolloutResult:
-    """Result of rolling out from a node to terminal state."""
+    """Result of rolling out from a node to terminal state.
+
+    ``status`` distinguishes *why* a rollout did not complete normally:
+    ``"ok"`` (successful), ``"timeout"`` (an ``LLMTimeoutError`` occurred;
+    ``recovery_gain`` is ``NaN`` so it can never win a maximisation and is
+    excluded from mean/rate aggregation), ``"error"`` (any other exception),
+    ``"no_client"`` (no LLM client was supplied), or ``"empty_answer"``
+    (terminal answer generation returned nothing). The invariant
+    ``rollout_successful == (status == "ok")`` always holds.
+    """
     terminal_context: str
     terminal_answer: str
     recovery_gain: float  # Terminal answer score; credit subtracts identity baseline.
     rollout_successful: bool
     generation_points_completed: int
+    status: str = "ok"
 
     @property
     def is_recovered(self) -> bool:
@@ -65,6 +76,7 @@ def rollout_to_terminal(
             recovery_gain=0.0,
             rollout_successful=False,
             generation_points_completed=0,
+            status="no_client",
         )
 
     try:
@@ -93,6 +105,7 @@ def rollout_to_terminal(
                 recovery_gain=0.0,
                 rollout_successful=False,
                 generation_points_completed=current_generation_point - start_generation_point,
+                status="empty_answer",
             )
 
         # Compute terminal answer score. Baseline subtraction happens only in
@@ -110,6 +123,18 @@ def rollout_to_terminal(
             recovery_gain=recovery_gain,
             rollout_successful=True,
             generation_points_completed=current_generation_point - start_generation_point,
+            status="ok",
+        )
+
+    except LLMTimeoutError as exc:
+        _logger.warning("Rollout timed out: %s", exc)
+        return RolloutResult(
+            terminal_context=start_context,
+            terminal_answer="",
+            recovery_gain=float("nan"),
+            rollout_successful=False,
+            generation_points_completed=0,
+            status="timeout",
         )
 
     except Exception as exc:
@@ -120,6 +145,7 @@ def rollout_to_terminal(
             recovery_gain=0.0,
             rollout_successful=False,
             generation_points_completed=0,
+            status="error",
         )
 
 
@@ -147,6 +173,12 @@ Answer:"""
 
         response = client.generate(prompt)
         return response.strip() if response else ""
+
+    except LLMTimeoutError:
+        # Let timeouts propagate to rollout_to_terminal's outer handler so
+        # they are recorded as status="timeout" (NaN), not laundered into
+        # the empty_answer path (0.0).
+        raise
 
     except Exception as exc:
         _logger.warning("Terminal answer generation failed: %s", exc)
@@ -184,6 +216,11 @@ def _compute_recovery_gain(
         )
 
         return max(0.0, min(1.0, terminal_score))
+
+    except LLMTimeoutError:
+        # Propagate so rollout_to_terminal's outer handler records timeout
+        # status distinctly from a generic scoring error.
+        raise
 
     except Exception as exc:
         _logger.warning("Recovery gain computation failed: %s", exc)

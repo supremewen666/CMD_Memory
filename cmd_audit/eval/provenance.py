@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+from typing import Any
 
 from cmd_audit.core.models import Citation, MemoryItem, ProbeCase, ProvenanceEdge
 from cmd_audit.replays import ReplayResult
@@ -119,6 +120,39 @@ def compute_provenance_completeness(
         return 0.0
     num_with_prov = sum(1 for item in memory_items if item.provenance)
     return num_with_prov / len(memory_items)
+
+
+def judge_provenance_fields(
+    judge_client: Any, *, rubric_version: str | None = None
+) -> dict[str, str]:
+    """Return the judge-identity + rubric-version fields for output provenance.
+
+    Standing principle (SPEC_A §3, decided 2026-07-13; Red Queen GM
+    2606.26294): the judge is frozen for the entire study while the
+    answering model varies across arms, so every paper-facing output CSV
+    must record which judge endpoint/model produced its scores and which
+    rubric version was in effect — otherwise cross-arm and cross-generation
+    comparisons can silently fold into a self-evaluation loop or compare
+    against a drifted evaluator.
+
+    ``judge_client`` should always be the judge client from
+    ``experiments.experiment_runner_common.build_clients`` (or an
+    ``LLMClientConfig`` directly) — never the answer client, whose identity
+    varies by design and is not the thing being frozen here.
+
+    ``rubric_version`` defaults to :data:`cmd_audit.scoring.llm.RUBRIC_VERSION`
+    when omitted.
+    """
+    if rubric_version is None:
+        from cmd_audit.scoring.llm import RUBRIC_VERSION
+
+        rubric_version = RUBRIC_VERSION
+    config = getattr(judge_client, "config", judge_client)
+    return {
+        "judge_base_url": str(getattr(config, "base_url", "")),
+        "judge_model": str(getattr(config, "model", "")),
+        "rubric_version": rubric_version,
+    }
 
 
 def get_graph_distractor_edges(

@@ -82,8 +82,11 @@ def build_all(
     recurrent_families_per_source: int = 8,
     recurrent_variants_per_family: int = 5,
     item_per_label: int = 40,
+    only: str | None = None,
 ) -> dict[str, Any]:
     """Build source-specific and aggregate probe-case JSON files."""
+    if only not in (None, "recurrent"):
+        raise ValueError(f"unsupported selective build target: {only}")
     output_dir.mkdir(parents=True, exist_ok=True)
     all_auto: list[dict[str, Any]] = []
     all_poisoned: list[dict[str, Any]] = []
@@ -166,7 +169,8 @@ def build_all(
             variants_per_family=recurrent_variants_per_family,
         )
 
-        _write_json(output_dir / f"real_{source_name}_cases.json", auto_cases)
+        if only is None:
+            _write_json(output_dir / f"real_{source_name}_cases.json", auto_cases)
         all_auto.extend(auto_cases)
         all_poisoned.extend(poisoned_cases)
         all_item_layer.extend(item_layer_cases)
@@ -197,17 +201,19 @@ def build_all(
             ),
         }
 
-    _write_json(output_dir / "real_three_source_cases.json", all_auto)
-    _write_json(output_dir / "real_item_poisoned_hitl_cases.json", all_poisoned)
-    _write_json(output_dir / "real_item_layer_cases.json", all_item_layer)
-    _write_json(output_dir / "real_multihop_cases.json", all_multihop)
-    _write_json(output_dir / "real_coupled_failure_boundary_cases.json", all_coupled)
+    if only is None:
+        _write_json(output_dir / "real_three_source_cases.json", all_auto)
+        _write_json(output_dir / "real_item_poisoned_hitl_cases.json", all_poisoned)
+        _write_json(output_dir / "real_item_layer_cases.json", all_item_layer)
+        _write_json(output_dir / "real_multihop_cases.json", all_multihop)
+        _write_json(output_dir / "real_coupled_failure_boundary_cases.json", all_coupled)
     _write_json(output_dir / "real_recurrent_cases.json", all_recurrent)
-    _write_inspection_payload(
-        output_dir / "coupled_failure_inspected_subset.json",
-        all_coupled,
-        target_cases=len(all_coupled),
-    )
+    if only is None:
+        _write_inspection_payload(
+            output_dir / "coupled_failure_inspected_subset.json",
+            all_coupled,
+            target_cases=len(all_coupled),
+        )
     summary["total_auto_cases"] = len(all_auto)
     summary["total_hitl_poisoned_cases"] = len(all_poisoned)
     summary["total_item_layer_cases"] = len(all_item_layer)
@@ -230,7 +236,8 @@ def build_all(
     summary["coupled_pair_counts"] = dict(
         Counter("+".join(c["coupled_labels"]) for c in all_coupled)
     )
-    _write_report(output_dir / "probe_case_build_report.md", summary)
+    if only is None:
+        _write_report(output_dir / "probe_case_build_report.md", summary)
     return summary
 
 
@@ -1378,6 +1385,11 @@ def main() -> None:
     parser.add_argument("--recurrent-families-per-source", type=int, default=8)
     parser.add_argument("--recurrent-variants-per-family", type=int, default=5)
     parser.add_argument("--item-per-label", type=int, default=40)
+    parser.add_argument(
+        "--only",
+        choices=("recurrent",),
+        help="Selectively rewrite one dataset; all other output files remain untouched.",
+    )
     args = parser.parse_args()
 
     summary = build_all(
@@ -1390,6 +1402,7 @@ def main() -> None:
         recurrent_families_per_source=args.recurrent_families_per_source,
         recurrent_variants_per_family=args.recurrent_variants_per_family,
         item_per_label=args.item_per_label,
+        only=args.only,
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 

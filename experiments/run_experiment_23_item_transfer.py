@@ -24,9 +24,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.core.labels import ITEM_LABELS
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases_v1
-from cmd_audit.eval.writers import write_csv_table
+from cmd_audit.eval.writers import (
+    best_scored_pair,
+    format_recovery_value,
+    is_timeout_value,
+    recovery_case_outcomes,
+    write_csv_table,
+)
 from cmd_audit.counterfactual.actions import PipelineAction, get_legal_actions
 from cmd_audit.repair.failure_memory import (
     _memory_fingerprint,
@@ -38,9 +43,36 @@ from experiments.experiment_runner_common import (
     assert_g_eval_available,
     build_answer_verifier,
 )
+from experiments.experiment_runner_common import build_clients
 from experiments.probe_exhaustive import _step_context, _own_recovery
 
 _ACTION_BY_NAME = {action.value: action for action in PipelineAction}
+ITEM_TRANSFER_ARMS = (
+    "no_repair",
+    "single_xfer",
+    "item_oracle",
+    "item_global",
+    "item_fp",
+    "item_fp_topN",
+    "random_topN",
+)
+ITEM_TRANSFER_DETAIL_FIELDS = [
+    "case_id",
+    "gold_label",
+    "status",
+    "excluded",
+    "timeout_count",
+    *[f"{arm}_net" for arm in ITEM_TRANSFER_ARMS],
+    *[f"{arm}_rec" for arm in ITEM_TRANSFER_ARMS],
+    "topn_cost",
+    "topn_candidates",
+    "random_topn_cost",
+    "random_topn_candidates",
+    "item_oracle_op",
+    "item_fp_op",
+    "item_fp_topN_op",
+    "random_topN_op",
+]
 
 
 def _parse_op(op_str: str):
@@ -162,9 +194,9 @@ def main() -> None:
     if args.limit:
         cases = cases[: args.limit]
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="item-operator-transfer")
-    verifier = build_answer_verifier(client, answer_mode="answer-rubric")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="item-operator-transfer")
+    verifier = build_answer_verifier(judge_client, answer_mode="answer-rubric")
 
     from cmd_audit.harness import _initial_mcts_context, _retrieved_memory_items
 
@@ -174,17 +206,10 @@ def main() -> None:
         for cid, case in all_cases.items()
     }
 
-    arms = (
-        "no_repair",
-        "single_xfer",
-        "item_oracle",
-        "item_global",
-        "item_fp",
-        "item_fp_topN",
-        "random_topN",
-    )
+    arms = ITEM_TRANSFER_ARMS
     tally = defaultdict(lambda: [0, 0])
     rows = []
+    excluded_cases: list[str] = []
     print(f"Item operator transfer (LOO) over {len(cases)} cases\n")
     print(
         "Config: "
@@ -226,6 +251,28 @@ def main() -> None:
             )
 
         base_gain = run_ops([])
+        if is_timeout_value(base_gain):
+            # Every arm net would be score - NaN == NaN and would therefore be
+            # tallied as False. The baseline is unmeasured, so exclude the case
+            # from every arm, top-N, and random-control denominator instead.
+            excluded_cases.append(cid)
+            rows.append(_excluded_detail_row(case))
+            print(
+                f"  [{i}/{len(cases)}] {case.perturbation_label:28s} "
+                "EXCLUDED (identity-backbone rollout timed out)"
+            )
+            continue
+
+        arm_timeouts = 0
+
+        def net_of(score):
+            """Net gain with arm/candidate timeouts counted separately."""
+            nonlocal arm_timeouts
+            if is_timeout_value(score):
+                arm_timeouts += 1
+                return float("nan")
+            return score - base_gain
+
         others = [(other_id, row) for other_id, row in bank.items() if other_id != cid]
         item_shapes_all = [_op_shape(row["op"]) for _other_id, row in others if row["op"]]
         single_shapes_all = [
@@ -295,31 +342,26 @@ def main() -> None:
 
         per = {}
         for arm in ("no_repair", "single_xfer", "item_oracle", "item_global", "item_fp"):
-            net = (run_ops(arm_ops[arm]) - base_gain) if arm_ops[arm] else 0.0
-            recovered = net > args.recovered_threshold
-            per[arm] = (net, recovered)
-            tally[arm][0] += int(recovered)
-            tally[arm][1] += 1
+            net = net_of(run_ops(arm_ops[arm])) if arm_ops[arm] else 0.0
+            per[arm] = (net, False)
 
         def run_topn_shapes(candidate_shapes):
-            best_net, cost, best_op = 0.0, 0, []
+            cost = 0
+            candidates = []
             for rank, shape in enumerate(candidate_shapes, start=1):
                 ops = _shape_to_ops(shape, recall, max_depth, cfg)
                 if not ops:
                     continue
                 cost = rank
-                candidate_net = run_ops(ops) - base_gain
-                if candidate_net > best_net:
-                    best_net, best_op = candidate_net, ops
+                candidate_net = net_of(run_ops(ops))
+                candidates.append((candidate_net, ops))
                 if candidate_net > args.recovered_threshold:
                     break
+            best_net, best_op = _best_topn_candidate(candidates)
             return best_net, cost, best_op
 
         topn_net, topn_cost, topn_op = run_topn_shapes(fp_topn_shapes)
-        topn_recovered = topn_net > args.recovered_threshold
-        per["item_fp_topN"] = (topn_net, topn_recovered)
-        tally["item_fp_topN"][0] += int(topn_recovered)
-        tally["item_fp_topN"][1] += 1
+        per["item_fp_topN"] = (topn_net, False)
 
         random_shapes = _random_topn_shapes(
             item_shapes_all,
@@ -328,16 +370,32 @@ def main() -> None:
             topn=args.topn,
         )
         random_net, random_cost, random_op = run_topn_shapes(random_shapes)
-        random_recovered = random_net > args.recovered_threshold
-        per["random_topN"] = (random_net, random_recovered)
-        tally["random_topN"][0] += int(random_recovered)
-        tally["random_topN"][1] += 1
+        per["random_topN"] = (random_net, False)
+
+        outcomes = recovery_case_outcomes(
+            base_gain,
+            {arm: per[arm][0] for arm in arms},
+            threshold=args.recovered_threshold,
+        )
+        assert outcomes is not None  # NaN base_gain was excluded above.
+        for arm in arms:
+            per[arm] = (per[arm][0], outcomes[arm])
+            tally[arm][0] += int(outcomes[arm])
+            tally[arm][1] += 1
+        topn_recovered = outcomes["item_fp_topN"]
+        random_recovered = outcomes["random_topN"]
 
         rows.append(
             {
                 "case_id": cid,
                 "gold_label": case.perturbation_label,
-                **{f"{arm}_net": f"{per[arm][0]:.4f}" for arm in arms},
+                "status": "ok",
+                "excluded": "false",
+                "timeout_count": str(arm_timeouts),
+                **{
+                    f"{arm}_net": format_recovery_value(per[arm][0], digits=4)
+                    for arm in arms
+                },
                 **{f"{arm}_rec": str(per[arm][1]).lower() for arm in arms},
                 "topn_cost": str(topn_cost),
                 "topn_candidates": str(len(fp_topn_shapes)),
@@ -358,25 +416,13 @@ def main() -> None:
             f"single={'Y' if per['single_xfer'][1] else '.'}"
         )
 
-    _summary(tally, arms)
+    _summary(tally, arms, excluded_cases)
     path = write_csv_table(
         args.out,
-        [
-            "case_id",
-            "gold_label",
-            *[f"{arm}_net" for arm in arms],
-            *[f"{arm}_rec" for arm in arms],
-            "topn_cost",
-            "topn_candidates",
-            "random_topn_cost",
-            "random_topn_candidates",
-            "item_oracle_op",
-            "item_fp_op",
-            "item_fp_topN_op",
-            "random_topN_op",
-        ],
+        ITEM_TRANSFER_DETAIL_FIELDS,
         rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     print(f"\nWrote {path}")
 
@@ -385,7 +431,36 @@ def _fmt_ops(ops):
     return "+".join(f"gp{gp}:{action.value}" for gp, action in ops)
 
 
-def _summary(tally, arms):
+def _best_topn_candidate(candidates):
+    """Return the best finite candidate, retaining the legacy 0.0 floor."""
+    score, ops = best_scored_pair([(0.0, []), *candidates])
+    assert ops is not None
+    return score, ops
+
+
+def _excluded_detail_row(case) -> dict[str, str]:
+    """Detail row for an unmeasured identity-backbone baseline."""
+    row = {
+        field: ""
+        for field in ITEM_TRANSFER_DETAIL_FIELDS
+    }
+    row.update(
+        case_id=case.case_id,
+        gold_label=case.perturbation_label,
+        status="base_gain_timeout",
+        excluded="true",
+        timeout_count="1",
+        topn_cost="0",
+        topn_candidates="0",
+        random_topn_cost="0",
+        random_topn_candidates="0",
+    )
+    for arm in ITEM_TRANSFER_ARMS:
+        row[f"{arm}_rec"] = "false"
+    return row
+
+
+def _summary(tally, arms, excluded_cases=()):
     print("\n=== Item transfer recovery rate ===")
     print(f"{'arm':14s} {'recovered':>9s} {'total':>6s} {'rate':>8s} {'vs_oracle':>10s}")
     oracle_rate = (
@@ -398,6 +473,12 @@ def _summary(tally, arms):
         rate = recovered / total if total else 0.0
         frac = f"{rate / oracle_rate:.2f}" if oracle_rate and arm != "no_repair" else "-"
         print(f"{arm:14s} {recovered:>9d} {total:>6d} {rate:>8.4f} {frac:>10s}")
+    if excluded_cases:
+        print(
+            "\nEXCLUDED (identity-backbone rollout timed out): "
+            f"{len(excluded_cases)} -- not counted as recovered or "
+            "not-recovered in any arm."
+        )
     print("\nDECISION ARM = item_fp_topN; random_topN controls for execution budget.")
     print("GO: item_fp_topN captures most item_oracle recovery and beats random_topN.")
 

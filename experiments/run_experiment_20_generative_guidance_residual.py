@@ -76,7 +76,6 @@ from statistics import mean, pstdev
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases
 from cmd_audit.eval.writers import write_csv_table
 from cmd_audit.counterfactual.actions import (
@@ -94,6 +93,7 @@ from experiments.experiment_runner_common import (
     assert_g_eval_available,
     build_answer_verifier,
 )
+from experiments.experiment_runner_common import build_clients
 from experiments.probe_exhaustive import _evaluate_case
 
 ARMS = ("corrected_only", "ecs_no_guidance", "ecs_template", "ecs_skill")
@@ -280,9 +280,9 @@ def main() -> None:
 
     bank = _load_prior_bank(Path(args.prior_bank)) if Path(args.prior_bank).exists() else {}
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="generative-guidance-residual")
-    verifier = build_answer_verifier(client, answer_mode="answer-rubric")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="generative-guidance-residual")
+    verifier = build_answer_verifier(judge_client, answer_mode="answer-rubric")
 
     all_cases = [c for c in load_probe_cases(args.cases) if c.perturbation_label in PIPELINE_STEP_ACTIONS]
     residual = [c for c in all_cases if c.case_id in residual_ids]
@@ -399,6 +399,7 @@ def main() -> None:
          "mean_score", "std_score", "n_repeats", "gate_applied", "recovered", "answer"],
         detail_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     print(f"\nWrote {detail_path}")
 

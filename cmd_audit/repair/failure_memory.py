@@ -13,9 +13,10 @@ from ..core.labels import (
     validate_diagnosis_label,
     validate_label,
 )
-from ..core.models import ProbeCase
+from ..core.models import MemoryItem, ProbeCase
 from ..counterfactual import OperatorSpec, PipelineAction
 from .ecs import ECSDraft
+from .governance import GovernanceDecision, OperatorGovernance
 from ..scoring import evidence_recall_from_text
 from ..eval.writers import write_csv_table, write_text_artifact
 
@@ -132,6 +133,67 @@ def _memory_fingerprint(texts: tuple[str, ...], *, top_k: int = 12) -> str:
         return ""
     ranked = [word for word, _count in Counter(words).most_common(top_k)]
     return " ".join(sorted(ranked))
+
+
+def memory_fingerprint_for_items(
+    items: tuple[MemoryItem, ...],
+    *,
+    fingerprint_mode: str = "content",
+    top_k: int = 12,
+) -> str:
+    """Build the stable content key, optionally augmented with item structure.
+
+    ``content`` preserves the validated step-layer key. ``hybrid`` appends
+    coarse, gold-free timestamp and recall-shape buckets so item-layer
+    retrieval can distinguish otherwise text-similar stale/conflict states.
+    """
+    content = _memory_fingerprint(
+        tuple(item.text for item in items),
+        top_k=top_k,
+    )
+    if fingerprint_mode == "content":
+        return content
+    if fingerprint_mode != "hybrid":
+        raise ValueError("fingerprint_mode must be 'content' or 'hybrid'")
+
+    timestamps = sorted(
+        timestamp
+        for item in items
+        for timestamp in [_timestamp_seconds(item.store)]
+        if timestamp is not None
+    )
+    if len(timestamps) < 2:
+        time_bucket = "ts:none"
+    else:
+        span_days = (timestamps[-1] - timestamps[0]) / (24 * 60 * 60)
+        if span_days <= 7:
+            time_bucket = "ts:same_period"
+        elif span_days <= 30:
+            time_bucket = "ts:weeks"
+        else:
+            time_bucket = "ts:months_plus"
+    source_shapes = sorted(
+        {
+            "atomic" if len(item.source_event_ids) <= 1 else "compressed"
+            for item in items
+        }
+    )
+    shape_bucket = f"shape:{'+'.join(source_shapes) or 'unknown'}"
+    count_bucket = f"count:{min(len(items), 5)}"
+    return " ".join(
+        part for part in (content, time_bucket, shape_bucket, count_bucket) if part
+    )
+
+
+def _timestamp_seconds(value: str) -> float | None:
+    from datetime import datetime
+
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 def _signature_from(query: str, memory_texts: tuple[str, ...]) -> str:
@@ -1653,9 +1715,7 @@ class FailureMemoryStore:
     def __init__(self) -> None:
         self._records: list[StepLevelRecord | FailureMemoryRecord] = []
         self._label_success_rates: dict[str, tuple[int, int]] = {}  # label -> (success, total)
-
-    def __len__(self) -> int:
-        return len(self._records)
+        self._governance = OperatorGovernance()
 
     def add(self, record: StepLevelRecord | FailureMemoryRecord) -> "FailureMemoryStore":
         """Add a record and update success rate statistics."""
@@ -1860,8 +1920,11 @@ class FailureMemoryStore:
             top_k=max(top_k * 3, top_k),
             memory_texts=memory_texts,
         )
-        specs: list[OperatorSpec] = []
-        seen = set()
+        fingerprint = _signature_from(query, memory_texts)
+        specs: list[OperatorSpec] = list(
+            self._governance.active_operators(fingerprint)
+        )
+        seen = {spec.content_hash() for spec in specs}
         for record in records:
             if not isinstance(record, StepLevelRecord):
                 continue
@@ -1873,14 +1936,55 @@ class FailureMemoryStore:
             )
             if not _operator_within_depth(spec, max_depth):
                 continue
-            key = spec.format()
+            key = spec.content_hash()
             if key in seen:
                 continue
             specs.append(spec)
             seen.add(key)
             if len(specs) >= top_k:
                 break
-        return specs, len(records)
+        return specs[:top_k], len(records)
+
+    def admit_with_cluster_replay(
+        self,
+        query: str,
+        operator_spec: OperatorSpec,
+        replay_gains: tuple[float, ...],
+        *,
+        memory_texts: tuple[str, ...] = (),
+        generation: int = 0,
+    ) -> GovernanceDecision:
+        """Run the A4 replay/CI/dedup/cap gate for one operator."""
+        fingerprint = _signature_from(query, memory_texts)
+        return self._governance.admit_with_cluster_replay(
+            fingerprint,
+            operator_spec,
+            replay_gains,
+            generation=generation,
+        )
+
+    def record_operator_outcome(
+        self,
+        query: str,
+        operator_spec: OperatorSpec,
+        *,
+        succeeded: bool,
+        generation: int,
+        memory_texts: tuple[str, ...] = (),
+    ):
+        """Update the governed operator evidence ledger after live use."""
+        fingerprint = _signature_from(query, memory_texts)
+        return self._governance.record_application(
+            fingerprint,
+            operator_spec.content_hash(),
+            succeeded=succeeded,
+            generation=generation,
+        )
+
+    @property
+    def governance(self) -> OperatorGovernance:
+        """Expose the auditable A4 ledger without leaking mutable records."""
+        return self._governance
 
     def get_hook_confidence_bonus(
         self,

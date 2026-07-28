@@ -34,9 +34,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases
-from cmd_audit.eval.writers import write_csv_table
+from cmd_audit.eval.writers import (
+    best_scored_pair,
+    format_recovery_value,
+    is_timeout_value,
+    recovery_timeout_count,
+    write_csv_table,
+)
 from cmd_audit.counterfactual.actions import PipelineAction, get_legal_actions
 from cmd_audit.repair.efficacy import LABEL_TO_ACTION, run_single_repair
 from cmd_audit.scoring.retrieval import compute_bm25_scores, tokenize
@@ -46,6 +51,7 @@ from experiments.experiment_runner_common import (
     assert_g_eval_available,
     build_answer_verifier,
 )
+from experiments.experiment_runner_common import build_clients
 
 ABSTAIN = "<abstain>"
 
@@ -87,14 +93,15 @@ def main() -> None:
     sources = sorted(set(id_to_source.values()))
     arms = _arms(args.source_mode)
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="cross-source-recovery")
-    verifier = build_answer_verifier(client, answer_mode="answer-rubric")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="cross-source-recovery")
+    verifier = build_answer_verifier(judge_client, answer_mode="answer-rubric")
 
     from cmd_audit.harness import _initial_mcts_context, _retrieved_memory_items
 
     tallies = defaultdict(_new_tally)
     detail_rows = []
+    excluded_cases = []
 
     print(
         f"Cross-source recovery transfer over {len(cases)} pipeline cases "
@@ -121,6 +128,14 @@ def main() -> None:
             )
 
         baseline_gain = runner(None).recovery_gain
+        if is_timeout_value(baseline_gain):
+            excluded_cases.append(case.case_id)
+            detail_rows.extend(_excluded_rows(case, source, arms))
+            print(
+                f"  [{i + 1}/{len(cases)}] {case.case_id:38s} "
+                "EXCLUDED (identity-backbone rollout timed out)"
+            )
+            continue
         arm_choices = _choices_for_case(
             case,
             source=source,
@@ -143,27 +158,41 @@ def main() -> None:
             if arm == "no_repair":
                 net, choice, action = 0.0, None, ""
                 seed_available = False
+                timeout_count = 0
             else:
                 choices = arm_choices[arm]
-                net, choice, action = _best_net(choices, runner, baseline_gain)
+                net, choice, action, timeout_count = _best_net(
+                    choices, runner, baseline_gain
+                )
                 seed_available = bool(choices)
 
-            recovered = net > args.recovered_threshold
+            recovered = (
+                not is_timeout_value(net)
+                and net > args.recovered_threshold
+            )
             _add_tally(tallies[(source, arm)], recovered, net, seed_available)
             _add_tally(tallies[("ALL", arm)], recovered, net, seed_available)
             detail_rows.append({
                 "source": source,
                 "case_id": case.case_id,
                 "gold_label": case.perturbation_label,
+                "status": "ok",
+                "excluded": "false",
+                "timeout_count": str(timeout_count),
                 "arm": arm,
                 "seed_choice": "" if choice is None else f"gp{choice[0]}:{choice[1].value}",
                 "selected_action": action or "",
-                "net_gain": f"{net:.4f}",
+                "net_gain": format_recovery_value(net, digits=4),
                 "recovered": str(recovered).lower(),
             })
 
     summary_rows = _summary_rows(tallies, sources, arms)
     _print_summary(summary_rows)
+    if excluded_cases:
+        print(
+            "\nEXCLUDED (identity-backbone rollout timed out): "
+            f"{len(excluded_cases)} -- absent from every arm denominator."
+        )
 
     summary_path = write_csv_table(
         OUT / "experiment_cross_dataset.csv",
@@ -174,12 +203,14 @@ def main() -> None:
             "total",
             "recovery_rate",
             "avg_net_gain",
+            "timeout_count",
             "seed_available",
             "seed_available_rate",
             "vs_oracle",
         ],
         summary_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     detail_path = write_csv_table(
         OUT / "experiment_cross_dataset_detail.csv",
@@ -187,6 +218,9 @@ def main() -> None:
             "source",
             "case_id",
             "gold_label",
+            "status",
+            "excluded",
+            "timeout_count",
             "arm",
             "seed_choice",
             "selected_action",
@@ -195,6 +229,7 @@ def main() -> None:
         ],
         detail_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     print(f"\nWrote {summary_path}")
     print(f"Wrote {detail_path}")
@@ -326,27 +361,59 @@ def _pairs_to_choices(pairs, recall_set, max_depth):
 
 
 def _best_net(choices, runner, baseline_gain):
-    best_net = 0.0
-    best_choice = None
-    best_action = None
+    candidates = []
     for choice in choices:
         result = runner(choice)
         net = result.recovery_gain - baseline_gain
-        if best_choice is None or net > best_net:
-            best_net = net
-            best_choice = choice
-            best_action = result.selected_action
-    return best_net, best_choice, best_action
+        candidates.append((net, (choice, result.selected_action)))
+    timeout_count = recovery_timeout_count(score for score, _payload in candidates)
+    if not candidates:
+        return 0.0, None, None, timeout_count
+    best_net, payload = best_scored_pair(candidates)
+    if payload is None:
+        return float("nan"), None, None, timeout_count
+    best_choice, best_action = payload
+    return best_net, best_choice, best_action, timeout_count
+
+
+def _excluded_rows(case, source, arms):
+    return [
+        {
+            "source": source,
+            "case_id": case.case_id,
+            "gold_label": case.perturbation_label,
+            "status": "base_gain_timeout",
+            "excluded": "true",
+            "timeout_count": "1",
+            "arm": arm,
+            "seed_choice": "",
+            "selected_action": "",
+            "net_gain": "",
+            "recovered": "false",
+        }
+        for arm in arms
+    ]
 
 
 def _new_tally():
-    return {"recovered": 0, "total": 0, "net_sum": 0.0, "seed_available": 0}
+    return {
+        "recovered": 0,
+        "total": 0,
+        "net_sum": 0.0,
+        "net_count": 0,
+        "timeout_count": 0,
+        "seed_available": 0,
+    }
 
 
 def _add_tally(tally, recovered, net, seed_available):
     tally["recovered"] += int(recovered)
     tally["total"] += 1
-    tally["net_sum"] += net
+    if is_timeout_value(net):
+        tally["timeout_count"] += 1
+    else:
+        tally["net_sum"] += net
+        tally["net_count"] += 1
     tally["seed_available"] += int(seed_available)
 
 
@@ -364,7 +431,11 @@ def _summary_rows(tallies, sources, arms):
                 "recovered": str(tally["recovered"]),
                 "total": str(tally["total"]),
                 "recovery_rate": f"{rate:.4f}",
-                "avg_net_gain": f"{(tally['net_sum'] / tally['total'] if tally['total'] else 0.0):.4f}",
+                "avg_net_gain": f"{(
+                    tally['net_sum'] / tally['net_count']
+                    if tally['net_count'] else 0.0
+                ):.4f}",
+                "timeout_count": str(tally["timeout_count"]),
                 "seed_available": str(tally["seed_available"]),
                 "seed_available_rate": f"{_rate(tally['seed_available'], tally['total']):.4f}",
                 "vs_oracle": (

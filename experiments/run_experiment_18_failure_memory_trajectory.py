@@ -19,9 +19,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases
-from cmd_audit.eval.writers import write_csv_table
+from cmd_audit.eval.writers import (
+    best_scored_pair,
+    format_recovery_value,
+    is_timeout_value,
+    recovery_timeout_count,
+    write_csv_table,
+)
 from cmd_audit.counterfactual.actions import PipelineAction, get_legal_actions
 from cmd_audit.repair.efficacy import LABEL_TO_ACTION, run_single_repair
 from cmd_audit.repair.failure_memory import FailureMemoryStore, StepLevelRecord
@@ -31,6 +36,7 @@ from experiments.experiment_runner_common import (
     assert_g_eval_available,
     build_answer_verifier,
 )
+from experiments.experiment_runner_common import build_clients
 from experiments.probe_exhaustive import _evaluate_case
 
 
@@ -46,9 +52,9 @@ def main() -> None:
     parser.add_argument("--recovered-threshold", type=float, default=0.1)
     args = parser.parse_args()
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="failure-memory-trajectory")
-    verifier = build_answer_verifier(client, answer_mode="answer-rubric")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="failure-memory-trajectory")
+    verifier = build_answer_verifier(judge_client, answer_mode="answer-rubric")
 
     cases = [
         c
@@ -84,6 +90,20 @@ def main() -> None:
             max_depth=max_depth,
             intervention_config=cfg,
         ).recovery_gain
+        if is_timeout_value(baseline_gain):
+            detail_rows.append(
+                _excluded_detail_row(
+                    case_index,
+                    case,
+                    prior_total_count=len(active_priors),
+                )
+            )
+            print(
+                f"  [{case_index}/{len(cases)}] "
+                f"{case.perturbation_label:20s} EXCLUDED "
+                "(identity-backbone rollout timed out)"
+            )
+            continue
 
         seed_pairs, prior_source_count = _retrieve_seed_pairs(
             active_priors,
@@ -137,7 +157,13 @@ def main() -> None:
                 fallback_net = fallback_res.recovery_gain - baseline_gain
                 fallback_choice = candidate
                 fallback_action = fallback_res.selected_action or action.value
-                if fallback_net > recovered_net:
+                if (
+                    not is_timeout_value(fallback_net)
+                    and (
+                        is_timeout_value(recovered_net)
+                        or fallback_net > recovered_net
+                    )
+                ):
                     recovered_net = fallback_net
                 if fallback_net > args.recovered_threshold:
                     recovered_choice = candidate
@@ -165,6 +191,9 @@ def main() -> None:
             active_prior_written = True
 
         seed_rollouts = int(seed_result["seed_rollouts_used"])
+        timeout_count = int(seed_result["timeout_count"]) + int(
+            is_timeout_value(fallback_net)
+        )
         total_rollouts = seed_rollouts + fallback_rollouts
         rollouts_to_recovery = (
             seed_result["seed_rank_recovered"]
@@ -183,20 +212,29 @@ def main() -> None:
             "case_index": str(case_index),
             "case_id": case.case_id,
             "gold_label": case.perturbation_label,
+            "status": "ok",
+            "excluded": "false",
+            "timeout_count": str(timeout_count),
             "prior_total_count": str(len(active_priors) - int(active_prior_written)),
             "prior_source_count": str(prior_source_count),
             "seed_choices": _format_choices(seed_choices),
             "seed_rank_recovered": str(seed_result["seed_rank_recovered"]),
             "seed_selected_choice": _format_choice(seed_result["recovered_choice"]),
-            "seed_best_net_gain": f"{float(seed_result['best_net_gain']):.4f}",
+            "seed_best_net_gain": format_recovery_value(
+                float(seed_result["best_net_gain"]), digits=4
+            ),
             "seed_rollouts_used": str(seed_rollouts),
             "fallback_choice": _format_choice(fallback_choice),
             "fallback_action": fallback_action,
-            "fallback_net_gain": f"{fallback_net:.4f}",
+            "fallback_net_gain": format_recovery_value(
+                fallback_net, digits=4
+            ),
             "fallback_rollouts_used": str(fallback_rollouts),
             "total_rollouts_used": str(total_rollouts),
             "rollouts_used_to_recovery": str(rollouts_to_recovery),
-            "best_net_gain": f"{recovered_net:.4f}",
+            "best_net_gain": format_recovery_value(
+                recovered_net, digits=4
+            ),
             "recovered": str(recovered).lower(),
             "recovery_source": recovery_source or "",
             "ledger_written": "true",
@@ -215,6 +253,7 @@ def main() -> None:
         _detail_fieldnames(),
         detail_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     summary_rows = _summary_rows(detail_rows, bin_size=args.bin_size)
     summary_path = write_csv_table(
@@ -222,6 +261,7 @@ def main() -> None:
         _summary_fieldnames(),
         summary_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
 
     _print_summary(summary_rows)
@@ -314,19 +354,23 @@ def _run_seed_stage(
     recovered_choice = None
     seed_rank_recovered = 0
     rollouts_used = 0
+    candidates = []
 
     for rank, choice in enumerate(seed_choices, start=1):
         rollouts_used += 1
         res = runner(choice)
         net = res.recovery_gain - baseline_gain
-        if best_choice is None or net > best_net:
-            best_net = net
-            best_choice = choice
+        candidates.append((net, choice))
         if net > recovered_threshold:
             recovered_choice = choice
             seed_rank_recovered = rank
             best_net = net
             break
+
+    if recovered_choice is None and candidates:
+        best_net, best_choice = best_scored_pair(candidates)
+        if best_choice is None:
+            best_net = float("nan")
 
     return {
         "best_net_gain": best_net,
@@ -334,6 +378,9 @@ def _run_seed_stage(
         "recovered_choice": recovered_choice,
         "seed_rank_recovered": seed_rank_recovered,
         "seed_rollouts_used": rollouts_used,
+        "timeout_count": recovery_timeout_count(
+            score for score, _choice in candidates
+        ),
     }
 
 
@@ -370,7 +417,9 @@ def _ledger_fields(case, recovered_choice, recovered_net: float, *, recovery_sou
         "ledger_original_evidence": corrected_memory,
         "ledger_corrected_memory": corrected_memory,
         "ledger_repair_guidance": repair_guidance,
-        "ledger_recovery_gain": f"{recovered_net:.4f}",
+        "ledger_recovery_gain": format_recovery_value(
+            recovered_net, digits=4
+        ),
     }
 
 
@@ -386,11 +435,30 @@ def _format_choices(choices) -> str:
     return "|".join(_format_choice(choice) for choice in choices)
 
 
+def _excluded_detail_row(case_index, case, *, prior_total_count: int):
+    """Stream row whose identity-backbone score is unmeasured."""
+    return {
+        "case_index": str(case_index),
+        "case_id": case.case_id,
+        "gold_label": case.perturbation_label,
+        "status": "base_gain_timeout",
+        "excluded": "true",
+        "timeout_count": "1",
+        "prior_total_count": str(prior_total_count),
+        "recovered": "false",
+        "ledger_written": "false",
+        "active_prior_written": "false",
+    }
+
+
 def _detail_fieldnames() -> list[str]:
     return [
         "case_index",
         "case_id",
         "gold_label",
+        "status",
+        "excluded",
+        "timeout_count",
         "prior_total_count",
         "prior_source_count",
         "seed_choices",
@@ -420,6 +488,10 @@ def _detail_fieldnames() -> list[str]:
 
 
 def _summary_rows(rows: list[dict[str, str]], *, bin_size: int) -> list[dict[str, str]]:
+    rows = [
+        row for row in rows
+        if row.get("excluded", "false") != "true"
+    ]
     if not rows:
         return []
     out = []

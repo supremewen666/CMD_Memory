@@ -39,7 +39,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.eval.writers import write_csv_table
 from cmd_audit.counterfactual.actions import PipelineAction, get_legal_actions
 from experiments.experiment_runner_common import (
@@ -48,6 +47,7 @@ from experiments.experiment_runner_common import (
     build_answer_verifier,
     load_cases_with_raw,
 )
+from experiments.experiment_runner_common import build_clients
 from experiments.probe_exhaustive import DATA, _own_recovery, _step_context
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -135,9 +135,9 @@ def main() -> None:
     parser.add_argument("--out", default=str(OUT / "coupled_exhaustive_detail.csv"))
     args = parser.parse_args()
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="coupled-exhaustive")
-    verifier = build_answer_verifier(client, answer_mode="answer-rubric")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="coupled-exhaustive")
+    verifier = build_answer_verifier(judge_client, answer_mode="answer-rubric")
 
     # Coupled cases carry coupled_labels (>=2) in raw, not a single
     # perturbation_label. Mirror Exp8's load_cases_with_raw access path.
@@ -206,6 +206,7 @@ def main() -> None:
          "best_combo", "combo_choice", "verdict"],
         detail_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     print(f"\nWrote {out_path}")
 

@@ -38,9 +38,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.data_io import load_probe_cases
-from cmd_audit.eval.writers import write_csv_table
+from cmd_audit.eval.writers import (
+    best_scored_pair,
+    format_recovery_value,
+    is_timeout_value,
+    recovery_timeout_count,
+    write_csv_table,
+)
 from cmd_audit.counterfactual.actions import PipelineAction, get_legal_actions
 from cmd_audit.repair.efficacy import LABEL_TO_ACTION, run_single_repair
 from cmd_audit.scoring.retrieval import compute_bm25_scores, tokenize
@@ -50,6 +55,7 @@ from experiments.experiment_runner_common import (
     assert_g_eval_available,
     build_answer_verifier,
 )
+from experiments.experiment_runner_common import build_clients
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -120,17 +126,19 @@ def _pairs_to_choices(pairs, recall_set, max_depth):
 
 def _best_net(choices, runner, baseline_gain):
     """Run each seeded choice, return (best_net, best_choice). Empty -> (0, None)."""
-    best_net = 0.0
-    best_choice = None
-    best_action = None
+    candidates = []
     for choice in choices:
         res = runner(choice)
         net = res.recovery_gain - baseline_gain
-        if best_choice is None or net > best_net:
-            best_net = net
-            best_choice = choice
-            best_action = res.selected_action
-    return best_net, best_choice, best_action
+        candidates.append((net, (choice, res.selected_action)))
+    timeout_count = recovery_timeout_count(score for score, _payload in candidates)
+    if not candidates:
+        return 0.0, None, None, timeout_count
+    best_net, payload = best_scored_pair(candidates)
+    if payload is None:
+        return float("nan"), None, None, timeout_count
+    best_choice, best_action = payload
+    return best_net, best_choice, best_action, timeout_count
 
 
 def main() -> None:
@@ -149,9 +157,9 @@ def main() -> None:
 
     bank = _load_prior_bank(args.prior_bank)
 
-    client = LLMClient(LLMClientConfig())
-    assert_g_eval_available(client, role="prior-transfer")
-    verifier = build_answer_verifier(client, answer_mode="answer-rubric")
+    client, judge_client = build_clients()
+    assert_g_eval_available(judge_client, role="prior-transfer")
+    verifier = build_answer_verifier(judge_client, answer_mode="answer-rubric")
 
     cases = [
         c
@@ -170,6 +178,7 @@ def main() -> None:
 
     tally = defaultdict(lambda: [0, 0])  # arm -> [recovered, total]
     detail_rows = []
+    excluded_cases = []
 
     print(f"Prior transfer (LOO): arms={arms} over {len(cases)} cases, topk={args.topk}\n")
     for i, case in enumerate(cases):
@@ -188,6 +197,14 @@ def main() -> None:
             )
 
         baseline_gain = runner(None).recovery_gain
+        if is_timeout_value(baseline_gain):
+            excluded_cases.append(case.case_id)
+            detail_rows.extend(_excluded_rows(case, arms))
+            print(
+                f"  [{i+1}/{len(cases)}] {gold:20s} "
+                "EXCLUDED (identity-backbone rollout timed out)"
+            )
+            continue
 
         # oracle: the held-out case's OWN exhaustive culprit (upper bound).
         own_gp, own_action = bank.get(case.case_id, (None, None))
@@ -208,18 +225,27 @@ def main() -> None:
         for arm in arms:
             if arm == "no_repair":
                 net, choice, action = 0.0, None, ""
+                timeout_count = 0
             else:
-                net, choice, action = _best_net(arm_choices[arm], runner, baseline_gain)
-            recovered = net > args.recovered_threshold
+                net, choice, action, timeout_count = _best_net(
+                    arm_choices[arm], runner, baseline_gain
+                )
+            recovered = (
+                not is_timeout_value(net)
+                and net > args.recovered_threshold
+            )
             tally[arm][0] += int(recovered)
             tally[arm][1] += 1
             detail_rows.append({
                 "case_id": case.case_id,
                 "gold_label": gold,
+                "status": "ok",
+                "excluded": "false",
+                "timeout_count": str(timeout_count),
                 "arm": arm,
                 "seed_choice": "" if choice is None else f"gp{choice[0]}:{choice[1].value}",
                 "selected_action": action or "",
-                "net_gain": f"{net:.4f}",
+                "net_gain": format_recovery_value(net, digits=4),
                 "recovered": str(recovered).lower(),
             })
         print(
@@ -228,15 +254,40 @@ def main() -> None:
         )
 
     _print_summary(tally, arms)
+    if excluded_cases:
+        print(
+            "\nEXCLUDED (identity-backbone rollout timed out): "
+            f"{len(excluded_cases)} -- absent from every arm denominator."
+        )
 
     detail_path = write_csv_table(
         OUT / "prior_transfer_detail.csv",
-        ["case_id", "gold_label", "arm", "seed_choice",
+        ["case_id", "gold_label", "status", "excluded", "timeout_count",
+         "arm", "seed_choice",
          "selected_action", "net_gain", "recovered"],
         detail_rows,
         sandbox_root=OUT,
+        judge_client=judge_client,
     )
     print(f"\nWrote {detail_path}")
+
+
+def _excluded_rows(case, arms):
+    return [
+        {
+            "case_id": case.case_id,
+            "gold_label": case.perturbation_label,
+            "status": "base_gain_timeout",
+            "excluded": "true",
+            "timeout_count": "1",
+            "arm": arm,
+            "seed_choice": "",
+            "selected_action": "",
+            "net_gain": "",
+            "recovered": "false",
+        }
+        for arm in arms
+    ]
 
 
 def _print_summary(tally, arms) -> None:
@@ -256,6 +307,3 @@ def _print_summary(tally, arms) -> None:
 
 if __name__ == "__main__":
     main()
-
-
-

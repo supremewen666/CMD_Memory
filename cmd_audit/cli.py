@@ -11,7 +11,7 @@ from .harness import (
     write_attribution_table,
     write_comparison_metrics_table,
 )
-from .data_io import load_all_real_cases, load_probe_cases, load_probe_cases_v1
+from .data_io import load_probe_cases, load_probe_cases_v1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,11 +40,6 @@ def main(argv: list[str] | None = None) -> int:
         "--metrics-out",
         default="artifacts/comparison_metrics.csv",
         help="CSV path for CMD operator recovery metrics",
-    )
-    run_parser.add_argument(
-        "--confusion-out",
-        default=None,
-        help=argparse.SUPPRESS,
     )
     run_parser.add_argument(
         "--on-the-fly-baseline-rescore",
@@ -114,6 +109,23 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    # ── Memory-directory repair ─────────────────────────────────────────
+
+    repair_parser = subparsers.add_parser(
+        "repair-store",
+        help="inspect or repair a one-fact-per-Markdown memory directory",
+    )
+    repair_parser.add_argument("memory_dir", help="memory directory to inspect")
+    repair_parser.add_argument(
+        "--mode",
+        choices=("dry-run", "apply"),
+        default="dry-run",
+        help="dry-run writes a report; apply snapshots, gates, and may demote stale files",
+    )
+    repair_parser.add_argument("--max-bucket-size", type=int, default=5)
+    repair_parser.add_argument("--similarity-threshold", type=float, default=0.35)
+    repair_parser.add_argument("--timestamp-tolerance-days", type=int, default=7)
+
     # ── Parse and dispatch ──────────────────────────────────────────────
 
     args = parser.parse_args(argv)
@@ -170,5 +182,25 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("run-v1 requires --cases or --real-data")
         return 0
 
+    if args.command == "repair-store":
+        from .repair.store_repair import execute_store_repair
+
+        result = execute_store_repair(
+            args.memory_dir,
+            mode=args.mode,
+            max_bucket_size=args.max_bucket_size,
+            similarity_threshold=args.similarity_threshold,
+            tolerance_days=args.timestamp_tolerance_days,
+        )
+        print(
+            f"repair-store mode={result.mode} applied={str(result.applied).lower()} "
+            f"gate={result.gate} report={result.report_path}"
+        )
+        return 0
+
     parser.error(f"unknown command {args.command!r}")
     return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
