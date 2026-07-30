@@ -15,6 +15,7 @@ from typing import Any, Iterable
 
 from ..core.models import MemoryItem
 from .actions import (
+    SINGLE_GENERATION_POINT,
     PipelineAction,
     apply_pipeline_action,
     operator_dsl_for_action,
@@ -299,22 +300,20 @@ def evaluate_operator_spec(
     ``intervention_config``. The gold answer is used only for scoring.
     """
     cfg = operator.intervention_config(intervention_config)
-    current = initial_context
     action_by_gp = operator.action_by_generation_point()
-    for generation_point in range(max_depth):
-        action = action_by_gp.get(generation_point, PipelineAction.IDENTITY)
-        intervened = apply_pipeline_action(
-            action,
-            current,
-            recall_set,
-            generation_point,
-            intervention_config=cfg,
-        )
-        current = generate_conditioned_context(
-            client,
-            intervened,
-            generation_point + 1,
-        )
+    action = action_by_gp.get(SINGLE_GENERATION_POINT, PipelineAction.IDENTITY)
+    intervened = apply_pipeline_action(
+        action,
+        initial_context,
+        recall_set,
+        SINGLE_GENERATION_POINT,
+        intervention_config=cfg,
+    )
+    current = generate_conditioned_context(
+        client,
+        intervened,
+        SINGLE_GENERATION_POINT + 1,
+    )
 
     result = rollout_to_terminal(
         client,

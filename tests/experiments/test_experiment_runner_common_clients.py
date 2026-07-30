@@ -4,7 +4,10 @@ import os
 import unittest
 from unittest.mock import patch
 
-from experiments.experiment_runner_common import build_clients
+from experiments.experiment_runner_common import (
+    assert_live_llm_env_configured,
+    build_clients,
+)
 
 
 class BuildClientsTest(unittest.TestCase):
@@ -35,6 +38,36 @@ class BuildClientsTest(unittest.TestCase):
             self.assertEqual(answer_client.config.model, "llama-3.1-8b-instruct")
             self.assertEqual(judge_client.config.model, "qwen2.5-7b-instruct")
             self.assertNotEqual(answer_client.config, judge_client.config)
+
+    def test_live_path_rejects_implicit_local_defaults(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "LLM_BASE_URL.*LLM_MODEL.*LLM_JUDGE_BASE_URL.*LLM_JUDGE_MODEL",
+            ):
+                assert_live_llm_env_configured()
+
+    def test_live_path_requires_explicit_frozen_judge_identity(self):
+        env = {
+            "LLM_BASE_URL": "http://localhost:8000/v1",
+            "LLM_MODEL": "answerer",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "LLM_JUDGE_BASE_URL.*LLM_JUDGE_MODEL",
+            ):
+                assert_live_llm_env_configured()
+
+    def test_live_path_accepts_explicit_answer_and_judge_identities(self):
+        env = {
+            "LLM_BASE_URL": "http://localhost:8000/v1",
+            "LLM_MODEL": "answerer",
+            "LLM_JUDGE_BASE_URL": "http://localhost:9000/v1",
+            "LLM_JUDGE_MODEL": "judge",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            assert_live_llm_env_configured()
 
 
 if __name__ == "__main__":

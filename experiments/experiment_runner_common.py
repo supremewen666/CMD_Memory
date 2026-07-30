@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -109,6 +110,48 @@ RUBRIC_PAIRS = (
         "absent",
     ),
 )
+
+
+def assert_live_llm_env_configured(
+    *, roles: tuple[str, ...] = ("answer", "judge")
+) -> None:
+    """Fail closed on missing live LLM environment configuration.
+
+    ``LLMClientConfig`` (and therefore ``build_clients()``) falls back to a
+    hardcoded local ollama endpoint (``http://localhost:11434/v1``,
+    ``qwen2.5:7b``) when no ``LLM_*`` env vars are set at all — convenient
+    for offline/unit tests, but wrong for a live run: the caller would
+    silently execute against an unconfigured local default while believing
+    it hit a real endpoint. Call this before constructing any live client
+    so a live run raises instead.
+
+    The ``"answer"`` role requires ``LLM_BASE_URL`` / ``LLM_MODEL``.  A live
+    judge role additionally requires its own ``LLM_JUDGE_BASE_URL`` /
+    ``LLM_JUDGE_MODEL`` rather than accepting the low-level client's
+    backward-compatible fallback to the answer configuration.  Requiring an
+    explicit judge identity is what keeps a live run from silently becoming a
+    self-judged run when the caller intended a frozen evaluator.
+    """
+    missing: list[str] = []
+    for role in roles:
+        if role == "answer":
+            if not os.environ.get("LLM_BASE_URL"):
+                missing.append("LLM_BASE_URL")
+            if not os.environ.get("LLM_MODEL"):
+                missing.append("LLM_MODEL")
+        elif role == "judge":
+            if not os.environ.get("LLM_JUDGE_BASE_URL"):
+                missing.append("LLM_JUDGE_BASE_URL")
+            if not os.environ.get("LLM_JUDGE_MODEL"):
+                missing.append("LLM_JUDGE_MODEL")
+        else:
+            raise ValueError(f"unknown LLM client role: {role!r}")
+    if missing:
+        raise RuntimeError(
+            "Live LLM execution requires explicit endpoint configuration; "
+            f"missing environment variable(s): {', '.join(missing)}. Refusing "
+            "to silently fall back to the local ollama default on the live path."
+        )
 
 
 def build_clients() -> tuple[Any, Any]:
@@ -335,9 +378,9 @@ def run_mcts_for_case(
     *,
     max_iterations: int,
     max_depth: int | None = None,
-    restrict_to_hop: int | None = None,
     action_priors: dict[str, float] | None = None,
 ):
+    from cmd_audit.counterfactual.actions import SINGLE_POINT_DEPTH
     from cmd_audit.harness import _initial_mcts_context, _retrieved_memory_items
     from cmd_audit.counterfactual.search import attribute_single_point
 
@@ -349,11 +392,10 @@ def run_mcts_for_case(
         case.gold_evidence,
         case.gold_answer,
         max_iterations=max_iterations,
-        max_depth=max_depth or max(1, min(3, len(recall_set) or 1)),
+        max_depth=max_depth or SINGLE_POINT_DEPTH,
         answer_verifier=answer_verifier,
         baseline_answer_score=case.primary_baseline.answer_score,
         intervention_config={"candidate_items": case.extracted_memory},
-        restrict_to_hop=restrict_to_hop,
         action_priors=action_priors,
     )
 

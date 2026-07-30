@@ -233,3 +233,200 @@ CMD's Tier 3 single-point counterfactual scan diagnoses retrieval-period failure
 - Failure Memory is not a raw log archive. Don't re-inject complete failed traces.
 - CMD-Audit writes limited to replay-local sandbox. Only CMD-Skill Adapter writes production state.
 - Perturbation type is injected ground truth. Never use LLM-guessed or post-hoc labels.
+
+## Evolution Protocol
+
+**Operator Skill** — A gold-free trigger plus an executable `OperatorSpec` and
+its recovery track record. Its body changes the memory context; it is not
+answer-time guidance text.
+
+**Operator Library** — The versioned collection of Operator Skills available
+before a case is evaluated. A case may update the library only after its own
+outcome has been recorded.
+
+**Repair Pattern** — A gold-free, reusable description of the observable
+memory-failure situation that triggers skill retrieval. A pattern aggregates
+case evidence and owns no executable mutation itself. One Repair Pattern may
+index multiple competing Skill Families. In the Skill Self-Evolution
+experiments, its definition, fingerprint function, similarity function, and
+matching parameters are frozen; only its observational statistics accumulate.
+
+**Skill Family** — The append-only lineage of executable Operator Skills
+associated with one Repair Pattern. Distinct operator shapes remain separate
+competing families even when they recover the same observable situation; no
+single family is assumed canonical.
+
+**Skill Revision** — An immutable executable revision in a Skill Family. A new
+revision may specialize, generalize, parameterize, or compose earlier
+OperatorSpecs, but never overwrites them. Its parent revision and producing
+case evidence remain recorded.
+
+**Active Skill Set** — The Skill Revisions eligible for runtime retrieval at a
+particular library version. It includes provisional-active and stable
+revisions. Evolution changes this set by activation, promotion, or retirement
+pointers; it does not mutate historical revisions.
+
+**Skill Self-Evolution** — The append-only process by which accumulated,
+post-outcome repair evidence creates new Skill Revisions and promotes revisions
+that improve held-out recovery under a fixed retrieval and execution policy.
+Repair Pattern mutation, prompt rewriting, and retriever training are outside
+this claim.
+
+**Provisional-Active Revision** — A Skill Revision that recovered its producing
+case with Recovery Gain above threshold and becomes runtime-eligible starting
+with the next case. Its producing case establishes local executability, not
+transfer.
+
+**Stable Revision** — A Provisional-Active Revision promoted after at least
+three successful independent post-creation case validations spanning at least
+two Recurrence Families, paired non-inferiority to the previous active revision
+under the same budget, and no regression on the incumbent's anchor set.
+
+**Revision Anchor Set** — The immutable four-case capability contract created
+when a revision becomes stable: its producing case plus the earliest three
+successful independent validation cases that satisfy the cross-family promotion
+rule. Anchors come only from represented update-producing cases. They are
+checked by direct revision execution with no retrieval or discovery.
+
+**Soft Retirement** — Removal of a Skill Revision from the Active Skill Set
+without deleting its executable body, evidence, or lineage. A retired revision
+remains reproducible and rollback-eligible.
+
+**Paired Skill Dominance** — On the same independent validation cases and
+budget, a challenger never loses recovery to the incumbent, records at least
+three challenger-only recoveries, costs no more on shared recoveries, and
+introduces no anchor-set regression.
+
+**Capability Evolution** — Improvement in recovery on cases that were not used
+to produce the evaluated library version. A growing library, a changing
+recovery provenance, or a falling retry cost is not sufficient by itself.
+
+**Warm-up Reuse** — Stable recovery with lower discovery or rollout cost after
+previous repairs become reusable. This is an efficiency result, not Capability
+Evolution.
+
+**Recurrence Family** — A group of distinct case variants that instantiate the
+same reusable memory-failure structure. Family membership is evaluation
+metadata and must not enter the runtime retrieval key.
+
+**Prior Same-Family Count** — The number of earlier variants from the current
+case's Recurrence Family that were eligible to update the Operator Library.
+This is the exposure axis for recurrence experiments; stream position alone is
+not a substitute.
+
+**Offline Closed Loop** — A round-based development protocol: diagnose failures
+on training trajectories, update a library or policy, then evaluate the new
+version on a fixed held-out probe set.
+
+**True Online Evolution** — A prequential protocol: evaluate case `t`, record
+its outcome, then and only then allow it to update the Operator Library. Case
+`t` never re-enters future evaluation.
+
+**Verified-Feedback Prequential Evolution** — The bounded Experiment B claim.
+After case `t` is evaluated and irreversibly recorded, delayed verifiable
+feedback may generate an experience-tape event for `L_(t+1)`. The producing
+case never re-enters the online recovery numerator or validates its own
+revision. Offline gold supports only a prequential simulation claim unless an
+equivalent feedback channel exists in deployment.
+
+**Pipeline-Symmetric Control** — A control arm with the same discovery fallback,
+acceptance rule, scorer, and token/rollout budget as the treatment arm. The
+intended intervention is the only difference.
+
+**Retrieval Displacement** — Loss of an earlier library recovery because later
+skills push its working operator outside the fixed top-N retrieval budget.
+It is measured separately from Revision Anchor Set regression, which tests the
+executable directly.
+
+**Evolution AULC** — Area under the held-out recovery learning curve, compared
+against a stream-order permutation null or a pipeline-symmetric no-update
+control.
+
+**Represented-Family Gate** — The primary Skill Self-Evolution gate. It measures
+recovery improvement on held-out variants whose Recurrence Families contributed
+different training variants but not the evaluated cases. It passes only when
+the patterned arm improves from `L0` to `L3`, its difference-in-differences
+against `no_update` is positive, and its normalized Evolution AULC exceeds
+`no_update`, with every one-sided family-blocked paired-bootstrap 95% lower
+confidence bound above zero.
+
+**Family-Blocked Paired Bootstrap** — The evolution Gate estimator. It first
+averages held-out variants within each Recurrence Family, then resamples
+families with replacement while preserving the same cases, checkpoints, arms,
+and run seeds as a paired block. Gate confidence bounds use 10,000
+deterministically seeded resamples.
+
+**Unseen-Family Safety Gate** — A mandatory non-regression gate on held-out
+Recurrence Families that contributed no update-producing case. It measures
+whether specialization harms out-of-family behavior; improvement is not
+required for the Skill Self-Evolution claim. At `L3`, the patterned arm's
+paired end-to-end recovery difference against concurrent `no_update` must have
+a non-negative point estimate and a one-sided family-blocked-bootstrap 95%
+lower confidence bound of at least `-0.05`. The five-point margin is the
+maximum tolerable material loss, not evidence of improvement.
+
+**Evolution Family Split** — The immutable SHA-256 family-level 80/20 split:
+families whose `SHA-256(recurrent_family_id) mod 5 == 0` are unseen safety
+families; all others are represented families. Represented variants 0–2 produce
+experience and variants 3–4 form the primary held-out probe. Every unseen
+variant is read-only evaluation data.
+
+**Offline Evolution Checkpoint** — One of four fixed library evaluations:
+`L0` before updates, `L1` after every represented-family variant 0, `L2` after
+variant 1, and `L3` after variant 2. Seeds shuffle family order only within a
+round.
+
+**Pattern Catalog** — The immutable set of Repair Pattern prototypes generated
+before `L0` from represented-family variant 0 gold-free recall content and
+metadata using `_memory_fingerprint`. Runtime matching uses the frozen
+`_query_signature_similarity` and top-5 Pattern prototypes. No later or unseen
+case may create a Pattern.
+
+**Cold-Start Skill State** — At `L0`, every arm has the same empty Active Skill
+Set. The Pattern Catalog and discovery fallback exist, but no OperatorSpec is
+counted as accumulated experience until a post-outcome successful discovery
+creates a provisional-active revision.
+
+**Unkeyed Experience Control** — A pipeline-symmetric evolution arm that
+receives the same successful OperatorSpecs, update times, lifecycle rules, and
+budget as the patterned CMD arm, but stores revisions in one global Skill pool
+and never uses Repair Pattern membership for retrieval.
+
+**No-Update Control** — A pipeline-symmetric arm whose Active Skill Set remains
+frozen. It retains the same discovery fallback and execution budget but cannot
+accumulate executable repair experience.
+
+**Top-3 Experience Tape Event** — The case-level, arm-shared record of at most
+three distinct successful `OperatorSpec`s eligible for post-outcome Skill
+updates. Every retained operator must achieve `Recovery Gain >= 0.1`.
+Candidates are deduplicated by canonical spec hash and ordered by higher
+Recovery Gain, lower rollout cost, then lexical spec hash. An already-known
+hash reinforces its existing revision rather than creating a duplicate. New
+revisions become provisional-active only from the next case.
+
+**Post-Outcome Shadow Discovery** — The arm-independent procedure that creates
+the Experiment A experience tape after every arm has recorded the current
+case. It runs the frozen discovery fallback once from the same pre-repair case
+snapshot, without reading an arm's Skill Library, Pattern membership, repaired
+context, or outcome. Operator construction is gold-free; offline gold/scoring
+may only verify Recovery Gain and select the Top-3 Experience Tape Event.
+
+**Skill Retrieval Quota** — The fixed top-5 runtime allocation used during
+Skill Self-Evolution: three exploitation slots for validated active revisions
+and two exploration slots for provisional-active revisions needing independent
+evidence. Unused slots are backfilled without increasing the total budget.
+
+**Operator Weight** — The automatically learned conservative recovery weight of
+a Skill Revision. After `s` independent validation successes and `f` failures,
+`weight = Q_0.05(Beta(1+s, 1+f))`. A success requires
+`Recovery Gain >= 0.1`. Producing-case and shadow-discovery evidence are
+excluded. The shared `Beta(1,1)` prior is neutral; no operator-specific value is
+written by hand.
+
+**Exploitation Order** — Deterministic lexicographic ranking by higher Operator
+Weight, higher median Recovery Gain, lower median rollouts, then revision ID.
+Producing-case and shadow-discovery evidence are excluded.
+
+**Exploration Order** — Deterministic lexicographic ranking of
+provisional-active revisions by fewer independent validations, earlier
+activation, then revision ID.

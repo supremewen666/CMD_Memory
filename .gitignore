@@ -21,12 +21,6 @@ reference_notes/
 .pytest_cache/
 .ruff_cache/
 .traces/
-汇报_优化版_可编辑.pptx.inspect.ndjson
-汇报_优化版_可编辑.pptx
-汇报_优化版/
-汇报_优化版_原始备份.pptx
-汇报_优化版.pptx
-汇报_优化版.pptx.inspect.ndjson
 logs/
 AUDIT_DONE_UNDONE.md
 CONCLUSION.md
@@ -37,3 +31,6 @@ SKILL_EVOLUTION_DESIGN.md
 SKILL_MODE_DEPLOYMENT.md
 data/raw_cases/
 data/probe_cases.bak.*/
+data/probe_cases/T1_T2_400_FULL.json
+papers/
+repos/

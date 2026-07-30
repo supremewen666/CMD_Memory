@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
+from typing import Any, Iterable, Mapping
 
 from ..core.labels import (
     ITEM_LABELS,
@@ -17,6 +19,7 @@ from ..core.models import MemoryItem, ProbeCase
 from ..counterfactual import OperatorSpec, PipelineAction
 from .ecs import ECSDraft
 from .governance import GovernanceDecision, OperatorGovernance
+from .operator_library import PatternRecord, canonical_json, content_id, hash_text
 from ..scoring import evidence_recall_from_text
 from ..eval.writers import write_csv_table, write_text_artifact
 
@@ -2079,6 +2082,121 @@ def _query_signature_similarity(left: str, right: str) -> float:
     if not left_kw or not right_kw:
         return 0.0
     return len(left_kw & right_kw) / max(len(left_kw), len(right_kw))
+
+
+@dataclass(frozen=True)
+class FrozenPatternCatalog:
+    """Gold-free Pattern prototypes frozen before the evolution run."""
+
+    catalog_version: str
+    catalog_hash: str
+    patterns: tuple[PatternRecord, ...]
+
+    def match(self, fingerprint: str, *, top_k: int = 5) -> tuple[PatternRecord, ...]:
+        """Return deterministic top-k prototype matches without audit metadata."""
+        if top_k < 1:
+            return ()
+        scored = sorted(
+            (
+                (_query_signature_similarity(fingerprint, item.canonical_fingerprint), item)
+                for item in self.patterns
+            ),
+            key=lambda value: (
+                -value[0],
+                value[1].pattern_id,
+            ),
+        )
+        return tuple(item for score, item in scored[:top_k] if score > 0.0)
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "catalog_version": self.catalog_version,
+            "catalog_hash": self.catalog_hash,
+            "patterns": [
+                {
+                    "pattern_id": item.pattern_id,
+                    "prototype_hash": item.prototype_hash,
+                    "canonical_fingerprint": item.canonical_fingerprint,
+                    "gold_free_feature_hash": item.gold_free_feature_hash,
+                    "catalog_version": item.catalog_version,
+                    "linked_family_ids": list(item.linked_family_ids),
+                    "audit_counters": dict(item.audit_counters),
+                }
+                for item in self.patterns
+            ],
+        }
+
+
+def bootstrap_frozen_pattern_catalog(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    catalog_version: str = "pattern-catalog-v1",
+) -> FrozenPatternCatalog:
+    """Bootstrap prototypes from represented-family variant zero only.
+
+    Gold, injected labels, and family identifiers are used only to select the
+    preregistered split/variant.  They never enter a prototype or feature hash.
+    """
+    fingerprints: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        family_id = str(row.get("recurrent_family_id") or "")
+        if not family_id:
+            raise ValueError("pattern bootstrap requires recurrent_family_id")
+        try:
+            variant_index = int(row["recurrent_variant_index"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("invalid recurrent_variant_index") from exc
+        bucket = int(hashlib.sha256(family_id.encode("utf-8")).hexdigest(), 16) % 5
+        if bucket == 0 or variant_index != 0:
+            continue
+        items = row.get("extracted_memory") or ()
+        texts = tuple(
+            str(item.get("text") or "")
+            for item in items
+            if isinstance(item, Mapping)
+        )
+        fingerprint = _memory_fingerprint(texts)
+        if not fingerprint:
+            continue
+        feature_payload = {
+            "fingerprint": fingerprint,
+            "recall_size": len(texts),
+            "trajectory_kind": str(row.get("trajectory_kind") or ""),
+            "source": str(row.get("source") or ""),
+        }
+        fingerprints.setdefault(fingerprint, feature_payload)
+    patterns: list[PatternRecord] = []
+    for fingerprint in sorted(fingerprints):
+        feature_payload = fingerprints[fingerprint]
+        prototype_hash = hash_text(fingerprint)
+        pattern_id = content_id(
+            "pattern",
+            [catalog_version, prototype_hash, feature_payload],
+        )
+        patterns.append(
+            PatternRecord(
+                pattern_id=pattern_id,
+                prototype_hash=prototype_hash,
+                canonical_fingerprint=fingerprint,
+                gold_free_feature_hash=hash_text(canonical_json(feature_payload)),
+                catalog_version=catalog_version,
+            )
+        )
+    payload = [
+        {
+            "pattern_id": item.pattern_id,
+            "prototype_hash": item.prototype_hash,
+            "canonical_fingerprint": item.canonical_fingerprint,
+            "gold_free_feature_hash": item.gold_free_feature_hash,
+            "catalog_version": item.catalog_version,
+        }
+        for item in patterns
+    ]
+    return FrozenPatternCatalog(
+        catalog_version=catalog_version,
+        catalog_hash=hash_text(canonical_json(payload)),
+        patterns=tuple(patterns),
+    )
 
 
 def _step_record_similarity(

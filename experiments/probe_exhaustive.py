@@ -2,16 +2,15 @@
 """Exhaustive single-point counterfactual probe (diagnostic C, NOT a runner).
 
 Bypasses MCTS/UCB entirely. For each case, deterministically evaluates every
-single-point intervention along the identity backbone:
+single-point intervention at the one fixed generation point:
 
-  credit[0][a] = own_recovery(hop1=a,        hop2=identity)
-               - own_recovery(hop1=identity, hop2=identity)
-  credit[1][a] = own_recovery(hop1=identity, hop2=a)
-               - own_recovery(hop1=identity, hop2=identity)
+  credit[0][a] = own_recovery(action=a)
+               - own_recovery(action=identity)
 
-This is the UPPER BOUND of the counterfactual signal: every (hop, action) path
-is rolled out, so any low accuracy here is a signal-quality problem, not a
-search-coverage problem. main_culprit = argmax credit over non-identity actions.
+This is the UPPER BOUND of the counterfactual signal: every action at the
+single generation point is rolled out, so any low accuracy here is a
+signal-quality problem, not a search-coverage problem. main_culprit = argmax
+credit over non-identity actions.
 
 Run after vLLM is up:
     python -m experiments.probe_exhaustive --limit 0 --aggregate
@@ -29,6 +28,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cmd_audit.core.labels import PIPELINE_STEP_ACTIONS
 from cmd_audit.data_io import load_probe_cases
 from cmd_audit.counterfactual.actions import (
+    SINGLE_GENERATION_POINT,
+    SINGLE_POINT_DEPTH,
     PipelineAction,
     apply_pipeline_action,
     get_legal_actions,
@@ -175,7 +176,7 @@ def _evaluate_case(case, client, verifier, min_credit=0.0):
     from cmd_audit.harness import _initial_mcts_context, _retrieved_memory_items
 
     recall_set = _retrieved_memory_items(case)
-    max_depth = max(1, min(3, len(recall_set) or 1))
+    max_depth = SINGLE_POINT_DEPTH
     base_ctx = _initial_mcts_context(case, recall_set)
     cfg = {"candidate_items": case.extracted_memory, "raw_events": case.raw_events}
     gold_answer = case.gold_answer
@@ -186,34 +187,24 @@ def _evaluate_case(case, client, verifier, min_credit=0.0):
             client, context, start_gp, max_depth, recall_set, gold_answer, verifier, baseline
         )
 
-    # hop1 actions (gen_point 0), then hop2 actions along identity backbone (gen_point 1).
-    hop1_actions = get_legal_actions(recall_set, 0)
-    # identity-backbone context at hop2: hop1 = identity
-    id1_ctx = _step_context(client, base_ctx, PipelineAction.IDENTITY, recall_set, 0, cfg)
-    hop2_actions = get_legal_actions(recall_set, 1)
+    actions = get_legal_actions(recall_set, SINGLE_GENERATION_POINT)
 
-    credits = {0: {}, 1: {}}
-    # baseline = identity everywhere
-    id_id_recovery = own(
-        _step_context(client, id1_ctx, PipelineAction.IDENTITY, recall_set, 1, cfg), 2
+    credits = {0: {}}
+    # baseline = identity at the single generation point
+    identity_recovery = own(
+        _step_context(
+            client, base_ctx, PipelineAction.IDENTITY, recall_set,
+            SINGLE_GENERATION_POINT, cfg,
+        ),
+        SINGLE_GENERATION_POINT + 1,
     )
 
-    # credit[0]: vary hop1, hop2 = identity (rollout fills identity for remaining)
-    id1_recovery = own(id1_ctx, 1)  # hop1=identity, then rollout identity
-    for a in hop1_actions:
+    for a in actions:
         if a == PipelineAction.IDENTITY:
             credits[0][a] = 0.0
             continue
-        ctx = _step_context(client, base_ctx, a, recall_set, 0, cfg)
-        credits[0][a] = own(ctx, 1) - id1_recovery
-
-    # credit[1]: hop1 = identity, vary hop2
-    for a in hop2_actions:
-        if a == PipelineAction.IDENTITY:
-            credits[1][a] = 0.0
-            continue
-        ctx = _step_context(client, id1_ctx, a, recall_set, 1, cfg)
-        credits[1][a] = own(ctx, 2) - id_id_recovery
+        ctx = _step_context(client, base_ctx, a, recall_set, SINGLE_GENERATION_POINT, cfg)
+        credits[0][a] = own(ctx, SINGLE_GENERATION_POINT + 1) - identity_recovery
 
     # Principled abstention: only commit to an action with strictly positive
     # credit. A non-positive best means no repair recovered, or identity already
@@ -221,11 +212,10 @@ def _evaluate_case(case, client, verifier, min_credit=0.0):
     # first-iterated action then fabricates a label. Mirrors find_main_culprit.
     culprit = None
     best = min_credit
-    for gp in (0, 1):
-        for a, c in credits[gp].items():
-            if a != PipelineAction.IDENTITY and c > best:
-                best = c
-                culprit = (gp, a, c)
+    for a, c in credits[0].items():
+        if a != PipelineAction.IDENTITY and c > best:
+            best = c
+            culprit = (SINGLE_GENERATION_POINT, a, c)
     return credits, culprit
 
 

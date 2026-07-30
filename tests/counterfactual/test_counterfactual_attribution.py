@@ -35,7 +35,12 @@ def answer_verifier(answer: str, gold_answer: str) -> float:
 
 
 class TestPipelineActions(unittest.TestCase):
-    def test_get_legal_actions_base_and_restricted_hop(self) -> None:
+    def test_get_legal_actions_base_at_single_generation_point(self) -> None:
+        # There is one fixed generation point now (see
+        # REFACTOR_SPEC_SINGLE_POINT.md Sec0); the removed restrict_to_hop
+        # parameter used to gate legal actions to a matching hop, so the
+        # single-point equivalent is: the full action list is always legal,
+        # unrestricted, at the one generation point.
         recall_set = (MemoryItem("item1", "Paris is in France"),)
 
         actions = get_legal_actions(recall_set, 0, include_gated_actions=False)
@@ -47,15 +52,6 @@ class TestPipelineActions(unittest.TestCase):
                 PipelineAction.GRANULARITY_ERROR,
                 PipelineAction.IDENTITY,
             ],
-        )
-
-        self.assertEqual(
-            get_legal_actions(recall_set, 0, restrict_to_hop=2),
-            [PipelineAction.IDENTITY],
-        )
-        self.assertIn(
-            PipelineAction.RETRIEVAL_ERROR,
-            get_legal_actions(recall_set, 1, restrict_to_hop=2),
         )
 
     def test_get_legal_actions_can_include_item_actions(self) -> None:

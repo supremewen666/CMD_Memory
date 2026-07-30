@@ -111,7 +111,6 @@ class DurableRepairStore:
                 items, changed = _materialize_action(
                     case,
                     items,
-                    step.generation_point,
                     step.action,
                     rule.operator.item_signal_hints_dict(),
                 )
@@ -130,14 +129,14 @@ class DurableRepairStore:
 def _materialize_action(
     case: ProbeCase,
     items: tuple[MemoryItem, ...],
-    generation_point: int,
     action: PipelineAction,
     item_signal_hints: dict[str, float],
 ) -> tuple[tuple[MemoryItem, ...], bool]:
     if action == PipelineAction.RETRIEVAL_ERROR:
         existing = {item.memory_id for item in items}
-        candidates = _hop_local_candidates(case.extracted_memory, generation_point)
-        missed = tuple(item for item in candidates if item.memory_id not in existing)
+        missed = tuple(
+            item for item in case.extracted_memory if item.memory_id not in existing
+        )
         return items + missed, bool(missed)
 
     if action == PipelineAction.INJECTION_ERROR:
@@ -215,21 +214,6 @@ def _materialize_action(
         return ordered, bool(ordered)
 
     return items, False
-
-
-def _hop_local_candidates(
-    candidates: tuple[MemoryItem, ...],
-    generation_point: int,
-) -> tuple[MemoryItem, ...]:
-    prefix = f"m_hop{generation_point + 1}_"
-    if not any(item.memory_id.startswith("m_hop") for item in candidates):
-        return candidates
-    return tuple(
-        item
-        for item in candidates
-        if item.memory_id.startswith(prefix)
-        or not item.memory_id.startswith("m_hop")
-    )
 
 
 def _order_by_signal(

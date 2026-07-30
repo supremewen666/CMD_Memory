@@ -1,0 +1,9 @@
+generation_bin,bin_start,bin_end,cases,excluded_cases,timeout_count,recovered,recovery_rate,library_recovered,library_recovery_rate,fixed_recovered,fixed_recovery_rate,random_recovered,random_recovery_rate,avg_library_size,avg_total_rollouts,avg_rollouts_recovered_cases,judge_base_url,judge_model,rubric_version
+1,1,15,15,0,0,13,0.8667,7,0.4667,13,0.8667,6,0.4000,6.2000,16.3333,14.0769,http://127.0.0.1:8000/v1,qwen2.5-7b-instruct,rubric-v1
+2,16,30,15,0,0,11,0.7333,7,0.4667,9,0.6000,3,0.2000,18.0000,17.8667,12.7273,http://127.0.0.1:8000/v1,qwen2.5-7b-instruct,rubric-v1
+3,31,45,15,0,0,11,0.7333,8,0.5333,8,0.5333,3,0.2000,28.3333,17.0000,11.0909,http://127.0.0.1:8000/v1,qwen2.5-7b-instruct,rubric-v1
+4,46,60,15,0,0,10,0.6667,6,0.4000,8,0.5333,2,0.1333,40.0667,21.3333,15.0000,http://127.0.0.1:8000/v1,qwen2.5-7b-instruct,rubric-v1
+5,61,75,15,0,0,13,0.8667,12,0.8000,8,0.5333,2,0.1333,51.4000,8.0000,4.3077,http://127.0.0.1:8000/v1,qwen2.5-7b-instruct,rubric-v1
+6,76,90,15,0,0,11,0.7333,7,0.4667,10,0.6667,2,0.1333,63.6000,18.2667,11.9091,http://127.0.0.1:8000/v1,qwen2.5-7b-instruct,rubric-v1
+7,91,105,15,0,0,9,0.6000,6,0.4000,8,0.5333,4,0.2667,73.2000,19.4000,12.0000,http://127.0.0.1:8000/v1,qwen2.5-7b-instruct,rubric-v1
+8,106,115,10,0,0,9,0.9000,8,0.8000,6,0.6000,3,0.3000,81.7000,7.7000,5.4444,http://127.0.0.1:8000/v1,qwen2.5-7b-instruct,rubric-v1

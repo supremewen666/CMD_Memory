@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+import urllib.parse
 from typing import Any
 
 from cmd_audit.core.models import Citation, MemoryItem, ProbeCase, ProvenanceEdge
@@ -153,6 +154,71 @@ def judge_provenance_fields(
         "judge_model": str(getattr(config, "model", "")),
         "rubric_version": rubric_version,
     }
+
+
+def derived_scorer_version(
+    judge_client: Any, *, rubric_version: str | None = None
+) -> dict[str, str]:
+    """Derive the frozen scorer-version identity hash (BUILD_SPEC_OBSERVATIONAL Task 4b).
+
+    ``--scorer-version`` was previously free-form text: nothing forced the
+    recorded string to actually match the judge endpoint that produced the
+    scores, violating the "scorer version frozen" invariant. This derives a
+    12-hex-char identity hash from the judge's real network host, model, and
+    rubric version, so a recorded scorer-version is provably tied to what
+    actually ran: ``sha256("|".join([judge_model, judge_host,
+    rubric_version]))[:12]``.
+
+    ``judge_host`` is the network location only (``netloc`` — host and, if
+    present, port), not the full ``judge_base_url`` (which also carries
+    scheme and path); this keeps the identity stable across equivalent URL
+    spellings of the same endpoint.
+
+    Returns a dict with the derived ``scorer_version`` plus the
+    human-readable parts (``judge_model``, ``judge_host``,
+    ``rubric_version``) it was derived from, for audit alongside it.
+    """
+    fields = judge_provenance_fields(judge_client, rubric_version=rubric_version)
+    judge_host = urllib.parse.urlparse(fields["judge_base_url"]).netloc
+    digest = hashlib.sha256(
+        "|".join(
+            [fields["judge_model"], judge_host, fields["rubric_version"]]
+        ).encode("utf-8")
+    ).hexdigest()[:12]
+    return {
+        "scorer_version": digest,
+        "judge_model": fields["judge_model"],
+        "judge_host": judge_host,
+        "rubric_version": fields["rubric_version"],
+    }
+
+
+def require_scorer_version(
+    judge_client: Any,
+    *,
+    explicit_scorer_version: str | None = None,
+    rubric_version: str | None = None,
+) -> dict[str, str]:
+    """Resolve the frozen scorer-version identity, failing closed on mismatch.
+
+    Returns the same dict as :func:`derived_scorer_version`. When
+    ``explicit_scorer_version`` is given (a caller-supplied ``--scorer-version``)
+    and it disagrees with the derived hash, raises ``ValueError`` rather than
+    silently accepting an unverifiable label.
+    """
+    derived = derived_scorer_version(judge_client, rubric_version=rubric_version)
+    if (
+        explicit_scorer_version is not None
+        and explicit_scorer_version != derived["scorer_version"]
+    ):
+        raise ValueError(
+            f"--scorer-version {explicit_scorer_version!r} disagrees with the "
+            f"derived judge identity hash {derived['scorer_version']!r} "
+            f"(judge_model={derived['judge_model']!r}, "
+            f"judge_host={derived['judge_host']!r}, "
+            f"rubric_version={derived['rubric_version']!r})"
+        )
+    return derived
 
 
 def get_graph_distractor_edges(

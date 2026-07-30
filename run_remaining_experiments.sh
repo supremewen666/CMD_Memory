@@ -1,241 +1,256 @@
 #!/usr/bin/env bash
-# run_remaining_experiments.sh — CMD 未完成实验的分布式后台跑批(2026-07-19)
+# CMD 观测式实验最短路径（单卡 A100，Qwen2.5-7B）
 #
-# 覆盖(与 IMPROVEMENT_SPEC_A/B、plan_res.md 对齐):
-#   lane 0(主端点,本地 qwen):
-#     Exp21 ×3 (churn 复测) -> Exp22 ×3 (bank=同 run 的 Exp21 输出)
-#     Exp23a single-param 补充臂 -> Exp23b ×3
-#     Exp18 ×3 (B-full: fingerprint 键下的轨迹曲线; 固定输出路径, 加全局锁)
-#     Exp24 ×3 (总闸门; 与同 run 的 Exp21 residual 集合绑定)
-#     Exp25 durability (runner 未建 -> 门控, 见 SPEC_A §5)
-#   lane 1..N(每 GPU 一个 vLLM 端点, 换 answering 模型):
-#     Exp14 ×3 (C4 headline) -> Exp21 ×3 -> Exp22 ×3
-#     [PROVISIONAL] judge/answerer 拆分已接线但尚未按冻结 judge 重跑;
-#     既有数字仅作趋势参考, 重跑验收前不进正文。
+# Usage:
+#   chmod +x run_remaining_experiments.sh
+#   ./run_remaining_experiments.sh              # 全套（~5h）
+#   ./run_remaining_experiments.sh --smoke      # 冒烟（50 case，~2min）
+#   ./run_remaining_experiments.sh --no-chains  # 跳过链探测（省 ~30% 调用）
 #
-# 用法:
-#   export CMD_ENDPOINTS="http://localhost:8000/v1|http://localhost:8001/v1"
-#   export CMD_MODELS="qwen2.5-7b-instruct|llama-3.1-8b-instruct"
-#   nohup ./run_remaining_experiments.sh > /dev/null 2>&1 &     # 全后台
-#   ./run_remaining_experiments.sh --wait                        # 前台等完
-#   ./run_remaining_experiments.sh --dry-run                     # 只打印命令
-#   CMD_ONLY="exp21,exp22" ./run_remaining_experiments.sh        # 只跑部分
-#
-# 约束(勿删):
-#   - LLM_TIMEOUT=120 必须; endpoint 必须支持 top_logprobs(G0 门先验)。
-#   - rollout.py 超时静默当 0 的 bug 未修前(SPEC_A §1), 远端/慢端点数字有假阴性风险。
-#   - Exp14/18 输出路径硬编码 artifacts/sandbox/(无 --out), 跨 lane 用全局锁串行。
+# 产出放在 artifacts/arena/ 下。
 
-set -u
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT"
+set -euo pipefail
 
-TS="$(date +%Y%m%d_%H%M%S)"
-RUN_ROOT="$ROOT/artifacts/exp_runs/$TS"
-mkdir -p "$RUN_ROOT"
+# ── 路径 ────────────────────────────────────────────────────────────────────
+CMD_ROOT="$HOME/wsy/CMD_Memory"
+CMD_VLLM_OVERLAY="$HOME/wsy/runtime/vllm085-transformers451"
+ARTIFACTS="$CMD_ROOT/artifacts/arena"
+SHARED_PORT=8000
+PID_FILE="/tmp/vllm_shared.pid"
+LOG_FILE="/tmp/vllm_shared.log"
 
-DRY_RUN=0
-WAIT=0
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=1 ;;
-    --wait) WAIT=1 ;;
+# ── 参数 ────────────────────────────────────────────────────────────────────
+SMOKE=false
+CHAINS="--chains"
+DEPOSIT="--deposit-after 0.5 --deposit-min-benefit 0.05 --deposit-min-support 3"
+EXTRA_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --smoke)
+      SMOKE=true
+      shift ;;
+    --no-chains)
+      CHAINS="--no-chains"
+      DEPOSIT=""
+      shift ;;
+    --no-deposit)
+      DEPOSIT=""
+      shift ;;
+    --seed)
+      EXTRA_ARGS+=("--seed" "$2")
+      shift 2 ;;
+    --help|-h)
+      echo "Usage: $0 [--smoke] [--no-chains] [--no-deposit] [--seed N]"
+      exit 0 ;;
+    *)
+      echo "Unknown: $1" >&2; exit 1 ;;
   esac
 done
 
-IFS='|' read -r -a ENDPOINTS <<< "${CMD_ENDPOINTS:-http://localhost:8000/v1}"
-IFS='|' read -r -a MODELS <<< "${CMD_MODELS:-qwen2.5-7b-instruct}"
-RUNS="${CMD_RUNS:-3}"
-ONLY="${CMD_ONLY:-}"
+cd "$CMD_ROOT"
 
-# Resolve the frozen judge exactly once, before any lane replaces LLM_* with
-# its varying answer endpoint/model. Explicit LLM_JUDGE_* values win; otherwise
-# lane 0 is the study-wide judge.
-JUDGE_BASE_URL="${LLM_JUDGE_BASE_URL:-${ENDPOINTS[0]}}"
-JUDGE_MODEL="${LLM_JUDGE_MODEL:-${MODELS[0]}}"
-JUDGE_API_KEY="${LLM_JUDGE_API_KEY:-${LLM_API_KEY:-dummy}}"
-
-log() { echo "[$(date +%H:%M:%S)] $*"; }
-
-should_run() {
-  [ -z "$ONLY" ] && return 0
-  case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac
-}
-
-# 单个实验 job:失败不终止 lane, 记 failures.log
-run_job() {
-  local name="$1"; shift
-  should_run "$name" || { log "SKIP  $name (CMD_ONLY)"; return 0; }
-  log "START $name"
-  if [ "$DRY_RUN" = "1" ]; then
-    printf '  [dry-run]'; printf ' %q' "$@"; echo
+# ── 0. vLLM：单共享端点（judge + answerer 共用） ───────────────────────────
+start_vllm() {
+  if curl -s "localhost:${SHARED_PORT}/v1/models" >/dev/null 2>&1; then
+    echo "[vLLM] port ${SHARED_PORT} already up, reusing"
     return 0
   fi
-  if "$@"; then
-    log "DONE  $name"
-  else
-    local rc=$?
-    log "FAIL  $name (exit $rc)"
-    echo "$name" >> "$RUN_ROOT/failures.log"
+
+  echo "[vLLM] resolving Qwen model dir …"
+  CMD_QWEN_MODEL_DIR="$(
+    env PYTHONPATH="$CMD_VLLM_OVERLAY" HF_HUB_OFFLINE=1 python - <<'PY'
+from huggingface_hub import snapshot_download
+print(snapshot_download("Qwen/Qwen2.5-7B-Instruct", local_files_only=True))
+PY
+  )"
+  echo "[vLLM] model dir: $CMD_QWEN_MODEL_DIR"
+
+  nohup env \
+    PYTHONPATH="$CMD_VLLM_OVERLAY" \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    CUDA_VISIBLE_DEVICES=0 \
+    vllm serve "$CMD_QWEN_MODEL_DIR" \
+    --host 127.0.0.1 \
+    --served-model-name qwen2.5-7b-instruct \
+    --port "$SHARED_PORT" \
+    --gpu-memory-utilization 0.80 \
+    --max-model-len 8192 \
+    --max-num-seqs 64 \
+    --enable-prefix-caching \
+    > "$LOG_FILE" 2>&1 &
+
+  echo $! > "$PID_FILE"
+  echo "[vLLM] pid $(cat "$PID_FILE")"
+
+  # 等待端点就绪
+  echo -n "[vLLM] waiting for port ${SHARED_PORT} …"
+  for i in $(seq 1 120); do
+    if curl -s "localhost:${SHARED_PORT}/v1/models" >/dev/null 2>&1; then
+      echo " ready (${i}s)"
+      return 0
+    fi
+    sleep 1
+    echo -n "."
+  done
+  echo " TIMEOUT"
+  return 1
+}
+
+stop_vllm() {
+  if [[ ! -f "$PID_FILE" ]]; then
+    return 0
   fi
+  local pid
+  pid=$(cat "$PID_FILE")
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "[vLLM] stopping pid $pid"
+    kill "$pid" || true
+    sleep 2
+  fi
+  rm -f "$PID_FILE"
 }
 
-# 固定输出路径实验(Exp14/18)的全局互斥锁: 锁内跑 + 立刻把产物拷进 run 目录
-FIXED_OUT_LOCK="$RUN_ROOT/.fixed_out.lock"
-run_fixed_out_job() {
-  local name="$1" dest="$2" glob="$3"; shift 3
-  should_run "$name" || { log "SKIP  $name (CMD_ONLY)"; return 0; }
-  if [ "$DRY_RUN" = "1" ]; then run_job "$name" "$@"; return 0; fi
-  while ! mkdir "$FIXED_OUT_LOCK" 2>/dev/null; do sleep 30; done
-  run_job "$name" "$@"
-  mkdir -p "$dest"
-  # shellcheck disable=SC2086
-  cp $glob "$dest"/ 2>/dev/null || true
-  rmdir "$FIXED_OUT_LOCK"
+# ── 1. 环境变量（单端点模式） ──────────────────────────────────────────────
+setup_env() {
+  export LLM_BASE_URL="http://localhost:${SHARED_PORT}/v1"
+  export LLM_MODEL="qwen2.5-7b-instruct"
+  export LLM_JUDGE_BASE_URL="http://localhost:${SHARED_PORT}/v1"
+  export LLM_JUDGE_MODEL="qwen2.5-7b-instruct"
+  export LLM_API_KEY="dummy"
+  export LLM_JUDGE_API_KEY="dummy"
+  export LLM_TIMEOUT=120
+  export NO_PROXY="localhost,127.0.0.1"
+  export no_proxy="localhost,127.0.0.1"
+
+  echo "[env] LLM_BASE_URL=$LLM_BASE_URL"
+  echo "[env] LLM_MODEL=$LLM_MODEL"
 }
 
-# G0: judge 端点必须能返回可解析的 G-Eval logprobs
-g0_gate() {
-  [ "$DRY_RUN" = "1" ] && { log "G0 gate skipped (dry-run)"; return 0; }
+# ── 2. G0 门 ────────────────────────────────────────────────────────────────
+gate_g0() {
+  echo "[gate] G0: judge logprob availability"
   python - <<'PY'
-import sys
-sys.path.insert(0, ".")
-from experiments.experiment_runner_common import assert_g_eval_available
+import sys; sys.path.insert(0, ".")
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
-# G0 is a judge-endpoint gate: top_logprobs is a judge-only requirement
-# (SPEC_A §3). With no LLM_JUDGE_* set, this falls back to the LLM_* lane
-# endpoint field by field, so single-endpoint lanes are unaffected.
+from experiments.experiment_runner_common import assert_g_eval_available
 assert_g_eval_available(LLMClient(LLMClientConfig.for_role("judge")), role="preflight-judge")
-print("G0 logprob gate: OK")
+print("[gate] G0 judge logprob gate: OK")
 PY
 }
 
-lane_env() {  # $1=endpoint $2=model
-  export LLM_BASE_URL="$1" LLM_MODEL="$2" LLM_API_KEY="dummy" LLM_TIMEOUT=120
-  export LLM_JUDGE_BASE_URL="$JUDGE_BASE_URL" LLM_JUDGE_MODEL="$JUDGE_MODEL"
-  export LLM_JUDGE_API_KEY="$JUDGE_API_KEY" LLM_JUDGE_TIMEOUT=120
-  export NO_PROXY="localhost,127.0.0.1" no_proxy="localhost,127.0.0.1"
+# ── 3. 流验证 ──────────────────────────────────────────────────────────────
+validate_streams() {
+  echo "===== Stream validation ====="
+  for arena in memtrace memfail stale; do
+    python -m "experiments.run_arena_${arena}" --validate-only
+  done
 }
 
-# ---------- lane 0: 主端点 ----------
-lane_local() {
-  lane_env "${ENDPOINTS[0]}" "${MODELS[0]}"
-  local D="$RUN_ROOT/lane0_${MODELS[0]}"
-  mkdir -p "$D"
-  g0_gate || { log "lane0: G0 gate FAILED — 端点无 top_logprobs, lane 终止"; return 1; }
+# ── 4. MemTrace-B Arena（主实验） ──────────────────────────────────────────
+run_memtrace() {
+  local label="$1"; shift
+  echo "===== Arena: MemTrace-B ($label) ====="
 
-  for r in $(seq 1 "$RUNS"); do
-    run_job "exp21" python experiments/run_experiment_21_operator_headroom.py \
-      --no-ec-test --out "$D/operator_headroom_detail_run${r}.csv"
-    run_job "exp22" python experiments/run_experiment_22_operator_transfer.py \
-      --operator-bank "$D/operator_headroom_detail_run${r}.csv" \
-      --neighbors 10 --topn 5 --random-seed $((22 + (r - 1) * 100)) \
-      --out "$D/operator_transfer_detail_run${r}.csv"
-  done
-
-  # Exp23a 补充臂: single-param(STALE 主协议之外的 item_signal_hints 家族)
-  run_job "exp23a" python experiments/run_experiment_23_item_headroom.py \
-    --operator-classes single-param \
-    --out "$D/item_operator_headroom_singleparam.csv"
-
-  # Exp23b ×3: bank 用 canonical(不存在则先补一发 single 臂生成)
-  local BANK="$ROOT/artifacts/sandbox/item_operator_headroom_detail.csv"
-  if [ ! -f "$BANK" ] && [ "$DRY_RUN" != "1" ]; then
-    run_job "exp23a" python experiments/run_experiment_23_item_headroom.py \
-      --operator-classes single --out "$BANK"
-  fi
-  for r in $(seq 1 "$RUNS"); do
-    run_job "exp23b" python experiments/run_experiment_23_item_transfer.py \
-      --operator-bank "$BANK" --neighbors 10 --topn 5 \
-      --random-seed $((23 + (r - 1) * 100)) \
-      --out "$D/item_operator_transfer_run${r}.csv"
-  done
-
-  # Exp18 B-full: fingerprint 键已在代码, 重跑出轨迹曲线; 输出路径固定 -> 锁
-  for r in $(seq 1 "$RUNS"); do
-    run_fixed_out_job "exp18" "$D/exp18_run${r}" \
-      "$ROOT/artifacts/sandbox/failure_memory_trajectory_*.csv" \
-      python experiments/run_experiment_18_failure_memory_trajectory.py \
-      --seed $((42 + (r - 1) * 100))
-  done
-
-  # Exp24 总闸门 / Exp25 durability: runner 未建, 存在性门控(不静默造数)
-  if [ -f experiments/run_experiment_24_operator_trajectory.py ]; then
-    for r in $(seq 1 "$RUNS"); do
-      run_job "exp24" python experiments/run_experiment_24_operator_trajectory.py \
-        --residual-from "$D/operator_headroom_detail_run${r}.csv" \
-        --seed $((24 + (r - 1) * 100)) \
-        --out "$D/operator_trajectory_run${r}.csv"
-    done
+  if $SMOKE; then
+    python -m experiments.run_arena_memtrace \
+      --backend-factory experiments.arena_backends:create_vllm_backend \
+      --limit 50 ${CHAINS} \
+      "${EXTRA_ARGS[@]}" "$@" \
+      --output "${ARTIFACTS}/memtrace_${label}.jsonl" \
+      2>&1 | tee "${ARTIFACTS}/memtrace_${label}.log"
   else
-    log "GATED exp24: runner 不存在 — 先按 IMPROVEMENT_SPEC_A §2 建 runner, 再 CMD_ONLY=exp24 重跑"
+    python -m experiments.run_arena_memtrace \
+      --backend-factory experiments.arena_backends:create_vllm_backend \
+      ${CHAINS} ${DEPOSIT} \
+      "${EXTRA_ARGS[@]}" "$@" \
+      --output "${ARTIFACTS}/memtrace_${label}.jsonl" \
+      2>&1 | tee "${ARTIFACTS}/memtrace_${label}.log"
   fi
-  if [ -f experiments/run_experiment_25_repair_durability.py ]; then
-    run_job "exp25" python experiments/run_experiment_25_repair_durability.py \
-      --out "$D/repair_durability_detail.csv"
-  else
-    log "GATED exp25: runner 不存在 — 见 IMPROVEMENT_SPEC_A §5"
-  fi
-
-  run_job "significance" python experiments/analyze_significance.py
 }
 
-# ---------- lane i>=1: 多模型(PROVISIONAL) ----------
-lane_model() {  # $1=endpoint $2=model $3=lane_idx
-  lane_env "$1" "$2"
-  local D="$RUN_ROOT/lane$3_$2"
-  mkdir -p "$D"
-  log "lane$3 [$2] PROVISIONAL: frozen judge 已接线, 待本 lane 重跑验收后再转正式数字"
-  g0_gate || { log "lane$3: G0 gate FAILED — frozen judge 端点无 top_logprobs; lane 终止"; return 1; }
-
-  for r in $(seq 1 "$RUNS"); do
-    run_fixed_out_job "exp14" "$D/exp14_run${r}" \
-      "$ROOT/artifacts/sandbox/repair_efficacy_*.csv" \
-      python experiments/run_experiment_14_repair_efficacy.py \
-      --cmd-attribution exhaustive --limit 0
-    run_job "exp21" python experiments/run_experiment_21_operator_headroom.py \
-      --no-ec-test --out "$D/operator_headroom_detail_run${r}.csv"
-    run_job "exp22" python experiments/run_experiment_22_operator_transfer.py \
-      --operator-bank "$D/operator_headroom_detail_run${r}.csv" \
-      --neighbors 10 --topn 5 --random-seed $((22 + (r - 1) * 100)) \
-      --out "$D/operator_transfer_detail_run${r}.csv"
-  done
+# ── 5. MemFail Arena（跨环境复现） ─────────────────────────────────────────
+run_memfail() {
+  echo "===== Arena: MemFail ====="
+  python -m experiments.run_arena_memfail \
+    --backend-factory experiments.arena_backends:create_vllm_backend \
+    --no-chains \
+    "${EXTRA_ARGS[@]}" \
+    --output "${ARTIFACTS}/memfail_observations.jsonl" \
+    2>&1 | tee "${ARTIFACTS}/memfail_run.log"
 }
 
-# ---------- 启动 ----------
-{
-  echo "commit: $(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
-  echo "endpoints: ${ENDPOINTS[*]}"
-  echo "models: ${MODELS[*]}"
-  echo "frozen_judge_endpoint: $JUDGE_BASE_URL"
-  echo "frozen_judge_model: $JUDGE_MODEL"
-  echo "runs_per_exp: $RUNS  only: ${ONLY:-<all>}"
-} > "$RUN_ROOT/MANIFEST.txt"
+# ── 6. STALE Arena ─────────────────────────────────────────────────────────
+run_stale() {
+  echo "===== Arena: STALE ====="
+  python -m experiments.run_arena_stale \
+    --backend-factory experiments.arena_backends:create_vllm_backend \
+    --no-chains \
+    "${EXTRA_ARGS[@]}" \
+    --output "${ARTIFACTS}/stale_observations.jsonl" \
+    2>&1 | tee "${ARTIFACTS}/stale_run.log"
+}
 
-if ! grep -q "LLMTimeoutError" cmd_audit/counterfactual/rollout.py 2>/dev/null; then
-  log "WARN: rollout.py 仍将超时静默计为 recovery_gain=0.0(SPEC_A §1 未修)— 慢端点 lane 有假阴性风险"
-fi
+# ── 7. 统一分析 ────────────────────────────────────────────────────────────
+run_analysis() {
+  echo "===== Analysis ====="
+  python -m experiments.analyze_arena_results \
+    --inputs \
+      "${ARTIFACTS}/memtrace_observations.jsonl" \
+      "${ARTIFACTS}/memfail_observations.jsonl" \
+      "${ARTIFACTS}/stale_observations.jsonl" \
+    --output-dir "${ARTIFACTS}/analysis"
+}
 
-if [ "$DRY_RUN" = "1" ]; then
-  lane_local
-  for ((i = 1; i < ${#ENDPOINTS[@]}; i++)); do
-    lane_model "${ENDPOINTS[$i]}" "${MODELS[$i]:-${MODELS[0]}}" "$i"
+# ── 8. Llama 复现（可选） ──────────────────────────────────────────────────
+run_llama() {
+  echo "===== Arena: MemTrace-B (Llama-3.1-8B) ====="
+  export LLM_MODEL="llama-3.1-8b-instruct"
+  # LLM_JUDGE_* 不变
+  python -m experiments.run_arena_memtrace \
+    --backend-factory experiments.arena_backends:create_vllm_backend \
+    ${CHAINS} \
+    "${EXTRA_ARGS[@]}" \
+    --output "${ARTIFACTS}/memtrace_llama_observations.jsonl" \
+    2>&1 | tee "${ARTIFACTS}/memtrace_llama_run.log"
+}
+
+# ── main ────────────────────────────────────────────────────────────────────
+main() {
+  mkdir -p "$ARTIFACTS"
+
+  start_vllm
+  setup_env
+  gate_g0
+
+  if $SMOKE; then
+    run_memtrace "smoke"
+    echo ""
+    echo "[smoke] done — check ${ARTIFACTS}/memtrace_smoke.jsonl"
+    stop_vllm
+    exit 0
+  fi
+
+  validate_streams
+
+  # 3 seeds MemTrace-B（跨 seed 生态位稳定性）
+  for s in 24 124 224; do
+    EXTRA_ARGS=("--seed" "$s")
+    run_memtrace "seed${s}"
   done
-  log "dry-run complete (no jobs launched)"
-  exit 0
-fi
+  # 主输出用 seed 24 的别名
+  cp "${ARTIFACTS}/memtrace_seed24.jsonl" "${ARTIFACTS}/memtrace_observations.jsonl"
 
-PIDS=()
-lane_local > "$RUN_ROOT/lane0.log" 2>&1 &
-PIDS+=($!)
-for ((i = 1; i < ${#ENDPOINTS[@]}; i++)); do
-  lane_model "${ENDPOINTS[$i]}" "${MODELS[$i]:-${MODELS[0]}}" "$i" > "$RUN_ROOT/lane$i.log" 2>&1 &
-  PIDS+=($!)
-done
-printf '%s\n' "${PIDS[@]}" > "$RUN_ROOT/pids.txt"
-log "launched ${#PIDS[@]} lane(s); logs: $RUN_ROOT/lane*.log; pids: $RUN_ROOT/pids.txt"
+  run_memfail
+  run_stale
+  run_analysis
 
-if [ "$WAIT" = "1" ]; then
-  wait
-  log "all lanes finished; failures: $( [ -f "$RUN_ROOT/failures.log" ] && wc -l < "$RUN_ROOT/failures.log" || echo 0 )"
-fi
+  echo ""
+  echo "===== ALL DONE ====="
+  echo "Observations in ${ARTIFACTS}/"
+  echo "Analysis CSVs in ${ARTIFACTS}/analysis/"
+  stop_vllm
+}
+
+main

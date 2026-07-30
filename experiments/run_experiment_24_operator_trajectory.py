@@ -583,72 +583,32 @@ def main() -> None:
             recovered_net = library_net
             recovery_source = "library"
 
-        # 2. Discovery fallback: discover a new shape only after a library miss.
-        discovery_net = 0.0
-        discovery_rollouts = 0
-        if recovered_spec is None:
-            (
-                discovery_net,
-                discovery_spec,
-                discovery_rollouts,
-            ) = _discovery_scan(
-                execute,
-                net_gain,
-                recall,
-                max_depth,
-                item_pool,
-                classes=args.fallback_classes,
-            )
-            if (
-                discovery_spec is not None
-                and not is_timeout_value(discovery_net)
-                and discovery_net >= args.recovered_threshold
-            ):
-                recovered_spec = discovery_spec
-                recovered_net = discovery_net
-                recovery_source = "discovery"
-
-        # 3. Accept-if-improves and retain multiple shapes per fingerprint.
-        library_written = False
-        if recovered_spec is not None:
-            key = (fingerprint, recovered_spec.format())
-            existing = {
-                (str(entry["fp"]), entry["spec"].format())
-                for entry in library
-            }
-            if key not in existing:
-                library.append(
-                    {
-                        "fp": fingerprint,
-                        "spec": recovered_spec,
-                        "net": recovered_net,
-                        "case_id": case.case_id,
-                    }
-                )
-                library_written = True
-
-        # 4. Control arms.  Both reuse this case's ``execute`` (same context and
-        # same identity baseline) so the only difference is which shapes are
-        # tried.  Neither may read or mutate the live ``library``.
+        # 2. Run every control's library stage before the shared discovery
+        # fallback. This keeps discovery pipeline-symmetric: a miss in fixed or
+        # random still gets the same fallback even when the growing arm already
+        # recovered from its library.
         fixed_recovered = ""
         fixed_net_out = ""
         fixed_rollouts = 0
         fixed_size_before = len(fixed_library)
+        fixed_net = 0.0
+        fixed_spec: OperatorSpec | None = None
+        fixed_hit = False
         random_recovered = ""
         random_net_out = ""
         random_rollouts = 0
         random_pool_size = 0
         random_coverage = 0.0
+        random_net = 0.0
+        random_spec: OperatorSpec | None = None
+        random_hit = False
         order_recovered = ""
         order_rank = 0
         order_rollouts = 0
         if controls_on:
-            # 4c. random-ORDER: same candidate set, shuffled. Isolates ranking
-            # quality from candidate-set quality, and is immune to the coverage
-            # degeneracy because the set is identical to the live arm's.
-            # Recovery is IDENTICAL to the live arm by construction (both walk
-            # the same set until the first hit), so this arm is a COST
-            # comparison -- never report it as a recovery-rate win.
+            # random-ORDER: same candidate set, shuffled. It is deliberately a
+            # library-stage COST comparison; recovery over the set is identical
+            # by construction.
             shuffled = list(scored_candidates)
             control_rng.shuffle(shuffled)
             (
@@ -660,7 +620,7 @@ def main() -> None:
                 shuffled, threshold=args.recovered_threshold
             )
             order_recovered = str(order_spec is not None).lower()
-            # 4a. fixed-library: frozen after the warm-up prefix.
+
             fixed_candidates = _retrieve_library(
                 fixed_library, fingerprint, topn=args.topn
             )
@@ -682,39 +642,19 @@ def main() -> None:
                 fixed_spec is not None
                 and fixed_net >= args.recovered_threshold
             )
-            # The frozen arm still needs a discovery path, otherwise it measures
-            # "no library" rather than "library that stopped growing".  Reuse the
-            # live arm's discovery outcome instead of paying for a second scan.
-            if not fixed_hit and recovery_source == "discovery":
-                fixed_hit = True
-                fixed_net = discovery_net
-                fixed_spec = recovered_spec
-            if fixed_hit and case_index <= warmup and fixed_spec is not None:
-                fixed_key = (fingerprint, fixed_spec.format())
-                if fixed_key not in {
-                    (str(e["fp"]), e["spec"].format()) for e in fixed_library
-                }:
-                    fixed_library.append(
-                        {
-                            "fp": fingerprint,
-                            "spec": fixed_spec,
-                            "net": fixed_net,
-                            "case_id": case.case_id,
-                        }
-                    )
-            fixed_recovered = str(bool(fixed_hit)).lower()
-            fixed_net_out = format_recovery_value(fixed_net, digits=4)
 
-            # 4b. random-variation: same realized budget, shapes drawn at random.
+            # The random arm receives the pre-registered top-N CAP. Realized
+            # live rollouts are an outcome (often 1 after an early hit), not an
+            # input to the comparator's budget.
             random_pool_size = len(
                 _random_pool(library, case_id=case.case_id)
             )
             random_coverage = _random_coverage(
-                random_pool_size, library_rollouts
+                random_pool_size, args.topn
             )
             random_shapes = _sample_random_shapes(
                 library,
-                budget=library_rollouts,
+                budget=args.topn,
                 case_id=case.case_id,
                 rng=control_rng,
             )
@@ -736,8 +676,102 @@ def main() -> None:
                 random_spec is not None
                 and random_net >= args.recovered_threshold
             )
+
+        live_library_hit = recovered_spec is not None
+        fixed_library_hit = fixed_hit
+        random_library_hit = random_hit
+
+        # 3. One arm-independent discovery scan, reused by every arm that
+        # missed its library stage. Running it is triggered by ANY arm's miss,
+        # never conditionally on the growing arm's recovery source.
+        discovery_net = 0.0
+        shared_discovery_rollouts = 0
+        discovery_spec: OperatorSpec | None = None
+        needs_discovery = (
+            not live_library_hit
+            or (
+                controls_on
+                and (not fixed_library_hit or not random_library_hit)
+            )
+        )
+        if needs_discovery:
+            (
+                discovery_net,
+                discovery_spec,
+                shared_discovery_rollouts,
+            ) = _discovery_scan(
+                execute,
+                net_gain,
+                recall,
+                max_depth,
+                item_pool,
+                classes=args.fallback_classes,
+            )
+        discovery_hit = (
+            discovery_spec is not None
+            and not is_timeout_value(discovery_net)
+            and discovery_net >= args.recovered_threshold
+        )
+        discovery_rollouts = (
+            shared_discovery_rollouts if not live_library_hit else 0
+        )
+        if not live_library_hit:
+            if discovery_hit:
+                recovered_spec = discovery_spec
+                recovered_net = discovery_net
+                recovery_source = "discovery"
+        if controls_on:
+            if not fixed_library_hit:
+                fixed_rollouts += shared_discovery_rollouts
+                if discovery_hit:
+                    fixed_hit = True
+                    fixed_net = discovery_net
+                    fixed_spec = discovery_spec
+            if not random_library_hit:
+                random_rollouts += shared_discovery_rollouts
+                if discovery_hit:
+                    random_hit = True
+                    random_net = discovery_net
+                    random_spec = discovery_spec
+
+            # fixed-library grows only during its pre-registered warm-up and
+            # then freezes, but its discovery fallback remains available.
+            if fixed_hit and case_index <= warmup and fixed_spec is not None:
+                fixed_key = (fingerprint, fixed_spec.format())
+                if fixed_key not in {
+                    (str(e["fp"]), e["spec"].format()) for e in fixed_library
+                }:
+                    fixed_library.append(
+                        {
+                            "fp": fingerprint,
+                            "spec": fixed_spec,
+                            "net": fixed_net,
+                            "case_id": case.case_id,
+                        }
+                    )
+            fixed_recovered = str(bool(fixed_hit)).lower()
+            fixed_net_out = format_recovery_value(fixed_net, digits=4)
             random_recovered = str(bool(random_hit)).lower()
             random_net_out = format_recovery_value(random_net, digits=4)
+
+        # 4. Accept-if-improves and retain multiple shapes per fingerprint.
+        library_written = False
+        if recovered_spec is not None:
+            key = (fingerprint, recovered_spec.format())
+            existing = {
+                (str(entry["fp"]), entry["spec"].format())
+                for entry in library
+            }
+            if key not in existing:
+                library.append(
+                    {
+                        "fp": fingerprint,
+                        "spec": recovered_spec,
+                        "net": recovered_net,
+                        "case_id": case.case_id,
+                    }
+                )
+                library_written = True
 
         total_rollouts = library_rollouts + discovery_rollouts
         recovered = recovered_spec is not None
@@ -761,12 +795,18 @@ def main() -> None:
                     digits=4,
                 ),
                 "discovery_rollouts": str(discovery_rollouts),
+                "shared_discovery_rollouts": str(
+                    shared_discovery_rollouts
+                ),
                 "discovery_net": format_recovery_value(
                     discovery_net,
                     digits=4,
                 ),
                 "total_rollouts": str(total_rollouts),
                 "recovered": str(recovered).lower(),
+                "library_only_recovered": str(
+                    live_library_hit
+                ).lower(),
                 "accepted": str(recovered).lower(),
                 "recovery_source": recovery_source or "unrecovered",
                 "recovered_op": (
@@ -782,10 +822,34 @@ def main() -> None:
                 ),
                 "library_written": str(library_written).lower(),
                 "fixed_recovered": fixed_recovered,
+                "fixed_library_only_recovered": (
+                    str(fixed_library_hit).lower() if controls_on else ""
+                ),
+                "fixed_recovery_source": (
+                    "library"
+                    if fixed_library_hit
+                    else "discovery"
+                    if fixed_hit
+                    else "unrecovered"
+                    if controls_on
+                    else ""
+                ),
                 "fixed_net": fixed_net_out,
                 "fixed_rollouts": str(fixed_rollouts),
                 "fixed_library_size_before": str(fixed_size_before),
                 "random_recovered": random_recovered,
+                "random_library_only_recovered": (
+                    str(random_library_hit).lower() if controls_on else ""
+                ),
+                "random_recovery_source": (
+                    "library"
+                    if random_library_hit
+                    else "discovery"
+                    if random_hit
+                    else "unrecovered"
+                    if controls_on
+                    else ""
+                ),
                 "random_net": random_net_out,
                 "random_rollouts": str(random_rollouts),
                 "random_pool_size": str(random_pool_size),
@@ -827,7 +891,7 @@ def main() -> None:
         "\nVERDICT guide: Gate 2 passes only if the live arm (recovery_rate) "
         "climbs across bins AND beats BOTH controls -- fixed_recovery_rate "
         "(library frozen after warm-up) and random_recovery_rate (same "
-        "realized budget, shapes drawn at random). Climbing alone is not "
+        "pre-registered top-N cap, shapes drawn at random). Climbing alone is not "
         "evidence: Exp22's same-budget random arm reached 0.84x the oracle "
         "ceiling, so a bare climb is consistent with later cases simply "
         "getting more attempts."
@@ -866,9 +930,11 @@ def _excluded_detail_row(
         "library_rank_recovered": "0",
         "library_net": "",
         "discovery_rollouts": "0",
+        "shared_discovery_rollouts": "0",
         "discovery_net": "",
         "total_rollouts": "0",
         "recovered": "false",
+        "library_only_recovered": "false",
         "accepted": "false",
         "recovery_source": "excluded",
         "recovered_op": "",
@@ -879,10 +945,14 @@ def _excluded_detail_row(
         # excluded from the live arm AND both controls -- never counted as a
         # failure in any of them.
         "fixed_recovered": "",
+        "fixed_library_only_recovered": "",
+        "fixed_recovery_source": "",
         "fixed_net": "",
         "fixed_rollouts": "0",
         "fixed_library_size_before": "0",
         "random_recovered": "",
+        "random_library_only_recovered": "",
+        "random_recovery_source": "",
         "random_net": "",
         "random_rollouts": "0",
         "random_pool_size": "0",
@@ -921,11 +991,21 @@ def _summary_rows(
         fixed_recovered = [
             row for row in fixed_measured if row["fixed_recovered"] == "true"
         ]
+        fixed_library_recovered = [
+            row
+            for row in fixed_measured
+            if row.get("fixed_library_only_recovered") == "true"
+        ]
         random_measured = [
             row for row in included if row.get("random_recovered", "") != ""
         ]
         random_recovered = [
             row for row in random_measured if row["random_recovered"] == "true"
+        ]
+        random_library_recovered = [
+            row
+            for row in random_measured
+            if row.get("random_library_only_recovered") == "true"
         ]
         denominator = len(included)
         summaries.append(
@@ -956,9 +1036,19 @@ def _summary_rows(
                     if fixed_measured
                     else ""
                 ),
+                "fixed_library_recovery_rate": (
+                    f"{len(fixed_library_recovered) / len(fixed_measured):.4f}"
+                    if fixed_measured
+                    else ""
+                ),
                 "random_recovered": str(len(random_recovered)),
                 "random_recovery_rate": (
                     f"{len(random_recovered) / len(random_measured):.4f}"
+                    if random_measured
+                    else ""
+                ),
+                "random_library_recovery_rate": (
+                    f"{len(random_library_recovered) / len(random_measured):.4f}"
                     if random_measured
                     else ""
                 ),
@@ -1012,9 +1102,11 @@ def _detail_fieldnames() -> list[str]:
         "library_rank_recovered",
         "library_net",
         "discovery_rollouts",
+        "shared_discovery_rollouts",
         "discovery_net",
         "total_rollouts",
         "recovered",
+        "library_only_recovered",
         "accepted",
         "recovery_source",
         "recovered_op",
@@ -1022,10 +1114,14 @@ def _detail_fieldnames() -> list[str]:
         "delta_k",
         "library_written",
         "fixed_recovered",
+        "fixed_library_only_recovered",
+        "fixed_recovery_source",
         "fixed_net",
         "fixed_rollouts",
         "fixed_library_size_before",
         "random_recovered",
+        "random_library_only_recovered",
+        "random_recovery_source",
         "random_net",
         "random_rollouts",
         "random_pool_size",
@@ -1051,8 +1147,10 @@ def _summary_fieldnames() -> list[str]:
         "library_recovery_rate",
         "fixed_recovered",
         "fixed_recovery_rate",
+        "fixed_library_recovery_rate",
         "random_recovered",
         "random_recovery_rate",
+        "random_library_recovery_rate",
         "avg_library_size",
         "avg_total_rollouts",
         "avg_rollouts_recovered_cases",

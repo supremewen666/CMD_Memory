@@ -19,6 +19,13 @@ from ..core.models import MemoryItem
 
 _logger = logging.getLogger(__name__)
 
+# Memory is recalled once per turn and the recall set is fixed for the turn;
+# there is no "which generation point retrieved this" axis (see
+# REFACTOR_SPEC_SINGLE_POINT.md §0). The trajectory is pinned to one
+# generation point.
+SINGLE_GENERATION_POINT = 0
+SINGLE_POINT_DEPTH = 1
+
 
 class PipelineAction(Enum):
     """Pipeline step actions for generation points."""
@@ -169,7 +176,6 @@ def get_legal_actions(
     include_gated_actions: bool = True,
     include_item_actions: bool = False,
     intervention_config: dict[str, Any] | None = None,
-    restrict_to_hop: int | None = None,
 ) -> list[PipelineAction]:
     """Get legal actions for a generation point.
 
@@ -181,9 +187,6 @@ def get_legal_actions(
     Returns:
         List of legal actions for this generation point
     """
-    if restrict_to_hop is not None and generation_point + 1 != restrict_to_hop:
-        return [PipelineAction.IDENTITY]
-
     actions = [
         PipelineAction.RETRIEVAL_ERROR,
         PipelineAction.INJECTION_ERROR,
@@ -204,44 +207,6 @@ def get_legal_actions(
         actions.extend(_legal_item_actions(recall_set, intervention_config))
 
     return actions
-
-
-def _hop_for_generation_point(generation_point: int) -> int:
-    """Map a 0-based generation point to its 1-based hop number.
-
-    generation_point 0 acts at hop 1, generation_point 1 at hop 2, etc.
-    Mirrors the ``hop == generation_point + 1`` convention in
-    ``get_legal_actions``.
-    """
-    return generation_point + 1
-
-
-def _hop_local_items(
-    items: tuple[MemoryItem, ...],
-    generation_point: int,
-) -> tuple[MemoryItem, ...]:
-    """Restrict items to the hop owned by ``generation_point``.
-
-    Multihop probe cases tag memory by hop via the ``m_hop{N}_`` memory_id
-    prefix. A counterfactual repair at a generation point must only touch
-    that hop's evidence, otherwise injecting a later hop's gold item lets an
-    early-hop intervention recover the terminal answer and collapses credit
-    onto generation_point 0.
-
-    Items without an ``m_hop{N}_`` prefix carry no hop tag (non-multihop
-    data) and are always kept, preserving the original full-recall behaviour
-    for those cases.
-    """
-    hop = _hop_for_generation_point(generation_point)
-    prefix = f"m_hop{hop}_"
-    tagged = tuple(item for item in items if item.memory_id.startswith("m_hop"))
-    if not tagged:
-        return items
-    local = tuple(item for item in items if item.memory_id.startswith(prefix))
-    untagged = tuple(
-        item for item in items if not item.memory_id.startswith("m_hop")
-    )
-    return local + untagged
 
 
 def apply_pipeline_action(
@@ -270,11 +235,6 @@ def apply_pipeline_action(
     """
     if action == PipelineAction.IDENTITY:
         return context
-
-    # A repair at this generation point may only touch its own hop's
-    # evidence; otherwise an early-hop intervention can pull in a later hop's
-    # gold item and spuriously recover the terminal answer.
-    recall_set = _hop_local_items(recall_set, generation_point)
 
     if action == PipelineAction.RETRIEVAL_ERROR:
         return _repair_retrieval_context(context, recall_set, intervention_config, generation_point)
@@ -625,13 +585,7 @@ def _candidate_items(
     if intervention_config:
         configured = intervention_config.get("candidate_items")
         if configured:
-            # The configured pool is the full extracted memory across all
-            # hops; restrict it to the hop this generation point repairs so a
-            # later hop's gold item can't leak into an early-hop intervention.
-            return _order_items_by_signal(
-                _hop_local_items(tuple(configured), generation_point),
-                intervention_config,
-            )
+            return _order_items_by_signal(tuple(configured), intervention_config)
     return _order_items_by_signal(recall_set, intervention_config)
 
 

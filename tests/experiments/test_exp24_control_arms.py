@@ -55,9 +55,9 @@ def test_random_arm_never_draws_the_cases_own_shape() -> None:
     assert len(drawn) == 2
 
 
-def test_random_arm_budget_matches_realized_live_rollouts() -> None:
-    """Budget parity must be exact, not nominal: the random arm gets the number
-    of executions the live arm actually spent on this case."""
+def test_random_arm_honors_the_pre_registered_candidate_cap() -> None:
+    """The random arm accepts a fixed cap; callers must not derive it from the
+    live arm's realized early-stop cost."""
     library = [
         _entry(PipelineAction.RETRIEVAL_ERROR, "c1"),
         _entry(PipelineAction.INJECTION_ERROR, "c2"),
@@ -318,11 +318,16 @@ def _row(**overrides) -> dict[str, str]:
         "excluded": "false",
         "timeout_count": "0",
         "recovered": "true",
+        "library_only_recovered": "true",
         "recovery_source": "library",
         "library_size_before": "3",
         "total_rollouts": "2",
         "fixed_recovered": "true",
+        "fixed_library_only_recovered": "true",
+        "fixed_recovery_source": "library",
         "random_recovered": "false",
+        "random_library_only_recovered": "false",
+        "random_recovery_source": "unrecovered",
     }
     row.update(overrides)
     return row
@@ -336,6 +341,7 @@ def test_summary_reports_all_three_arm_rates() -> None:
             recovered="false",
             recovery_source="unrecovered",
             fixed_recovered="false",
+            fixed_library_only_recovered="false",
             random_recovered="false",
         ),
     ]
@@ -345,6 +351,27 @@ def test_summary_reports_all_three_arm_rates() -> None:
     assert summary["recovery_rate"] == "0.5000"
     assert summary["fixed_recovery_rate"] == "0.5000"
     assert summary["random_recovery_rate"] == "0.0000"
+    assert summary["fixed_library_recovery_rate"] == "0.5000"
+    assert summary["random_library_recovery_rate"] == "0.0000"
+
+
+def test_summary_separates_library_recovery_from_discovery_rescue() -> None:
+    rows = [
+        _row(
+            fixed_library_only_recovered="false",
+            fixed_recovery_source="discovery",
+            random_recovered="true",
+            random_library_only_recovered="false",
+            random_recovery_source="discovery",
+        )
+    ]
+
+    summary = exp24._summary_rows(rows, bin_size=1)[0]
+
+    assert summary["fixed_recovery_rate"] == "1.0000"
+    assert summary["fixed_library_recovery_rate"] == "0.0000"
+    assert summary["random_recovery_rate"] == "1.0000"
+    assert summary["random_library_recovery_rate"] == "0.0000"
 
 
 def test_excluded_case_leaves_every_arm_denominator() -> None:
@@ -416,9 +443,13 @@ def test_detail_and_summary_fieldnames_cover_control_columns() -> None:
         "fixed_net",
         "fixed_rollouts",
         "fixed_library_size_before",
+        "fixed_library_only_recovered",
+        "fixed_recovery_source",
         "random_recovered",
         "random_net",
         "random_rollouts",
+        "random_library_only_recovered",
+        "random_recovery_source",
     ):
         assert column in detail
 

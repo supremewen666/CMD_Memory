@@ -34,6 +34,27 @@ from .actions import (
 )
 from .ecs import ECSDraft, ECSCauseValidationError
 from .executor import RepairExecutor, RepairExecutorResult
+from .darwinian import (
+    SELECTION_MODES,
+    DarwinianPopulation,
+    EvolutionAudit,
+    FitnessObservation,
+    OffspringResult,
+    OperatorIndividual,
+    RejectedOffspring,
+    crossover_operators,
+    mutate_operator,
+    select_individuals,
+)
+from .chain_dynamics import (
+    ChainAttempt,
+    ChainBenefitSpectrum,
+    ChainDepositionEvent,
+    ChainDirectionality,
+    ChainObserver,
+    CoactivationEdge,
+    CoactivationSnapshot,
+)
 from .failure_memory import (
     FailureMemoryDiagnosis,
     FailureMemoryOutcome,
@@ -42,11 +63,13 @@ from .failure_memory import (
     FailureMemorySkill,
     FailureMemorySkillLoop,
     FailureMemoryStore,
+    FrozenPatternCatalog,
     MarkdownFailureMemoryStore,
     PatternValidationResult,
     RecurrenceComparisonRow,
     RecurrenceSummary,
     build_failure_memory_context,
+    bootstrap_frozen_pattern_catalog,
     build_repair_context,
     compute_memory_top_terms,
     compute_recurrence_summary,
@@ -55,7 +78,36 @@ from .failure_memory import (
     step_level_record_from_mcts_result,
     write_recurrence_comparison_table,
 )
-from .orchestrator import AttributionFailed, RepairOrchestrator, RepairOrchestratorResult
+from .orchestrator import (
+    AttributionFailed,
+    RepairObservationSink,
+    RepairOrchestrator,
+    RepairOrchestratorResult,
+)
+from .skill_ecology import (
+    ChainExecution,
+    CompetitionEvent,
+    CompetitiveExecutor,
+    CompetitiveResult,
+    EcologySnapshot,
+    EcologyObserver,
+    EcologyTracker,
+    NicheOverlap,
+    NicheProfile,
+    OperatorConflict,
+    PerturbationEvent,
+    PerturbationProbe,
+    SkillCandidate,
+    SkillExecution,
+    detect_operator_conflicts,
+    evaluate_skill_chain,
+    jensen_shannon_divergence,
+    select_competitive_winner,
+)
+from .operator_library import (
+    CompositeOperatorSpec,
+    merge_operators,
+)
 from .post_repair import (
     REPAIR_ASSESSMENT_VALUES,
     AgentGenerate,
@@ -100,9 +152,50 @@ __all__ = [
     # executor
     "RepairExecutor",
     "RepairExecutorResult",
+    # darwinian population (separate from Lamarckian revision lifecycle)
+    "SELECTION_MODES",
+    "DarwinianPopulation",
+    "EvolutionAudit",
+    "FitnessObservation",
+    "OffspringResult",
+    "OperatorIndividual",
+    "RejectedOffspring",
+    "crossover_operators",
+    "mutate_operator",
+    "select_individuals",
+    # observational chain dynamics
+    "ChainAttempt",
+    "ChainBenefitSpectrum",
+    "ChainDepositionEvent",
+    "ChainDirectionality",
+    "ChainObserver",
+    "CoactivationEdge",
+    "CoactivationSnapshot",
+    "CompositeOperatorSpec",
+    "merge_operators",
+    # competitive execution and ecology
+    "CompetitionEvent",
+    "ChainExecution",
+    "CompetitiveExecutor",
+    "CompetitiveResult",
+    "EcologySnapshot",
+    "EcologyObserver",
+    "EcologyTracker",
+    "NicheOverlap",
+    "NicheProfile",
+    "OperatorConflict",
+    "PerturbationEvent",
+    "PerturbationProbe",
+    "SkillCandidate",
+    "SkillExecution",
+    "detect_operator_conflicts",
+    "evaluate_skill_chain",
+    "jensen_shannon_divergence",
+    "select_competitive_winner",
     # orchestrator
     "RepairOrchestrator",
     "RepairOrchestratorResult",
+    "RepairObservationSink",
     # failure_memory
     "FailureMemoryDiagnosis",
     "FailureMemoryOutcome",
@@ -111,11 +204,13 @@ __all__ = [
     "FailureMemorySkill",
     "FailureMemorySkillLoop",
     "FailureMemoryStore",
+    "FrozenPatternCatalog",
     "MarkdownFailureMemoryStore",
     "PatternValidationResult",
     "RecurrenceComparisonRow",
     "RecurrenceSummary",
     "build_failure_memory_context",
+    "bootstrap_frozen_pattern_catalog",
     "build_repair_context",
     "step_level_record_from_mcts_result",
 ]

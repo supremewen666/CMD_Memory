@@ -63,6 +63,10 @@ def _answer_verifier(answer: str, gold_answer: str) -> float:
 
 
 def _store_with_retrieval_operator(case: ProbeCase) -> FailureMemoryStore:
+    # generation_point/hop_index pinned to the single fixed point (0 / 1) —
+    # see REFACTOR_SPEC_SINGLE_POINT.md Sec0; a stored operator at a later
+    # generation point can never fall within mcts_max_depth=1 and would be
+    # unreachable by _try_failure_memory_operator_specs.
     recall_texts = tuple(
         item.text
         for item in case.extracted_memory
@@ -72,15 +76,15 @@ def _store_with_retrieval_operator(case: ProbeCase) -> FailureMemoryStore:
     store.add(
         StepLevelRecord.from_mcts_result(
             query="prior wording does not matter",
-            hop_index=2,
+            hop_index=1,
             label="retrieval_error",
             cause="prior recovered by adding the missed second-hop item",
             corrected_memory="Bridge key K resolves to: PARIS",
-            repair_guidance="execute the retrieval operator at hop 2",
+            repair_guidance="execute the retrieval operator",
             recovery_success=True,
             recovery_gain=1.0,
             memory_texts=recall_texts,
-            operator_spec=OperatorSpec.single(1, PipelineAction.RETRIEVAL_ERROR),
+            operator_spec=OperatorSpec.single(0, PipelineAction.RETRIEVAL_ERROR),
         )
     )
     return store
@@ -180,7 +184,7 @@ def test_run_case_uses_operator_specs_reloaded_from_markdown_skill_library() -> 
         writer_loop.record_recovered_case(
             case_id="prior_case",
             query="prior wording",
-            hop_index=2,
+            hop_index=1,
             label="retrieval_error",
             cause="retrieval recovered",
             corrected_memory="Bridge key K resolves to: PARIS",
@@ -188,7 +192,7 @@ def test_run_case_uses_operator_specs_reloaded_from_markdown_skill_library() -> 
             retrieved_items=recall_texts,
             memory_texts=recall_texts,
             recovery_gain=1.0,
-            operator_spec=OperatorSpec.single(1, PipelineAction.RETRIEVAL_ERROR),
+            operator_spec=OperatorSpec.single(0, PipelineAction.RETRIEVAL_ERROR),
         )
         cold_loop = FailureMemorySkillLoop(MarkdownFailureMemoryStore(tmpdir))
         assert cold_loop.load_patterns_from_disk() == 1

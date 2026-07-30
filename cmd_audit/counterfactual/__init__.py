@@ -7,6 +7,8 @@ Tree search and value distillation are retired from the mainline.
 
 from .actions import (
     PIPELINE_ACTION_OPERATOR_DSL,
+    SINGLE_GENERATION_POINT,
+    SINGLE_POINT_DEPTH,
     PipelineAction,
     PipelineOperatorDSL,
     SelectPredicate,
@@ -31,6 +33,8 @@ __all__ = [
     "OperatorSpec",
     "OperatorStep",
     "PIPELINE_ACTION_OPERATOR_DSL",
+    "SINGLE_GENERATION_POINT",
+    "SINGLE_POINT_DEPTH",
     "PipelineAction",
     "PipelineOperatorDSL",
     "RolloutResult",

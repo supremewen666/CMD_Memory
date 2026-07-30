@@ -111,10 +111,12 @@ def test_summary_excludes_identity_timeout_from_recovery_denominator() -> None:
             # Control arms absent from these legacy rows: the arms did not run,
             # so their counts are 0 and their rates blank rather than 0.0000.
             # A blank rate must never be read as "the control scored zero".
-            "fixed_recovered": "0",
-            "fixed_recovery_rate": "",
-            "random_recovered": "0",
-            "random_recovery_rate": "",
+                "fixed_recovered": "0",
+                "fixed_recovery_rate": "",
+                "fixed_library_recovery_rate": "",
+                "random_recovered": "0",
+                "random_recovery_rate": "",
+                "random_library_recovery_rate": "",
             "avg_library_size": "2.0000",
             "avg_total_rollouts": "1.0000",
             "avg_rollouts_recovered_cases": "1.0000",

@@ -400,22 +400,20 @@ def _analyze_exp24() -> None:
             pairs = list(zip(live, flags))
             note = ""
             if column == "random_recovered":
-                # Drop cases where the random arm could reach the WHOLE pool.
-                # There it is exhaustive-over-library, which strictly dominates
-                # any ranked top-N, so it is not a same-strength control. The
-                # library grows from empty, so these cluster early in the stream
-                # -- leaving them in makes the control's discriminating power
-                # rise along the stream and fakes a "live pulls ahead" trend.
+                # The pre-registered selector contrast requires pool_size >=
+                # 2K, i.e. random coverage <= 0.5. Above that, random is close
+                # to an exhaustive scan rather than a selective comparator.
+                # Those cases remain in descriptive end-to-end rates.
                 keep = [
                     i
                     for i, row in enumerate(rows)
-                    if _exp24_coverage(row) < 1.0
+                    if _exp24_coverage(row) <= 0.5
                 ]
                 dropped = len(rows) - len(keep)
                 if not keep:
                     print(
                         f"    {label:22s} DEGENERATE (all {len(rows)} cases had "
-                        "coverage=1.0: random exhausted the library)"
+                        "coverage>0.5: random saw more than half the library)"
                     )
                     continue
                 pairs = [pairs[i] for i in keep]
@@ -459,13 +457,15 @@ def _exp24_ordering_cost(rows: list[dict[str, str]]) -> None:
         print("    vs random-order        UNAVAILABLE (control arm not run)")
         return
 
-    # Sanity: the rate tie is structural. A mismatch means the arms diverged.
+    # Sanity applies only to the library stage. End-to-end live recovery also
+    # includes discovery, while random-order deliberately replays the retrieved
+    # library candidates only.
     mismatched = sum(
         1
         for row in rows
+        if row.get("recovery_source") == "library"
         if (row.get("random_order_recovered") or "").strip()
-        and (row.get("random_order_recovered") == "true")
-        != (row.get("recovery_source") == "library")
+        and row.get("random_order_recovered") != "true"
     )
 
     live_cheaper = sum(1 for live, order in paired if live < order)

@@ -57,6 +57,7 @@ from .item_gate import (
     run_item_gate_for_recall_set,
 )
 from .counterfactual import (
+    SINGLE_POINT_DEPTH,
     OperatorSpec,
     PipelineAction,
     SearchResult,
@@ -724,7 +725,7 @@ def _run_with_hook(
         item_signal_hints = item_signal_hints_from_result(item_gate_result)
 
     attribution_result = None
-    mcts_max_depth = max(1, min(3, len(recall_set) or 1))
+    mcts_max_depth = SINGLE_POINT_DEPTH
     base_context = _initial_mcts_context(case, recall_set)
     intervention_config = {
         "candidate_items": case.extracted_memory,

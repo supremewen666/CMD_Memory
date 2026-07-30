@@ -7,6 +7,7 @@ stops at first recovered or exhausts the list.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 from .failure_memory import (
     FailureMemoryStore,
@@ -48,6 +49,16 @@ class RepairOrchestratorResult:
     skipped_reason: str = ""
 
 
+class RepairObservationSink(Protocol):
+    """Optional append-only hook; it cannot alter orchestration decisions."""
+
+    def record_orchestrator_result(
+        self,
+        result: RepairOrchestratorResult,
+    ) -> None:
+        ...
+
+
 class RepairOrchestrator:
     """Iterative repair controller.
 
@@ -59,9 +70,16 @@ class RepairOrchestrator:
         self,
         executor: RepairExecutor | None = None,
         fm_store: FailureMemoryStore | None = None,
+        observer: RepairObservationSink | None = None,
     ) -> None:
         self._executor = executor if executor is not None else RepairExecutor()
         self._fm_store = fm_store
+        self._observer = observer
+        self._observer_errors: list[str] = []
+
+    @property
+    def observer_errors(self) -> tuple[str, ...]:
+        return tuple(self._observer_errors)
 
     def run(
         self,
@@ -75,7 +93,7 @@ class RepairOrchestrator:
     ) -> RepairOrchestratorResult:
         """Run iterative repair over close_deltas labels."""
         if not attribution.close_deltas:
-            return RepairOrchestratorResult(
+            return self._finish(RepairOrchestratorResult(
                 case_id=case.case_id,
                 final_assessment="skipped",
                 final_answer_score=0.0,
@@ -85,7 +103,7 @@ class RepairOrchestrator:
                 exhausted=False,
                 labels_tried=(),
                 skipped_reason="v0_attribution_no_close_deltas",
-            )
+            ))
 
         if not fm_context and self._fm_store is not None:
             records = self._fm_store.retrieve(
@@ -134,7 +152,7 @@ class RepairOrchestrator:
             attempts.append(result)
 
             if result.assessment == "recovered":
-                return RepairOrchestratorResult(
+                return self._finish(RepairOrchestratorResult(
                     case_id=case.case_id,
                     final_assessment="recovered",
                     final_answer_score=result.post_repair_answer_score,
@@ -144,10 +162,10 @@ class RepairOrchestrator:
                     exhausted=False,
                     labels_tried=tuple(labels_tried),
                     labels_skipped=tuple(labels_skipped),
-                )
+                ))
 
         final = attempts[-1] if attempts else None
-        return RepairOrchestratorResult(
+        return self._finish(RepairOrchestratorResult(
             case_id=case.case_id,
             final_assessment=final.assessment if final else "failed",
             final_answer_score=final.post_repair_answer_score if final else 0.0,
@@ -157,4 +175,18 @@ class RepairOrchestrator:
             exhausted=True,
             labels_tried=tuple(labels_tried),
             labels_skipped=tuple(labels_skipped),
-        )
+        ))
+
+    def _finish(
+        self,
+        result: RepairOrchestratorResult,
+    ) -> RepairOrchestratorResult:
+        """Emit after the result is fixed; observer failures never alter it."""
+        if self._observer is not None:
+            try:
+                self._observer.record_orchestrator_result(result)
+            except Exception as exc:  # observer isolation is the contract
+                self._observer_errors.append(
+                    f"{type(exc).__name__}: {exc}"
+                )
+        return result

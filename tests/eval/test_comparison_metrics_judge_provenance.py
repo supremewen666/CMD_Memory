@@ -21,7 +21,11 @@ import pytest
 
 from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
 from cmd_audit.eval import writers
-from cmd_audit.eval.provenance import judge_provenance_fields
+from cmd_audit.eval.provenance import (
+    derived_scorer_version,
+    judge_provenance_fields,
+    require_scorer_version,
+)
 from cmd_audit.harness import write_comparison_metrics_table
 
 
@@ -59,6 +63,43 @@ def test_judge_provenance_fields_accepts_explicit_rubric_version():
     fields = judge_provenance_fields(judge_client, rubric_version="rubric-v2-exp")
 
     assert fields["rubric_version"] == "rubric-v2-exp"
+
+
+def test_scorer_version_is_derived_from_real_judge_identity():
+    judge_client = LLMClient(
+        LLMClientConfig(
+            base_url="http://judge.example:9000/v1",
+            model="judge-model",
+        )
+    )
+
+    identity = derived_scorer_version(
+        judge_client,
+        rubric_version="rubric-v-test",
+    )
+    expected = hashlib.sha256(
+        b"judge-model|judge.example:9000|rubric-v-test"
+    ).hexdigest()[:12]
+
+    assert identity == {
+        "scorer_version": expected,
+        "judge_model": "judge-model",
+        "judge_host": "judge.example:9000",
+        "rubric_version": "rubric-v-test",
+    }
+
+
+def test_explicit_scorer_version_mismatch_fails_closed():
+    judge_client = LLMClient(
+        LLMClientConfig(base_url="http://judge/v1", model="judge-model")
+    )
+
+    with pytest.raises(ValueError, match="disagrees with the derived"):
+        require_scorer_version(
+            judge_client,
+            explicit_scorer_version="free-form-label",
+            rubric_version="rubric-v-test",
+        )
 
 
 def test_comparison_metrics_table_without_judge_client_omits_provenance_columns(

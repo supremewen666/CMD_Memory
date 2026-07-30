@@ -109,6 +109,32 @@ class GoldFreeConstructionTest(unittest.TestCase):
         self.assertIn("PARIS", repaired)
 
 
+class HopLocalFilteringRemovedTest(unittest.TestCase):
+    """Sec1 regression (REFACTOR_SPEC_SINGLE_POINT.md).
+
+    With depth pinned to a single generation point, generation_point is
+    always 0, so any hop-restricted filtering would resolve to the
+    m_hop1_ item only and make m_hop2_ gold permanently invisible for all
+    840 injected multihop cases. Recall containing both hop items must
+    show both in the repaired context.
+    """
+
+    def test_recall_with_both_hop_items_are_both_visible_after_repair(self) -> None:
+        case = _retrieval_case()
+        recall = case.extracted_memory  # (m_hop1_bridge, m_hop2_gold)
+
+        repaired = apply_pipeline_action(
+            PipelineAction.INJECTION_ERROR,
+            case.primary_baseline.injected_context,
+            recall,
+            0,
+        )
+
+        self.assertIn("m_hop1_bridge", repaired)
+        self.assertIn("m_hop2_gold", repaired)
+        self.assertIn("Bridge key K resolves to: PARIS", repaired)
+
+
 class RunSingleRepairTest(unittest.TestCase):
     """run_single_repair executes a choice (or None) and scores absolute gain."""
 

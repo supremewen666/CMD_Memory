@@ -80,12 +80,14 @@ def rollout_to_terminal(
         )
 
     try:
-        # Complete trajectory with identity actions
+        # Complete the trajectory with a single identity step. Depth is
+        # pinned to one generation point (memory is recalled once per turn;
+        # see REFACTOR_SPEC_SINGLE_POINT.md §0), so at most one step of
+        # identity padding can ever be needed here.
         current_context = start_context
         current_generation_point = start_generation_point
 
-        while current_generation_point < max_generation_points:
-            # Apply identity (no intervention) for remaining points
+        if current_generation_point < max_generation_points:
             current_context = apply_pipeline_action(
                 PipelineAction.IDENTITY,
                 current_context,
