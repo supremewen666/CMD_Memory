@@ -26,15 +26,16 @@ from cmd_audit.repair.chain_dynamics import (
 )
 from cmd_audit.repair.memtrace_families import build_families, family_stream
 from cmd_audit.repair.skill_ecology import (
+    AdditiveSaturationExecutor,
+    AdditiveSaturationResult,
     ChainExecution,
-    CompetitionEvent,
-    CompetitiveExecutor,
-    EcologyObserver,
     EcologySnapshot,
     PerturbationEvent,
     PerturbationProbe,
+    SaturationEcologyObserver,
     SkillCandidate,
     SkillExecution,
+    TopPSaturationEvent,
 )
 
 
@@ -89,7 +90,9 @@ class DualScoreArenaBackend(Protocol):
 class ArenaManifest:
     arena_id: str
     case_count: int
-    top_k: int
+    selection_mode: str
+    saturation_threshold: float
+    candidate_limit: int | None
     gold_free_signal_name: str
     shadow_gold_signal_name: str
     runtime_uses_gold: bool
@@ -104,7 +107,7 @@ class ArenaManifest:
 class ArenaRunResult:
     manifest: ArenaManifest
     gold_free_observations: tuple[GoldFreeObservation, ...]
-    competition_events: tuple[CompetitionEvent, ...]
+    saturation_events: tuple[TopPSaturationEvent, ...]
     ecology_snapshots: tuple[EcologySnapshot, ...]
     chain_attempts: tuple[ChainAttempt, ...]
     coactivation_snapshots: tuple[CoactivationSnapshot, ...]
@@ -120,8 +123,8 @@ class ObservationalArenaRunner:
         cases: Sequence[ArenaCase],
         *,
         backend: DualScoreArenaBackend,
-        top_k: int = 3,
-        recovery_threshold: float = 0.1,
+        saturation_threshold: float = 0.8,
+        candidate_limit: int | None = None,
         seed: int = 24,
         enable_chains: bool = True,
         deposition_after_fraction: float | None = None,
@@ -143,6 +146,10 @@ class ObservationalArenaRunner:
             raise ValueError("backend must name the gold-free signal")
         if not backend.shadow_gold_signal_name:
             raise ValueError("backend must name the shadow-gold signal")
+        if saturation_threshold <= 0:
+            raise ValueError("saturation_threshold must be > 0")
+        if candidate_limit is not None and candidate_limit <= 0:
+            raise ValueError("candidate_limit must be > 0 when provided")
         if deposition_after_fraction is not None and not (
             0 < deposition_after_fraction < 1
         ):
@@ -162,8 +169,10 @@ class ObservationalArenaRunner:
             raise ValueError("perturbation strategy must be keystone or specialist")
         self.cases = tuple(cases)
         self.backend = backend
-        self.top_k = int(top_k)
-        self.recovery_threshold = float(recovery_threshold)
+        self.saturation_threshold = float(saturation_threshold)
+        self.candidate_limit = (
+            int(candidate_limit) if candidate_limit is not None else None
+        )
         self.seed = int(seed)
         self.enable_chains = bool(enable_chains)
         self.deposition_after_fraction = deposition_after_fraction
@@ -182,14 +191,13 @@ class ObservationalArenaRunner:
         if any(case.arena_id != arena_id for case in self.cases):
             raise ValueError("one runner cannot mix arena ids")
         gold_observer = GoldFreeObserver(arena_id=arena_id)
-        ecology_observer = EcologyObserver(
+        ecology_observer = SaturationEcologyObserver(
             arena_id=arena_id,
             total_cases=len(self.cases),
         )
         chain_observer = ChainObserver(arena_id=arena_id)
-        executor = CompetitiveExecutor(
-            top_k=self.top_k,
-            recovery_threshold=self.recovery_threshold,
+        executor = AdditiveSaturationExecutor(
+            saturation_threshold=self.saturation_threshold,
         )
         candidate_catalog: dict[str, SkillCandidate] = {}
         deposition_position = (
@@ -217,7 +225,8 @@ class ObservationalArenaRunner:
                     for candidate in candidates
                     if candidate.skill_id != removed_skill_id
                 )
-            candidates = candidates[: self.top_k]
+            if self.candidate_limit is not None:
+                candidates = candidates[: self.candidate_limit]
             candidate_catalog.update(
                 (candidate.skill_id, candidate) for candidate in candidates
             )
@@ -257,7 +266,7 @@ class ObservationalArenaRunner:
                     skill_id: row.shadow_gold_gain
                     for skill_id, row in dual_by_skill.items()
                 },
-                runtime_abstained=result.abstained,
+                runtime_abstained=not result.repair_effective,
                 coordinates=case.coordinates,
                 runtime_provenance=RuntimeSelectionProvenance(
                     context_constructed_without_gold=True,
@@ -265,16 +274,22 @@ class ObservationalArenaRunner:
                     shadow_scores_isolated=True,
                 ),
             )
-            snapshot = ecology_observer.record(
+            event = _top_p_saturation_event(
                 result,
+                dual_by_skill=dual_by_skill,
+                checkpoint=f"{arena_id}:{position}/{len(self.cases)}",
+                subset=case.subset,
+            )
+            snapshot = ecology_observer.record(
+                event,
                 stream_position=position,
             )
             if perturbation_probe is not None:
                 perturbation_probe.observe(
                     stream_position=position,
                     winner_skill_id=(
-                        result.winner.skill_id
-                        if result.winner is not None
+                        result.selected[0].skill_id
+                        if result.selected
                         else None
                     ),
                 )
@@ -341,7 +356,9 @@ class ObservationalArenaRunner:
             manifest=ArenaManifest(
                 arena_id=arena_id,
                 case_count=len(self.cases),
-                top_k=self.top_k,
+                selection_mode="additive_top_p",
+                saturation_threshold=self.saturation_threshold,
+                candidate_limit=self.candidate_limit,
                 gold_free_signal_name=self.backend.gold_free_signal_name,
                 shadow_gold_signal_name=self.backend.shadow_gold_signal_name,
                 runtime_uses_gold=self.backend.runtime_uses_gold,
@@ -356,7 +373,7 @@ class ObservationalArenaRunner:
                 seed=self.seed,
             ),
             gold_free_observations=gold_observer.observations,
-            competition_events=ecology_observer.events,
+            saturation_events=ecology_observer.events,
             ecology_snapshots=ecology_observer.snapshots,
             chain_attempts=chain_observer.attempts,
             coactivation_snapshots=chain_observer.snapshots,
@@ -444,10 +461,7 @@ def write_arena_artifacts(result: ArenaRunResult, output: str | Path) -> Path:
         }
     ]
     rows.extend(row.to_dict() for row in result.gold_free_observations)
-    rows.extend(
-        {"record_type": "competition_event", **asdict(row)}
-        for row in result.competition_events
-    )
+    rows.extend(row.to_dict() for row in result.saturation_events)
     rows.extend(row.to_dict() for row in result.ecology_snapshots)
     rows.extend(row.to_dict() for row in result.chain_attempts)
     rows.extend(row.to_dict() for row in result.coactivation_snapshots)
@@ -593,6 +607,128 @@ def _probe_case_mapping(case: ProbeCase) -> dict[str, object]:
     }
 
 
+def _top_p_saturation_event(
+    result: AdditiveSaturationResult,
+    *,
+    dual_by_skill: Mapping[str, DualScoreExecution],
+    checkpoint: str,
+    subset: str,
+) -> TopPSaturationEvent:
+    selected_ids = tuple(item.skill_id for item in result.selected)
+    positive = sorted(
+        (
+            item
+            for item in result.executions
+            if item.has_finite_gain and float(item.recovery_gain) > 0.0
+        ),
+        key=lambda item: (
+            -float(item.recovery_gain),
+            float(item.execution_cost),
+            item.skill_id,
+        ),
+    )
+    mean_selected = (
+        sum(float(item.recovery_gain) for item in result.selected)
+        / len(result.selected)
+        if result.selected
+        else None
+    )
+    selected_shadow_values = [
+        dual_by_skill[skill_id].shadow_gold_gain for skill_id in selected_ids
+    ]
+    selected_shadow = (
+        sum(float(value) for value in selected_shadow_values)
+        if all(_finite(value) for value in selected_shadow_values)
+        else None
+    )
+    all_shadow = {
+        skill_id: row.shadow_gold_gain
+        for skill_id, row in dual_by_skill.items()
+    }
+    shadow_complete = bool(all_shadow) and all(
+        _finite(value) for value in all_shadow.values()
+    )
+    oracle_shadow = (
+        _saturating_positive_sum(
+            {
+                skill_id: float(value)
+                for skill_id, value in all_shadow.items()
+            },
+            threshold=result.saturation_threshold,
+        )
+        if shadow_complete
+        else None
+    )
+    return TopPSaturationEvent(
+        checkpoint=str(checkpoint),
+        case_id=result.case_id,
+        failure_type=result.failure_type,
+        subset=str(subset),
+        attempted_skill_ids=tuple(
+            item.skill_id for item in result.executions
+        ),
+        finite_skill_ids=tuple(
+            item.skill_id
+            for item in result.executions
+            if item.has_finite_gain
+        ),
+        positive_skill_ids=tuple(item.skill_id for item in positive),
+        selected_skill_ids=selected_ids,
+        rejected_skill_ids=tuple(item.skill_id for item in result.rejected),
+        gold_free_gains=tuple(
+            (item.skill_id, item.recovery_gain)
+            for item in result.executions
+        ),
+        cumulative_gain=result.cumulative_gain,
+        saturation_threshold=result.saturation_threshold,
+        covered=result.covered,
+        repair_effective=result.repair_effective,
+        mean_selected_gain=mean_selected,
+        shadow_selected_cumulative_gain=selected_shadow,
+        shadow_oracle_cumulative_gain=oracle_shadow,
+        shadow_selected_covered=(
+            selected_shadow >= result.saturation_threshold
+            if selected_shadow is not None
+            else None
+        ),
+        shadow_oracle_covered=(
+            oracle_shadow >= result.saturation_threshold
+            if oracle_shadow is not None
+            else None
+        ),
+        shadow_oracle_repair_effective=(
+            any(float(value) > 0.0 for value in all_shadow.values())
+            if shadow_complete
+            else None
+        ),
+        shadow_regret=(
+            max(0.0, oracle_shadow - selected_shadow)
+            if oracle_shadow is not None and selected_shadow is not None
+            else None
+        ),
+    )
+
+
+def _saturating_positive_sum(
+    values: Mapping[str, float],
+    *,
+    threshold: float,
+) -> float:
+    cumulative = 0.0
+    for _skill_id, value in sorted(
+        (
+            (skill_id, float(value))
+            for skill_id, value in values.items()
+            if math.isfinite(float(value)) and float(value) > 0.0
+        ),
+        key=lambda item: (-item[1], item[0]),
+    ):
+        cumulative += value
+        if cumulative >= threshold:
+            break
+    return cumulative
+
+
 def _skill_execution(
     candidate: SkillCandidate,
     row: DualScoreExecution,
@@ -631,7 +767,7 @@ def _split_condition(value: str) -> tuple[str, str]:
 
 
 def _select_removed_skill(
-    events: Sequence[CompetitionEvent],
+    events: Sequence[TopPSaturationEvent],
     *,
     strategy: str,
 ) -> str | None:
@@ -650,20 +786,20 @@ def _select_removed_skill(
         )
         for skill_id in skills
     }
-    wins_by_failure: dict[str, dict[str, int]] = {
+    selections_by_failure: dict[str, dict[str, int]] = {
         skill_id: {} for skill_id in skills
     }
     for event in events:
-        if event.winner_skill_id is not None:
-            counts = wins_by_failure[event.winner_skill_id]
+        for skill_id in event.selected_skill_ids:
+            counts = selections_by_failure[skill_id]
             counts[event.failure_type] = counts.get(event.failure_type, 0) + 1
-    if not any(wins_by_failure[skill_id] for skill_id in skills):
+    if not any(selections_by_failure[skill_id] for skill_id in skills):
         return None
     if strategy == "keystone":
         return min(
             skills,
             key=lambda skill_id: (
-                -sum(wins_by_failure[skill_id].values())
+                -sum(selections_by_failure[skill_id].values())
                 / max(1, attempts[skill_id]),
                 skill_id,
             ),
@@ -673,7 +809,7 @@ def _select_removed_skill(
     return min(
         skills,
         key=lambda skill_id: (
-            -_specialization_index(wins_by_failure[skill_id]),
+            -_specialization_index(selections_by_failure[skill_id]),
             skill_id,
         ),
     )

@@ -42,6 +42,21 @@ def test_unified_analysis_writes_descriptive_tables(tmp_path, monkeypatch):
                 },
             },
             {
+                "record_type": "top_p_saturation_event",
+                "checkpoint": "fixture:1/1",
+                "case_id": "case-1",
+                "failure_type": "retrieval_error",
+                "subset": "fixture",
+                "attempted_skill_ids": ["a", "b"],
+                "selected_skill_ids": ["a", "b"],
+                "gold_free_gains": [["a", 0.5], ["b", 0.3]],
+                "cumulative_gain": 0.8,
+                "covered": True,
+                "repair_effective": True,
+                "mean_selected_gain": 0.4,
+                "shadow_regret": 0.1,
+            },
+            {
                 "record_type": "ecology_snapshot",
                 "checkpoint": "fixture:1/1",
                 "event_count": 1,
@@ -100,7 +115,10 @@ def test_unified_analysis_writes_descriptive_tables(tmp_path, monkeypatch):
     )
     assert manifest["hypothesis_tests_run"] is False
     assert manifest["case_observations"] == 1
+    assert manifest["saturation_events"] == 1
     assert (output / "signal_by_failure.csv").exists()
+    assert (output / "saturation_summary.csv").exists()
+    assert (output / "skill_contribution.csv").exists()
     assert (output / "chain_benefit_spectrum.csv").exists()
     assert (output / "perturbation_response.csv").exists()
 

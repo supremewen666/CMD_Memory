@@ -8,6 +8,7 @@ import logging
 import re
 from typing import Any, Mapping, Sequence
 
+from cmd_audit.core.llm_client import LLMResponse
 from cmd_audit.core.models import MemoryItem, RawEvent
 from cmd_audit.counterfactual.actions import (
     SINGLE_GENERATION_POINT,
@@ -21,7 +22,12 @@ from cmd_audit.counterfactual.operators import (
 from cmd_audit.repair.chain_dynamics import ChainDepositionEvent
 from cmd_audit.repair.operator_library import CompositeOperatorSpec
 from cmd_audit.repair.skill_ecology import SkillCandidate
-from cmd_audit.scoring.llm import score_answer_with_verifier
+from cmd_audit.scoring.llm import (
+    RUBRIC_MAX_SCORE,
+    _expected_score_from_logprobs,
+    _find_score_digit_logprobs,
+    score_answer_with_verifier,
+)
 from experiments.arena_runner_common import (
     ArenaCase,
     DualScoreExecution,
@@ -37,7 +43,23 @@ from experiments.experiment_runner_common import (
 
 _logger = logging.getLogger(__name__)
 
-REFERENCE_FREE_RUBRIC_VERSION = "arena-reference-free-v1"
+#: Pipeline and item actions that correspond to real CC memory system failures.
+#: ``item_wrong``, ``item_compression_distorted``, and ``item_poisoned`` are
+#: CMD-internal experimental operators with no real-system failure mode; they
+#: are excluded from the arena to keep the skill set aligned with MemTrace-B
+#: and real-world CC memory frontmatter (timestamps, provenance, conflicts).
+_ARENA_ACTION_WHITELIST: frozenset[str] = frozenset(
+    {
+        "retrieval_error",
+        "injection_error",
+        "granularity_error",
+        "safety_error",
+        "item_stale",
+        "item_conflict",
+    }
+)
+
+REFERENCE_FREE_RUBRIC_VERSION = "arena-reference-free-v2"
 _REFERENCE_FREE_SYSTEM_PROMPT = """\
 TASK: Rate the answer quality using only the QUERY and EVIDENCE CONTEXT.
 
@@ -86,6 +108,9 @@ class ReferenceFreeAnswerScorer:
             context=context,
             answer=answer,
         )
+        continuous = self._score_continuous(prompt)
+        if continuous is not None:
+            return continuous
         for attempt in range(self.max_retries + 1):
             active_prompt = prompt
             if attempt:
@@ -105,6 +130,32 @@ class ReferenceFreeAnswerScorer:
             if parsed is not None:
                 return parsed / 4.0
         return None
+
+    def _score_continuous(self, prompt: str) -> float | None:
+        """Return logprob G-Eval expectation, or ``None`` for fallback."""
+        if not hasattr(self.judge_client, "generate_with_logprobs"):
+            return None
+        try:
+            response = self.judge_client.generate_with_logprobs(
+                prompt,
+                system=_REFERENCE_FREE_SYSTEM_PROMPT,
+                top_logprobs=10,
+            )
+        except Exception as exc:
+            _logger.warning(
+                "reference-free judge logprob call failed; using fallback: %s",
+                exc,
+            )
+            return None
+        if not isinstance(response, LLMResponse) or not response.token_logprobs:
+            return None
+        digits = _find_score_digit_logprobs(response.token_logprobs)
+        if not digits:
+            return None
+        try:
+            return _expected_score_from_logprobs(digits) / RUBRIC_MAX_SCORE
+        except ValueError:
+            return None
 
 
 class VLLMDualScoreArenaBackend:
@@ -184,6 +235,7 @@ class VLLMDualScoreArenaBackend:
             )
             for action in actions
             if action != PipelineAction.IDENTITY
+            and action.value in _ARENA_ACTION_WHITELIST
         ]
         for event in self._deposited:
             candidates.append(
@@ -192,17 +244,9 @@ class VLLMDualScoreArenaBackend:
                     operator=event.composite_spec,  # staged, not flattened
                 )
             )
-        # Retrieval is gold-free: structurally applicable operators come first,
-        # then stable ids break ties. No label or reference answer is inspected.
-        return tuple(
-            sorted(
-                candidates,
-                key=lambda candidate: (
-                    -self._structural_activation(case, candidate),
-                    candidate.skill_id,
-                ),
-            )
-        )
+        # V2 evaluates every legal operator. Stable ids make invocation order
+        # deterministic without using labels, gold answers, or length proxies.
+        return tuple(sorted(candidates, key=lambda candidate: candidate.skill_id))
 
     def evaluate(
         self,
@@ -317,36 +361,6 @@ class VLLMDualScoreArenaBackend:
         )
         self._runtime_views[case.case_id] = view
         return view
-
-    def _structural_activation(
-        self,
-        case: ArenaCase,
-        candidate: SkillCandidate,
-    ) -> float:
-        view = self._runtime_view(case)
-        try:
-            repaired = self._apply_candidate(
-                candidate,
-                input_context=case.base_context,
-                view=view,
-            )
-        except Exception as exc:
-            _logger.debug(
-                "operator activation failed case=%s skill=%s: %s",
-                case.case_id,
-                candidate.skill_id,
-                exc,
-            )
-            return -1.0
-        if repaired == case.base_context:
-            return 0.0
-        length = max(1, len(case.base_context), len(repaired))
-        prefix = 0
-        for left, right in zip(case.base_context, repaired):
-            if left != right:
-                break
-            prefix += 1
-        return 1.0 + (length - prefix) / length
 
     def _apply_candidate(
         self,

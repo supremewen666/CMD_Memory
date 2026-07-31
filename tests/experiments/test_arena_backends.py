@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
+from cmd_audit.core.llm_client import LLMResponse, TokenLogprob
 from cmd_audit.eval.gold_free_observer import ProbeCoordinates
 from experiments.arena_backends import (
+    ReferenceFreeAnswerScorer,
     VLLMDualScoreArenaBackend,
     parse_reference_free_score,
 )
@@ -95,6 +101,12 @@ def test_real_backend_executes_operator_and_isolates_reference_free_prompts():
         validate_endpoints=False,
     )
     case = _case()
+    candidate_ids = {row.skill_id for row in backend.candidates(case)}
+    assert not candidate_ids & {
+        "seed:item_wrong",
+        "seed:item_compression_distorted",
+        "seed:item_poisoned",
+    }
     retrieval = next(
         candidate
         for candidate in backend.candidates(case)
@@ -138,6 +150,64 @@ def test_reference_free_parser_is_strict_and_bounded():
     assert parse_reference_free_score('prefix {"score": 4} suffix') == 4
     assert parse_reference_free_score('{"score": 5}') is None
     assert parse_reference_free_score("FOUR") is None
+
+
+def test_reference_free_scorer_uses_logprob_expectation_before_discrete_fallback():
+    class ContinuousJudge:
+        def __init__(self):
+            self.discrete_calls = 0
+
+        def generate_with_logprobs(self, prompt, *, system=None, top_logprobs=10):
+            del prompt, system, top_logprobs
+            return LLMResponse(
+                text='{"reasoning":"fixture","score":3}',
+                token_logprobs=(
+                    TokenLogprob('"score"', -0.1),
+                    TokenLogprob(":", -0.1),
+                    TokenLogprob(
+                        "3",
+                        math.log(0.6),
+                        (
+                            ("2", math.log(0.3)),
+                            ("4", math.log(0.1)),
+                        ),
+                    ),
+                ),
+            )
+
+        def generate(self, prompt, *, system=None):
+            del prompt, system
+            self.discrete_calls += 1
+            return '{"reasoning":"fallback","score":0}'
+
+    judge = ContinuousJudge()
+    score = ReferenceFreeAnswerScorer(judge).score(
+        query="Where?",
+        context="Grounded context",
+        answer="Grounded answer",
+    )
+    assert score == pytest.approx((3 * 0.6 + 2 * 0.3 + 4 * 0.1) / 4)
+    assert judge.discrete_calls == 0
+
+
+def test_reference_free_scorer_falls_back_when_logprobs_are_missing():
+    class StrippedJudge:
+        def generate_with_logprobs(self, prompt, *, system=None, top_logprobs=10):
+            del prompt, system, top_logprobs
+            return LLMResponse(
+                text='{"reasoning":"fixture","score":3}',
+                token_logprobs=None,
+            )
+
+        def generate(self, prompt, *, system=None):
+            del prompt, system
+            return '{"reasoning":"fallback","score":3}'
+
+    assert ReferenceFreeAnswerScorer(StrippedJudge()).score(
+        query="Where?",
+        context="Context",
+        answer="Answer",
+    ) == pytest.approx(0.75)
 
 
 def test_shadow_failure_does_not_poison_runtime_gain():

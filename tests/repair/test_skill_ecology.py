@@ -7,6 +7,7 @@ import pytest
 from cmd_audit.counterfactual.actions import PipelineAction
 from cmd_audit.counterfactual.operators import OperatorSpec
 from cmd_audit.repair.skill_ecology import (
+    AdditiveSaturationExecutor,
     CompetitiveExecutor,
     EcologyObserver,
     EcologyTracker,
@@ -62,6 +63,61 @@ def test_competitive_executor_uses_same_snapshot_and_records_winner_losers():
     assert result.runner_up.skill_id == "a"
     assert result.winner_margin == pytest.approx(0.2)
     assert {item.skill_id for item in result.losers} == {"a", "c"}
+
+
+def test_additive_saturation_keeps_positive_contributors_until_threshold():
+    candidates = (
+        _candidate("a", PipelineAction.RETRIEVAL_ERROR),
+        _candidate("b", PipelineAction.INJECTION_ERROR),
+        _candidate("c", PipelineAction.GRANULARITY_ERROR),
+        _candidate("d", PipelineAction.SAFETY_ERROR),
+    )
+    seen_contexts = []
+    gains = {"a": 0.45, "b": 0.35, "c": 0.2, "d": -0.4}
+
+    def evaluator(candidate, base_context):
+        seen_contexts.append(base_context)
+        return _execution(candidate, gains[candidate.skill_id])
+
+    result = AdditiveSaturationExecutor(saturation_threshold=0.8).execute(
+        case_id="case-1",
+        failure_type="compound",
+        base_context="immutable-base",
+        candidates=candidates,
+        evaluator=evaluator,
+    )
+
+    assert seen_contexts == ["immutable-base"] * 4
+    assert tuple(row.skill_id for row in result.selected) == ("a", "b")
+    assert tuple(row.skill_id for row in result.rejected) == ("c", "d")
+    assert result.cumulative_gain == pytest.approx(0.8)
+    assert result.covered
+    assert result.repair_effective
+
+
+def test_additive_saturation_never_selects_zero_negative_or_nonfinite_gains():
+    candidates = (
+        _candidate("a", PipelineAction.RETRIEVAL_ERROR),
+        _candidate("b", PipelineAction.INJECTION_ERROR),
+        _candidate("c", PipelineAction.GRANULARITY_ERROR),
+        _candidate("d", PipelineAction.SAFETY_ERROR),
+    )
+    gains = {"a": 0.3, "b": 0.0, "c": -0.2, "d": math.nan}
+
+    result = AdditiveSaturationExecutor(saturation_threshold=0.8).execute(
+        case_id="case-2",
+        failure_type="compound",
+        base_context="base",
+        candidates=candidates,
+        evaluator=lambda candidate, _context: _execution(
+            candidate, gains[candidate.skill_id]
+        ),
+    )
+
+    assert tuple(row.skill_id for row in result.selected) == ("a",)
+    assert result.cumulative_gain == pytest.approx(0.3)
+    assert not result.covered
+    assert result.repair_effective
 
 
 def test_tie_nonfinite_and_all_failed_semantics_are_explicit():

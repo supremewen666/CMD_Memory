@@ -50,6 +50,53 @@ class CompetitiveResult:
 
 
 @dataclass(frozen=True)
+class AdditiveSaturationResult:
+    """Independent skill gains retained until an additive target is met."""
+
+    case_id: str
+    failure_type: str
+    executions: tuple[SkillExecution, ...]
+    selected: tuple[SkillExecution, ...]
+    rejected: tuple[SkillExecution, ...]
+    cumulative_gain: float
+    saturation_threshold: float
+    covered: bool
+    repair_effective: bool
+
+
+@dataclass(frozen=True)
+class TopPSaturationEvent:
+    """Append-only v2 arena record for one additive selection decision."""
+
+    checkpoint: str
+    case_id: str
+    failure_type: str
+    subset: str
+    attempted_skill_ids: tuple[str, ...]
+    finite_skill_ids: tuple[str, ...]
+    positive_skill_ids: tuple[str, ...]
+    selected_skill_ids: tuple[str, ...]
+    rejected_skill_ids: tuple[str, ...]
+    gold_free_gains: tuple[tuple[str, float | None], ...]
+    cumulative_gain: float
+    saturation_threshold: float
+    covered: bool
+    repair_effective: bool
+    mean_selected_gain: float | None
+    shadow_selected_cumulative_gain: float | None
+    shadow_oracle_cumulative_gain: float | None
+    shadow_selected_covered: bool | None
+    shadow_oracle_covered: bool | None
+    shadow_oracle_repair_effective: bool | None
+    shadow_regret: float | None
+
+    def to_dict(self) -> dict[str, object]:
+        value = asdict(self)
+        value["record_type"] = "top_p_saturation_event"
+        return value
+
+
+@dataclass(frozen=True)
 class CompetitionEvent:
     checkpoint: str
     case_id: str
@@ -91,6 +138,7 @@ class EcologySnapshot:
     diversity_index: float
     jsd_from_previous: float | None
     abstention_count: int
+    profile_metric: str = "winner_rate"
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
@@ -188,6 +236,100 @@ class CompetitiveExecutor:
             recovery_threshold=self.recovery_threshold,
             tie_tolerance=self.tie_tolerance,
         )
+
+
+class AdditiveSaturationExecutor:
+    """Evaluate every candidate on one snapshot and retain positive top gains.
+
+    The executor deliberately treats independently measured gains as additive
+    diagnostics.  It does not claim that the selected operators have already
+    been composed or that their joint answer gain equals the sum.
+    """
+
+    def __init__(self, *, saturation_threshold: float = 0.8) -> None:
+        if saturation_threshold <= 0:
+            raise ValueError("saturation_threshold must be > 0")
+        self.saturation_threshold = float(saturation_threshold)
+
+    def execute(
+        self,
+        *,
+        case_id: str,
+        failure_type: str,
+        base_context: str,
+        candidates: Sequence[SkillCandidate],
+        evaluator: SkillEvaluator,
+    ) -> AdditiveSaturationResult:
+        ids = [item.skill_id for item in candidates]
+        if len(ids) != len(set(ids)):
+            raise ValueError("saturation candidates contain duplicate skill_id")
+        executions: list[SkillExecution] = []
+        for candidate in candidates:
+            execution = evaluator(candidate, base_context)
+            if execution.skill_id != candidate.skill_id:
+                raise ValueError("evaluator returned a mismatched skill_id")
+            if execution.operator.content_hash() != candidate.operator.content_hash():
+                raise ValueError("evaluator returned a mismatched operator")
+            executions.append(execution)
+        return select_additive_saturation(
+            case_id=case_id,
+            failure_type=failure_type,
+            executions=executions,
+            saturation_threshold=self.saturation_threshold,
+        )
+
+
+def select_additive_saturation(
+    *,
+    case_id: str,
+    failure_type: str,
+    executions: Sequence[SkillExecution],
+    saturation_threshold: float = 0.8,
+) -> AdditiveSaturationResult:
+    """Select finite, strictly positive gains in descending order.
+
+    Zero, negative, and non-finite gains cannot move a positive cumulative
+    target closer, so they are never retained.  If the target is unreachable,
+    every positive contributor is kept and ``covered`` remains false.
+    """
+    if saturation_threshold <= 0:
+        raise ValueError("saturation_threshold must be > 0")
+    all_executions = tuple(executions)
+    if len({item.skill_id for item in all_executions}) != len(all_executions):
+        raise ValueError("executions contain duplicate skill_id")
+    positive = sorted(
+        (
+            item
+            for item in all_executions
+            if item.has_finite_gain and float(item.recovery_gain) > 0.0
+        ),
+        key=lambda item: (
+            -float(item.recovery_gain),
+            float(item.execution_cost),
+            item.skill_id,
+        ),
+    )
+    selected: list[SkillExecution] = []
+    cumulative_gain = 0.0
+    for execution in positive:
+        selected.append(execution)
+        cumulative_gain += float(execution.recovery_gain)
+        if cumulative_gain >= saturation_threshold:
+            break
+    selected_ids = {item.skill_id for item in selected}
+    return AdditiveSaturationResult(
+        case_id=str(case_id),
+        failure_type=str(failure_type),
+        executions=all_executions,
+        selected=tuple(selected),
+        rejected=tuple(
+            item for item in all_executions if item.skill_id not in selected_ids
+        ),
+        cumulative_gain=cumulative_gain,
+        saturation_threshold=float(saturation_threshold),
+        covered=cumulative_gain >= saturation_threshold,
+        repair_effective=bool(positive),
+    )
 
 
 def select_competitive_winner(
@@ -599,6 +741,181 @@ class EcologyObserver:
 
     def _checkpoint_name(self, stream_position: int) -> str:
         return f"{self.arena_id}:{stream_position}/{self.total_cases}"
+
+
+class SaturationEcologyObserver:
+    """Checkpoint additive selections as contribution/coverage ecology."""
+
+    def __init__(
+        self,
+        *,
+        arena_id: str,
+        total_cases: int,
+        checkpoint_fractions: Sequence[float] = (0.25, 0.5, 0.75, 1.0),
+        overlap_threshold: float = 0.7,
+    ) -> None:
+        if total_cases <= 0:
+            raise ValueError("total_cases must be > 0")
+        fractions = tuple(float(value) for value in checkpoint_fractions)
+        if not fractions or any(value <= 0 or value > 1 for value in fractions):
+            raise ValueError("checkpoint fractions must be in (0, 1]")
+        if tuple(sorted(set(fractions))) != fractions:
+            raise ValueError("checkpoint fractions must be unique and sorted")
+        if not 0 <= overlap_threshold <= 1:
+            raise ValueError("overlap_threshold must be in [0, 1]")
+        self.arena_id = str(arena_id)
+        self.total_cases = int(total_cases)
+        self.overlap_threshold = float(overlap_threshold)
+        self._events: list[TopPSaturationEvent] = []
+        self._boundaries = tuple(
+            max(1, math.ceil(self.total_cases * fraction))
+            for fraction in fractions
+        )
+        self._snapshots: list[EcologySnapshot] = []
+        self._emitted_boundaries: set[int] = set()
+        self._last_distribution: dict[str, float] | None = None
+
+    @property
+    def events(self) -> tuple[TopPSaturationEvent, ...]:
+        return tuple(self._events)
+
+    @property
+    def snapshots(self) -> tuple[EcologySnapshot, ...]:
+        return tuple(self._snapshots)
+
+    def record(
+        self,
+        event: TopPSaturationEvent,
+        *,
+        stream_position: int,
+    ) -> EcologySnapshot | None:
+        if stream_position <= 0 or stream_position > self.total_cases:
+            raise ValueError("stream_position outside declared arena")
+        self._events.append(event)
+        if (
+            stream_position in self._boundaries
+            and stream_position not in self._emitted_boundaries
+        ):
+            snapshot = self._snapshot(event.checkpoint)
+            self._snapshots.append(snapshot)
+            self._emitted_boundaries.add(stream_position)
+            return snapshot
+        return None
+
+    def finalize(self) -> EcologySnapshot:
+        if not self._events:
+            raise ValueError("cannot finalize an empty ecology")
+        if self.total_cases in self._emitted_boundaries:
+            return self._snapshots[-1]
+        snapshot = self._snapshot(
+            f"{self.arena_id}:{self.total_cases}/{self.total_cases}"
+        )
+        self._snapshots.append(snapshot)
+        self._emitted_boundaries.add(self.total_cases)
+        return snapshot
+
+    def _snapshot(self, checkpoint: str) -> EcologySnapshot:
+        failures = sorted({event.failure_type for event in self._events})
+        skills = sorted(
+            {
+                skill_id
+                for event in self._events
+                for skill_id in event.attempted_skill_ids
+            }
+        )
+        profiles: list[NicheProfile] = []
+        vectors: dict[str, list[float]] = {}
+        selection_counts: dict[str, int] = {}
+        for skill_id in skills:
+            rates: list[tuple[str, float]] = []
+            total_attempts = 0
+            total_selections = 0
+            for failure_type in failures:
+                attempts = sum(
+                    skill_id in event.attempted_skill_ids
+                    and event.failure_type == failure_type
+                    for event in self._events
+                )
+                selections = sum(
+                    skill_id in event.selected_skill_ids
+                    and event.failure_type == failure_type
+                    for event in self._events
+                )
+                total_attempts += attempts
+                total_selections += selections
+                rates.append(
+                    (
+                        failure_type,
+                        selections / attempts if attempts else 0.0,
+                    )
+                )
+            selection_counts[skill_id] = total_selections
+            vector = [rate for _failure, rate in rates]
+            vectors[skill_id] = vector
+            normalized = _normalize(vector)
+            support = sum(value > 0 for value in normalized)
+            specialization = (
+                0.0
+                if not normalized or sum(normalized) == 0
+                else 1.0
+                if support <= 1
+                else 1.0 - _entropy(normalized) / math.log(support)
+            )
+            dominant = None
+            if rates and max(rate for _failure, rate in rates) > 0:
+                peak = max(rate for _failure, rate in rates)
+                dominant = min(
+                    failure for failure, rate in rates if rate == peak
+                )
+            profiles.append(
+                NicheProfile(
+                    skill_id=skill_id,
+                    win_rates=tuple(rates),
+                    total_wins=total_selections,
+                    total_attempts=total_attempts,
+                    dominant_niche=dominant,
+                    specialization_index=specialization,
+                )
+            )
+        overlaps = tuple(
+            NicheOverlap(
+                skill_a=left,
+                skill_b=right,
+                cosine_similarity=_cosine(vectors[left], vectors[right]),
+                competitive=False,
+            )
+            for left_index, left in enumerate(skills)
+            for right in skills[left_index + 1 :]
+        )
+        distribution = {
+            skill_id: probability
+            for skill_id, probability in zip(
+                skills,
+                _normalize([selection_counts[skill_id] for skill_id in skills]),
+            )
+        }
+        jsd = (
+            None
+            if self._last_distribution is None
+            else jensen_shannon_divergence(
+                self._last_distribution,
+                distribution,
+            )
+        )
+        self._last_distribution = dict(distribution)
+        return EcologySnapshot(
+            checkpoint=str(checkpoint),
+            event_count=len(self._events),
+            niches=tuple(profiles),
+            overlaps=overlaps,
+            winner_distribution=tuple(sorted(distribution.items())),
+            diversity_index=_entropy(list(distribution.values())),
+            jsd_from_previous=jsd,
+            abstention_count=sum(
+                not event.repair_effective for event in self._events
+            ),
+            profile_metric="selection_rate",
+        )
 
 
 class PerturbationProbe:

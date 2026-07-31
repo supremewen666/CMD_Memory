@@ -32,8 +32,13 @@ def run_arena_cli(
     parser.add_argument("--output", default=default_output)
     parser.add_argument("--seed", type=int, default=24)
     parser.add_argument("--limit", type=int, default=0)
-    parser.add_argument("--top-k", type=int, default=3)
-    parser.add_argument("--recovery-threshold", type=float, default=0.1)
+    parser.add_argument("--saturation-threshold", type=float, default=0.8)
+    parser.add_argument(
+        "--candidate-limit",
+        type=int,
+        default=0,
+        help="Optional hard cap for diagnostics; 0 evaluates every legal skill.",
+    )
     parser.add_argument(
         "--backend-factory",
         default="experiments.arena_backends:create_vllm_backend",
@@ -93,8 +98,8 @@ def run_arena_cli(
     runner = ObservationalArenaRunner(
         cases,
         backend=backend,
-        top_k=args.top_k,
-        recovery_threshold=args.recovery_threshold,
+        saturation_threshold=args.saturation_threshold,
+        candidate_limit=args.candidate_limit or None,
         seed=args.seed,
         enable_chains=args.chains,
         deposition_after_fraction=args.deposit_after,
@@ -112,7 +117,15 @@ def run_arena_cli(
     print(f"[RESULT] cases={len(cases)}")
     print(
         "[RESULT] candidate_executions="
-        f"{sum(len(row.attempted_skill_ids) for row in result.competition_events)}"
+        f"{sum(len(row.attempted_skill_ids) for row in result.saturation_events)}"
+    )
+    print(
+        "[RESULT] cumulative_coverage_rate="
+        f"{sum(row.covered for row in result.saturation_events) / len(result.saturation_events):.6f}"
+    )
+    print(
+        "[RESULT] repair_effective_rate="
+        f"{sum(row.repair_effective for row in result.saturation_events) / len(result.saturation_events):.6f}"
     )
     print(f"[RESULT] chain_attempts={len(result.chain_attempts)}")
     print(f"[RESULT] deposition_events={len(result.deposition_events)}")

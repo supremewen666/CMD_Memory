@@ -87,13 +87,15 @@ def test_arena_runs_one_path_and_observers_do_not_change_selection(tmp_path):
     result = ObservationalArenaRunner(
         _cases(),
         backend=backend,
-        top_k=2,
+        saturation_threshold=0.25,
         enable_chains=True,
     ).run()
     assert len(result.gold_free_observations) == 4
     assert all(
-        row.winner_skill_id == "a" for row in result.competition_events
+        row.selected_skill_ids == ("a", "b")
+        for row in result.saturation_events
     )
+    assert all(row.covered for row in result.saturation_events)
     assert len(result.chain_attempts) == 8
     assert result.manifest.runtime_uses_gold is False
     standalone_inputs = [
@@ -109,6 +111,8 @@ def test_arena_runs_one_path_and_observers_do_not_change_selection(tmp_path):
     rows = [json.loads(line) for line in path.read_text().splitlines()]
     assert rows[0]["record_type"] == "arena_manifest"
     assert sum(row["record_type"] == "gold_free_observation" for row in rows) == 4
+    assert sum(row["record_type"] == "top_p_saturation_event" for row in rows) == 4
+    assert not any(row["record_type"] == "competition_event" for row in rows)
 
 
 def test_deposition_requires_and_calls_backend_hook():
@@ -116,7 +120,7 @@ def test_deposition_requires_and_calls_backend_hook():
     result = ObservationalArenaRunner(
         _cases(6),
         backend=backend,
-        top_k=2,
+        saturation_threshold=0.25,
         deposition_after_fraction=0.5,
         deposition_min_support=3,
     ).run()
@@ -146,7 +150,7 @@ def test_perturbation_removes_keystone_and_records_recovery(tmp_path):
     result = ObservationalArenaRunner(
         _cases(8),
         backend=backend,
-        top_k=2,
+        saturation_threshold=0.25,
         enable_chains=False,
         perturb_after_fraction=0.25,
         perturb_strategy="keystone",

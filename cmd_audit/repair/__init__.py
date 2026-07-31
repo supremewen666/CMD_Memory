@@ -85,6 +85,8 @@ from .orchestrator import (
     RepairOrchestratorResult,
 )
 from .skill_ecology import (
+    AdditiveSaturationExecutor,
+    AdditiveSaturationResult,
     ChainExecution,
     CompetitionEvent,
     CompetitiveExecutor,
@@ -99,10 +101,13 @@ from .skill_ecology import (
     PerturbationProbe,
     SkillCandidate,
     SkillExecution,
+    SaturationEcologyObserver,
+    TopPSaturationEvent,
     detect_operator_conflicts,
     evaluate_skill_chain,
     jensen_shannon_divergence,
     select_competitive_winner,
+    select_additive_saturation,
 )
 from .operator_library import (
     CompositeOperatorSpec,
@@ -174,6 +179,8 @@ __all__ = [
     "CompositeOperatorSpec",
     "merge_operators",
     # competitive execution and ecology
+    "AdditiveSaturationExecutor",
+    "AdditiveSaturationResult",
     "CompetitionEvent",
     "ChainExecution",
     "CompetitiveExecutor",
@@ -188,10 +195,13 @@ __all__ = [
     "PerturbationProbe",
     "SkillCandidate",
     "SkillExecution",
+    "SaturationEcologyObserver",
+    "TopPSaturationEvent",
     "detect_operator_conflicts",
     "evaluate_skill_chain",
     "jensen_shannon_divergence",
     "select_competitive_winner",
+    "select_additive_saturation",
     # orchestrator
     "RepairOrchestrator",
     "RepairOrchestratorResult",

@@ -38,6 +38,7 @@ def main() -> int:
     coactivation = records.get("coactivation_snapshot", [])
     depositions = records.get("chain_deposition_event", [])
     perturbations = records.get("perturbation_event", [])
+    saturation = records.get("top_p_saturation_event", [])
 
     paths = []
     paths.append(
@@ -50,6 +51,18 @@ def main() -> int:
         _write_csv(
             output / "signal_by_probe_coordinates.csv",
             _coordinate_slices(observations),
+        )
+    )
+    paths.append(
+        _write_csv(
+            output / "saturation_summary.csv",
+            _saturation_summary(saturation),
+        )
+    )
+    paths.append(
+        _write_csv(
+            output / "skill_contribution.csv",
+            _skill_contribution(saturation),
         )
     )
     niche_rows, overlap_rows, succession_rows = _ecology_tables(snapshots)
@@ -87,6 +100,7 @@ def main() -> int:
         "hypothesis_tests_run": False,
         "arena_count": len(manifests),
         "case_observations": len(observations),
+        "saturation_events": len(saturation),
         "ecology_snapshots": len(snapshots),
         "chain_attempts": len(attempts),
         "deposition_events": len(depositions),
@@ -102,6 +116,7 @@ def main() -> int:
     print("[RESULT] analysis_kind=descriptive_observational")
     print(f"[RESULT] arenas={len(manifests)}")
     print(f"[RESULT] observations={len(observations)}")
+    print(f"[RESULT] saturation_events={len(saturation)}")
     print(f"[RESULT] chain_attempts={len(attempts)}")
     print("[RESULT] hypothesis_tests_run=0")
     print(f"[RESULT] output_manifest={manifest_path}")
@@ -222,6 +237,131 @@ def _coordinate_slices(
             )
         )
     return expanded
+
+
+def _saturation_summary(
+    rows: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    groups: dict[
+        tuple[str, str, str],
+        list[Mapping[str, object]],
+    ] = {}
+    for row in rows:
+        arena_id = str(row.get("checkpoint", "")).split(":", 1)[0]
+        key = (
+            arena_id,
+            str(row.get("failure_type", "<missing>")),
+            str(row.get("subset", "<missing>")),
+        )
+        groups.setdefault(key, []).append(row)
+    output = []
+    for (arena_id, failure_type, subset), group in sorted(groups.items()):
+        covered = [row for row in group if bool(row.get("covered"))]
+        output.append(
+            {
+                "arena_id": arena_id,
+                "failure_type": failure_type,
+                "subset": subset,
+                "case_count": len(group),
+                "repair_effective_rate": _rate(
+                    bool(row.get("repair_effective")) for row in group
+                ),
+                "cumulative_coverage_rate": _rate(
+                    bool(row.get("covered")) for row in group
+                ),
+                "mean_cumulative_gain": _mean(
+                    row.get("cumulative_gain") for row in group
+                ),
+                "mean_selected_skill_count": _mean(
+                    len(row.get("selected_skill_ids") or ()) for row in group
+                ),
+                "mean_selected_skill_gain_on_covered": _mean(
+                    row.get("mean_selected_gain") for row in covered
+                ),
+                "mean_shadow_regret": _mean(
+                    row.get("shadow_regret") for row in group
+                ),
+                "shadow_selected_coverage_rate": _rate(
+                    bool(row.get("shadow_selected_covered"))
+                    for row in group
+                    if row.get("shadow_selected_covered") is not None
+                ),
+                "shadow_oracle_coverage_rate": _rate(
+                    bool(row.get("shadow_oracle_covered"))
+                    for row in group
+                    if row.get("shadow_oracle_covered") is not None
+                ),
+                "shadow_oracle_repair_effective_rate": _rate(
+                    bool(row.get("shadow_oracle_repair_effective"))
+                    for row in group
+                    if row.get("shadow_oracle_repair_effective") is not None
+                ),
+            }
+        )
+    return output
+
+
+def _skill_contribution(
+    rows: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    groups: dict[
+        tuple[str, str, str, str],
+        dict[str, object],
+    ] = {}
+    for row in rows:
+        arena_id = str(row.get("checkpoint", "")).split(":", 1)[0]
+        failure_type = str(row.get("failure_type", "<missing>"))
+        subset = str(row.get("subset", "<missing>"))
+        selected = set(str(value) for value in row.get("selected_skill_ids") or ())
+        gains = {
+            str(skill_id): value
+            for skill_id, value in row.get("gold_free_gains") or ()
+        }
+        for raw_skill_id in row.get("attempted_skill_ids") or ():
+            skill_id = str(raw_skill_id)
+            key = (arena_id, failure_type, subset, skill_id)
+            bucket = groups.setdefault(
+                key,
+                {
+                    "attempts": 0,
+                    "selections": 0,
+                    "covered_selections": 0,
+                    "selected_gains": [],
+                },
+            )
+            bucket["attempts"] = int(bucket["attempts"]) + 1
+            if skill_id in selected:
+                bucket["selections"] = int(bucket["selections"]) + 1
+                if bool(row.get("covered")):
+                    bucket["covered_selections"] = (
+                        int(bucket["covered_selections"]) + 1
+                    )
+                if _finite(gains.get(skill_id)):
+                    selected_gains = bucket["selected_gains"]
+                    assert isinstance(selected_gains, list)
+                    selected_gains.append(float(gains[skill_id]))
+    output = []
+    for key, bucket in sorted(groups.items()):
+        arena_id, failure_type, subset, skill_id = key
+        attempts = int(bucket["attempts"])
+        selections = int(bucket["selections"])
+        selected_gains = bucket["selected_gains"]
+        assert isinstance(selected_gains, list)
+        output.append(
+            {
+                "arena_id": arena_id,
+                "failure_type": failure_type,
+                "subset": subset,
+                "skill_id": skill_id,
+                "attempt_count": attempts,
+                "selection_count": selections,
+                "selection_rate": selections / attempts if attempts else None,
+                "covered_selection_count": int(bucket["covered_selections"]),
+                "mean_selected_gain": _mean(selected_gains),
+                "cumulative_selected_gain": sum(selected_gains),
+            }
+        )
+    return output
 
 
 def _ecology_tables(

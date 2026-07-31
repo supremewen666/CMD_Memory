@@ -62,9 +62,19 @@ python -m experiments.run_arena_memtrace
 `experiments.arena_backends:create_vllm_backend` is the default factory. Its
 runtime signal independently scores each generated answer for grounding,
 relevance, completeness, and internal consistency using only query + candidate
-context + answer. The shadow scorer then compares that same answer with
-`gold_answer`; shadow values are materialized after runtime values and never
-enter candidate selection.
+context + answer. Arena v2 requests score-token logprobs and uses the rubric
+expectation on a continuous `[0, 1]` scale; endpoints that strip logprobs fall
+back to the discrete JSON score. Every gated operator in the six-action real-CC
+whitelist is evaluated. Finite positive gains are retained in descending order
+until their additive sum reaches `--saturation-threshold` (default `0.8`);
+zero, negative, and non-finite gains are never retained. `--candidate-limit`
+exists only as an explicit diagnostic cap and defaults to no cap.
+
+The shadow scorer then compares the same answers with `gold_answer`; shadow
+values are materialized after runtime values and never enter candidate
+selection. The additive sum is an independent-gain coverage diagnostic, not a
+claim that the selected operators have already been composed. Joint effects
+still require the chain path and held-out validation.
 
 An alternative `--backend-factory module:factory` may be supplied. The factory
 receives `cases=<tuple[ArenaCase, ...]>` and `args=<Namespace>` and must return
@@ -90,9 +100,10 @@ python -m experiments.run_arena_memtrace \
   --perturb-strategy keystone
 ```
 
-The selected skill is removed only after the trigger case. Recovery requires
-two adjacent non-empty winner windows below the configured JSD threshold;
-all-abstain windows are recorded as collapse, not recovery.
+The selected keystone skill is removed only after the trigger case. Recovery
+uses the leading retained contributor as the perturbation stream and requires
+two adjacent non-empty windows below the configured JSD threshold; windows
+without a positive contributor are recorded as collapse, not recovery.
 
 `--deposit-after 0.5` is deliberately one-shot. It materializes one supported
 chain and calls `deposit_composite(event)` so the staged composite can enter
@@ -111,10 +122,10 @@ python -m experiments.analyze_arena_results \
     artifacts/arena/stale_observations.jsonl
 ```
 
-This produces descriptive signal, niche, succession, co-activation, chain
-spectrum, directionality, and cross-arena reproducibility tables. It performs
-no hypothesis tests and does not turn structural smoke scores into recovery
-claims.
+This produces descriptive signal, saturation, per-skill contribution, niche,
+succession, co-activation, chain spectrum, directionality, and cross-arena
+reproducibility tables. It performs no hypothesis tests and does not turn
+structural smoke scores into recovery claims.
 
 ## Legacy runners
 
