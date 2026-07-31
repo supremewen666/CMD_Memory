@@ -24,6 +24,9 @@ LLAMA_JUDGE_PORT=8000
 LLAMA_ANSWER_PORT=8001
 PID_FILE="/tmp/vllm_shared.pid"
 LOG_FILE="/tmp/vllm_shared.log"
+JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://localhost:${LLAMA_JUDGE_PORT}/v1}"
+JUDGE_MODEL="${JUDGE_MODEL:-qwen2.5-7b-instruct}"
+JUDGE_API_KEY="${JUDGE_API_KEY:-dummy}"
 
 # ── 参数 ────────────────────────────────────────────────────────────────────
 ROLE=""
@@ -219,25 +222,30 @@ stop_llama_dual_vllm() {
 # Env & gates
 # ══════════════════════════════════════════════════════════════════════════════
 
+lane_env() {
+  local answer_base_url="$1"
+  local answer_model="$2"
+  export LLM_BASE_URL="$answer_base_url"
+  export LLM_MODEL="$answer_model"
+  export LLM_JUDGE_BASE_URL="$JUDGE_BASE_URL"
+  export LLM_JUDGE_MODEL="$JUDGE_MODEL"
+  export LLM_API_KEY="${ANSWER_API_KEY:-dummy}"
+  export LLM_JUDGE_API_KEY="$JUDGE_API_KEY"
+}
+
 qwen_env() {
-  export LLM_BASE_URL="http://localhost:${QWVLLM_PORT}/v1"
-  export LLM_MODEL="qwen2.5-7b-instruct"
-  export LLM_JUDGE_BASE_URL="http://localhost:${QWVLLM_PORT}/v1"
-  export LLM_JUDGE_MODEL="qwen2.5-7b-instruct"
-  export LLM_API_KEY="dummy"
-  export LLM_JUDGE_API_KEY="dummy"
+  lane_env \
+    "http://localhost:${QWVLLM_PORT}/v1" \
+    "qwen2.5-7b-instruct"
   export LLM_TIMEOUT=120
   export NO_PROXY="localhost,127.0.0.1"
   export no_proxy="localhost,127.0.0.1"
 }
 
 llama_dual_env() {
-  export LLM_BASE_URL="http://localhost:${LLAMA_ANSWER_PORT}/v1"
-  export LLM_MODEL="llama-3.1-8b-instruct"
-  export LLM_JUDGE_BASE_URL="http://localhost:${LLAMA_JUDGE_PORT}/v1"
-  export LLM_JUDGE_MODEL="qwen2.5-7b-instruct"
-  export LLM_API_KEY="dummy"
-  export LLM_JUDGE_API_KEY="dummy"
+  lane_env \
+    "http://localhost:${LLAMA_ANSWER_PORT}/v1" \
+    "llama-3.1-8b-instruct"
   export LLM_TIMEOUT=120
   export NO_PROXY="localhost,127.0.0.1"
   export no_proxy="localhost,127.0.0.1"
