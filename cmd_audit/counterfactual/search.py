@@ -49,6 +49,9 @@ class SearchResult:
     early_stops: int
     search_time_seconds: float
     avg_rollout_time: float
+    truncated: bool = False
+    timed_out_actions: tuple[tuple[int, PipelineAction], ...] = ()
+    unscored_actions: tuple[tuple[int, PipelineAction], ...] = ()
 
     @property
     def primary_attribution_label(self) -> PipelineAction | None:
@@ -114,9 +117,14 @@ class SinglePointAttributor:
             deadline=start_time + self.config.time_limit_seconds,
         )
         action_credits: dict[int, dict[PipelineAction, float]] = {}
+        timed_out_actions: list[tuple[int, PipelineAction]] = []
+        unscored_actions: list[tuple[int, PipelineAction]] = []
+        intervention_rollouts = 0
+        truncated = False
 
         for gen_point in range(self.config.max_depth):
             if time.time() - start_time > self.config.time_limit_seconds:
+                truncated = True
                 break
 
             parent_context = contexts[gen_point]
@@ -138,18 +146,50 @@ class SinglePointAttributor:
                 baseline_answer_score,
             )
 
+            if _is_nan(identity_score):
+                timed_out_actions.append((gen_point, PipelineAction.IDENTITY))
+                # A credit relative to an unmeasured identity baseline is not a
+                # zero-credit intervention.  Preserve the missing measurement
+                # explicitly and do not let it silently become an abstention.
+                unscored_actions.extend(
+                    (gen_point, action)
+                    for action in _ordered_legal_actions(
+                        recall_set,
+                        gen_point,
+                        self.config.include_gated_actions,
+                        self.config.include_item_actions,
+                        _priors_for_generation_point(
+                            self.config.action_priors, gen_point
+                        ),
+                        intervention_config,
+                    )
+                    if action != PipelineAction.IDENTITY
+                )
+                truncated = True
+                continue
+
             credits: dict[PipelineAction, float] = {PipelineAction.IDENTITY: 0.0}
-            for action in _ordered_legal_actions(
+            actions = _ordered_legal_actions(
                 recall_set,
                 gen_point,
                 self.config.include_gated_actions,
                 self.config.include_item_actions,
                 _priors_for_generation_point(self.config.action_priors, gen_point),
                 intervention_config,
-            ):
+            )
+            for action_index, action in enumerate(actions):
                 if action == PipelineAction.IDENTITY:
                     continue
-                if time.time() - start_time > self.config.time_limit_seconds:
+                if (
+                    time.time() - start_time > self.config.time_limit_seconds
+                    or intervention_rollouts >= self.config.max_iterations
+                ):
+                    truncated = True
+                    unscored_actions.extend(
+                        (gen_point, pending)
+                        for pending in actions[action_index:]
+                        if pending != PipelineAction.IDENTITY
+                    )
                     break
                 action_context = _step_context(
                     client,
@@ -168,7 +208,11 @@ class SinglePointAttributor:
                     answer_verifier,
                     baseline_answer_score,
                 )
-                credits[action] = action_score - identity_score
+                intervention_rollouts += 1
+                if _is_nan(action_score):
+                    timed_out_actions.append((gen_point, action))
+                else:
+                    credits[action] = action_score - identity_score
 
             if credits:
                 action_credits[gen_point] = credits
@@ -185,12 +229,15 @@ class SinglePointAttributor:
             best_action_sequence=best_path,
             main_culprit=main_culprit,
             action_credits=action_credits,
-            iterations_completed=len(action_credits),
+            iterations_completed=intervention_rollouts,
             nodes_explored=1 + sum(len(actions) for actions in action_credits.values()),
             terminal_rollouts=self._rollouts,
             early_stops=0,
             search_time_seconds=search_time,
             avg_rollout_time=avg_rollout_time,
+            truncated=truncated,
+            timed_out_actions=tuple(timed_out_actions),
+            unscored_actions=tuple(unscored_actions),
         )
 
     def _rollout_score(
@@ -320,6 +367,10 @@ def _find_main_culprit(
     return culprit
 
 
+def _is_nan(value: float) -> bool:
+    return value != value
+
+
 def attribute_single_point(
     client: Any,
     initial_context: str,
@@ -334,6 +385,7 @@ def attribute_single_point(
     intervention_config: dict[str, Any] | None = None,
     action_priors: dict[str, float] | dict[int, dict[str, float]] | None = None,
     include_item_actions: bool = False,
+    time_limit_seconds: float = 30.0,
     value_function_type: str = "nested",
 ) -> SearchResult:
     """Compatibility wrapper for the live single-point attribution path."""
@@ -342,6 +394,7 @@ def attribute_single_point(
         max_iterations=max_iterations,
         max_depth=max_depth,
         include_item_actions=include_item_actions,
+        time_limit_seconds=time_limit_seconds,
         action_priors=dict(action_priors or {}),
     )
 

@@ -13,6 +13,11 @@ from cmd_audit.core.math_utils import (
     is_finite_number as _finite,
     mean_finite as _mean,
 )
+from experiments.arena_runner_common import (
+    ARENA_DATASET_FINGERPRINT_VERSION,
+    arena_case_ids_sha256,
+    arena_file_sha256,
+)
 
 DEFAULT_INPUTS = (
     "artifacts/arena/memtrace_observations.jsonl",
@@ -39,6 +44,7 @@ def main() -> int:
     depositions = records.get("chain_deposition_event", [])
     perturbations = records.get("perturbation_event", [])
     saturation = records.get("top_p_saturation_event", [])
+    arm_comparisons = records.get("arena_arm_comparison_event", [])
 
     paths = []
     paths.append(
@@ -63,6 +69,18 @@ def main() -> int:
         _write_csv(
             output / "skill_contribution.csv",
             _skill_contribution(saturation),
+        )
+    )
+    paths.append(
+        _write_csv(
+            output / "cmd_vs_best_of_n.csv",
+            _arm_comparison_summary(arm_comparisons),
+        )
+    )
+    paths.append(
+        _write_csv(
+            output / "cmd_vs_best_of_n_by_budget.csv",
+            _arm_comparison_by_budget(arm_comparisons),
         )
     )
     niche_rows, overlap_rows, succession_rows = _ecology_tables(snapshots)
@@ -101,6 +119,7 @@ def main() -> int:
         "arena_count": len(manifests),
         "case_observations": len(observations),
         "saturation_events": len(saturation),
+        "arm_comparison_events": len(arm_comparisons),
         "ecology_snapshots": len(snapshots),
         "chain_attempts": len(attempts),
         "deposition_events": len(depositions),
@@ -117,6 +136,7 @@ def main() -> int:
     print(f"[RESULT] arenas={len(manifests)}")
     print(f"[RESULT] observations={len(observations)}")
     print(f"[RESULT] saturation_events={len(saturation)}")
+    print(f"[RESULT] arm_comparison_events={len(arm_comparisons)}")
     print(f"[RESULT] chain_attempts={len(attempts)}")
     print("[RESULT] hypothesis_tests_run=0")
     print(f"[RESULT] output_manifest={manifest_path}")
@@ -131,7 +151,8 @@ def _load_artifacts(
     for path in paths:
         if not path.exists():
             raise FileNotFoundError(path)
-        manifest_count = 0
+        file_rows: list[dict[str, object]] = []
+        manifest_rows: list[dict[str, object]] = []
         with path.open(encoding="utf-8") as handle:
             for line_number, line in enumerate(handle, start=1):
                 if not line.strip():
@@ -141,19 +162,94 @@ def _load_artifacts(
                 if not record_type:
                     raise ValueError(f"{path}:{line_number}: missing record_type")
                 if record_type == "arena_manifest":
-                    manifest_count += 1
+                    manifest_rows.append(row)
                     arena_id = str(row["arena_id"])
-                    if arena_id in seen_arenas:
-                        raise ValueError(f"duplicate arena artifact: {arena_id}")
                     if row.get("runtime_uses_gold") is not False:
                         raise ValueError(
                             f"{arena_id}: runtime_uses_gold must be false"
                         )
-                    seen_arenas.add(arena_id)
-                records.setdefault(record_type, []).append(row)
-        if manifest_count != 1:
+                file_rows.append(row)
+        if len(manifest_rows) != 1:
             raise ValueError(f"{path}: expected exactly one arena manifest")
+        manifest = manifest_rows[0]
+        arena_id = str(manifest["arena_id"])
+        if arena_id in seen_arenas:
+            raise ValueError(f"duplicate arena artifact: {arena_id}")
+        _validate_dataset_provenance(path, manifest, file_rows)
+        seen_arenas.add(arena_id)
+        for row in file_rows:
+            records.setdefault(str(row["record_type"]), []).append(row)
     return records
+
+
+def _validate_dataset_provenance(
+    artifact_path: Path,
+    manifest: Mapping[str, object],
+    rows: Sequence[Mapping[str, object]],
+) -> None:
+    arena_id = str(manifest["arena_id"])
+    if (
+        manifest.get("dataset_fingerprint_version")
+        != ARENA_DATASET_FINGERPRINT_VERSION
+    ):
+        raise ValueError(
+            f"{arena_id}: missing or unsupported dataset fingerprint"
+        )
+    if manifest.get("dataset_source_kind") != "file":
+        raise ValueError(f"{arena_id}: arena analysis requires a file dataset source")
+    source_path_value = str(manifest.get("dataset_source_path", ""))
+    if not source_path_value:
+        raise ValueError(f"{arena_id}: missing dataset_source_path")
+    for key in (
+        "dataset_source_sha256",
+        "selected_case_ids_sha256",
+        "selected_cases_sha256",
+    ):
+        if not _is_sha256(manifest.get(key)):
+            raise ValueError(f"{arena_id}: invalid {key}")
+    try:
+        source_size = int(manifest["dataset_source_size_bytes"])
+        case_count = int(manifest["case_count"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{arena_id}: invalid dataset size or case count"
+        ) from exc
+    if source_size < 0 or case_count <= 0:
+        raise ValueError(f"{arena_id}: invalid dataset size or case count")
+
+    event_case_ids = [
+        str(row["case_id"])
+        for row in rows
+        if row.get("record_type") == "top_p_saturation_event"
+    ]
+    if len(event_case_ids) != case_count:
+        raise ValueError(
+            f"{arena_id}: manifest case_count={case_count} but artifact has "
+            f"{len(event_case_ids)} case events"
+        )
+    if (
+        arena_case_ids_sha256(event_case_ids)
+        != manifest["selected_case_ids_sha256"]
+    ):
+        raise ValueError(
+            f"{arena_id}: artifact case ids do not match dataset fingerprint"
+        )
+
+    source_path = Path(source_path_value)
+    if source_path.is_file():
+        if source_path.stat().st_size != source_size:
+            raise ValueError(
+                f"{arena_id}: current dataset size differs from manifest"
+            )
+        if arena_file_sha256(source_path) != manifest["dataset_source_sha256"]:
+            raise ValueError(
+                f"{arena_id}: current dataset bytes differ from manifest"
+            )
+
+
+def _is_sha256(value: object) -> bool:
+    text = str(value or "")
+    return len(text) == 64 and all(character in "0123456789abcdef" for character in text)
 
 
 def _signal_slices(
@@ -243,7 +339,7 @@ def _saturation_summary(
     rows: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
     groups: dict[
-        tuple[str, str, str],
+        tuple[str, str, str, str],
         list[Mapping[str, object]],
     ] = {}
     for row in rows:
@@ -252,16 +348,18 @@ def _saturation_summary(
             arena_id,
             str(row.get("failure_type", "<missing>")),
             str(row.get("subset", "<missing>")),
+            str(row.get("runtime_branch", "<missing>")),
         )
         groups.setdefault(key, []).append(row)
     output = []
-    for (arena_id, failure_type, subset), group in sorted(groups.items()):
+    for (arena_id, failure_type, subset, runtime_branch), group in sorted(groups.items()):
         covered = [row for row in group if bool(row.get("covered"))]
         output.append(
             {
                 "arena_id": arena_id,
                 "failure_type": failure_type,
                 "subset": subset,
+                "runtime_branch": runtime_branch,
                 "case_count": len(group),
                 "repair_effective_rate": _rate(
                     bool(row.get("repair_effective")) for row in group
@@ -362,6 +460,142 @@ def _skill_contribution(
             }
         )
     return output
+
+
+def _arm_comparison_summary(
+    rows: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    groups: dict[tuple[str, str], list[Mapping[str, object]]] = {}
+    for row in rows:
+        if str(row.get("runtime_branch", "")) != "fix":
+            continue
+        groups.setdefault(
+            (str(row.get("arena_id")), str(row.get("failure_type"))),
+            [],
+        ).append(row)
+    return [
+        _comparison_group_row(arena_id, failure_type, group)
+        for (arena_id, failure_type), group in sorted(groups.items())
+    ]
+
+
+def _arm_comparison_by_budget(
+    rows: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    groups: dict[tuple[str, str, int], list[Mapping[str, object]]] = {}
+    for row in rows:
+        if str(row.get("runtime_branch", "")) != "fix":
+            continue
+        try:
+            budget = int(row.get("candidate_budget", 0))
+        except (TypeError, ValueError):
+            budget = 0
+        groups.setdefault(
+            (
+                str(row.get("arena_id")),
+                str(row.get("failure_type")),
+                budget,
+            ),
+            [],
+        ).append(row)
+    return [
+        {
+            **_comparison_group_row(arena_id, failure_type, group),
+            "candidate_budget": budget,
+            "selection_is_nontrivial": budget >= 2,
+        }
+        for (arena_id, failure_type, budget), group in sorted(groups.items())
+    ]
+
+
+def _comparison_group_row(
+    arena_id: str,
+    failure_type: str,
+    group: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    def cmd_abstained(row: Mapping[str, object]) -> bool:
+        return bool(row.get("cmd_abstained")) or (
+            "cmd_abstained" not in row
+            and row.get("cmd_selected_skill_id") is None
+        )
+
+    def control_abstained(row: Mapping[str, object]) -> bool:
+        return bool(row.get("best_of_n_abstained")) or str(
+            row.get("status", "")
+        ) == "abstained_nonpositive_gain"
+
+    def control_failed(row: Mapping[str, object]) -> bool:
+        return (
+            not control_abstained(row)
+            and (
+                str(row.get("status", "ok")) != "ok"
+                or not _finite(row.get("best_of_n_shadow_gold_gain"))
+            )
+        )
+
+    paired = [
+        row
+        for row in group
+        if bool(row.get("budget_aligned"))
+        and not cmd_abstained(row)
+        and not control_abstained(row)
+        and not control_failed(row)
+        and _finite(row.get("cmd_shadow_gold_gain"))
+        and _finite(row.get("best_of_n_shadow_gold_gain"))
+    ]
+    cmd_wins = sum(
+        float(row["cmd_shadow_gold_gain"])
+        > float(row["best_of_n_shadow_gold_gain"])
+        for row in paired
+    )
+    best_wins = sum(
+        float(row["best_of_n_shadow_gold_gain"])
+        > float(row["cmd_shadow_gold_gain"])
+        for row in paired
+    )
+    budgets = [
+        int(row.get("candidate_budget", 0))
+        for row in group
+        if str(row.get("candidate_budget", "")).lstrip("-").isdigit()
+    ]
+    return {
+        "arena_id": arena_id,
+        "failure_type": failure_type,
+        "n_total": len(group),
+        "n_paired": len(paired),
+        "n_dropped_control_fail": sum(control_failed(row) for row in group),
+        "n_cmd_abstain": sum(cmd_abstained(row) for row in group),
+        "n_control_abstain": sum(control_abstained(row) for row in group),
+        "n_dropped_budget_mismatch": sum(
+            not bool(row.get("budget_aligned")) for row in group
+        ),
+        "n_dropped_cmd_shadow_fail": sum(
+            not cmd_abstained(row)
+            and not _finite(row.get("cmd_shadow_gold_gain"))
+            for row in group
+        ),
+        "budget_aligned_count": sum(
+            bool(row.get("budget_aligned")) for row in group
+        ),
+        "candidate_budget_min": min(budgets) if budgets else None,
+        "candidate_budget_max": max(budgets) if budgets else None,
+        "mean_candidate_budget": _mean(budgets),
+        "n_budget_one": sum(value == 1 for value in budgets),
+        "mean_cmd_shadow_gain": _mean(
+            row.get("cmd_shadow_gold_gain") for row in paired
+        ),
+        "mean_best_of_n_shadow_gain": _mean(
+            row.get("best_of_n_shadow_gold_gain") for row in paired
+        ),
+        "mean_structural_delta": _mean(
+            float(row["cmd_shadow_gold_gain"])
+            - float(row["best_of_n_shadow_gold_gain"])
+            for row in paired
+        ),
+        "cmd_wins": cmd_wins,
+        "best_of_n_wins": best_wins,
+        "ties": len(paired) - cmd_wins - best_wins,
+    }
 
 
 def _ecology_tables(

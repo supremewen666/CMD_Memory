@@ -179,7 +179,7 @@ def _paper_audit(case_id: str):
         regression_risk=0.0,
         had_repair_regression=False,
     )
-    mcts_result = SimpleNamespace(
+    attribution_result = SimpleNamespace(
         primary_attribution_label="retrieval_error",
         main_culprit=(0, "retrieval_error", 0.25),
         action_credits={0: {"identity": 0.0, "retrieval_error": 0.25}},
@@ -199,7 +199,7 @@ def _paper_audit(case_id: str):
         diagnosis_cost=1.5,
         attribution_correct=True,
         runtime_branch="fix",
-        mcts_result=mcts_result,
+        attribution_result=attribution_result,
         post_repair=repair,
         hard_case_baseline=SimpleNamespace(repair_assessment="failed"),
     )

@@ -19,11 +19,11 @@ def _mcts(primary, credit: float = 0.7, *, include_identity: bool = True):
     )
 
 
-def _audit(runtime_branch: str, perturbation_label, mcts_result):
+def _audit(runtime_branch: str, perturbation_label, attribution_result):
     return SimpleNamespace(
         runtime_branch=runtime_branch,
         perturbation_label=perturbation_label,
-        mcts_result=mcts_result,
+        attribution_result=attribution_result,
     )
 
 
@@ -80,3 +80,15 @@ def test_step_level_metrics_writer_tracks_identity_and_positive_credit(
     assert metrics["identity_baseline_coverage"]["denominator"] == "2"
     assert metrics["positive_credit_rate"]["numerator"] == "1"
     assert metrics["positive_credit_rate"]["denominator"] == "2"
+
+
+def test_step_level_metrics_writer_marks_zero_denominator_unmeasured(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "step_level_metrics.csv"
+    write_step_level_metrics_table([_audit("fill", "retrieval_error", None)], path)
+
+    metrics = _read_metrics(path)
+    coverage = metrics["step_attribution_coverage"]
+    assert coverage["denominator"] == "0"
+    assert coverage["value"] == ""

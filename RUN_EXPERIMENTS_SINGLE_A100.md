@@ -10,14 +10,12 @@
 ```
 GPU 0 (SSH 1)                          GPU 1 (SSH 2)
 ─────────────────────────────────      ─────────────────────────────────
-Qwen vLLM :8000                        Qwen vLLM :8000
-MemTrace-B seed 24  (~1.5h)            MemTrace-B seed 224 (~1.5h)
-MemTrace-B seed 124 (~1.5h)            STALE             (~25min)
-MemFail              (~20min)          ↓ 停 Qwen，起双端点
-                                       Qwen judge :8000 + Llama answerer :8001
-                                       MemTrace-B Llama   (~1.5h)
+Qwen judge :8000 + Llama :8001         Qwen judge :8000 + Llama :8001
+MemTrace-B seed 24                     MemTrace-B seed 224
+MemTrace-B seed 124                    STALE
+MemFail                                MemTrace-B replicate seed 24
 ─────────────────────────────────      ─────────────────────────────────
-wall-clock ~3.5h                       wall-clock ~3.5h
+wall-clock: 取决于实际吞吐               wall-clock: 取决于实际吞吐
 
 汇聚：scp GPU1 artifacts/arena/*.jsonl → GPU0
 分析：./run_remaining_experiments.sh --role analyze  (~5min CPU)
@@ -37,7 +35,7 @@ python -m pytest tests/ -q   # 预期 467 passed
 
 ---
 
-## GPU 0（SSH 1）— Qwen MemTrace-B ×2 + MemFail
+## GPU 0（SSH 1）— MemTrace-B ×2 + MemFail
 
 ```bash
 cd ~/wsy/CMD_Memory
@@ -45,22 +43,22 @@ cd ~/wsy/CMD_Memory
 # 冒烟（50 case，确认连通，~2min）
 ./run_remaining_experiments.sh --role gpu0 --smoke
 
-# 正式运行（~3.5h）
-./run_remaining_experiments.sh --role gpu0
+# 正式运行（断开 SSH 仍继续；PID 和 tail 命令会打印到终端）
+./run_remaining_experiments.sh --role gpu0 --detach
 ```
 
 产出（`artifacts/arena/`）：
 
 | 文件 | 内容 |
 |------|------|
-| `memtrace_seed24.jsonl` | Qwen MemTrace-B, seed 24（+ chains + deposit） |
-| `memtrace_seed124.jsonl` | Qwen MemTrace-B, seed 124（+ chains + deposit） |
+| `memtrace_seed24.jsonl` | MemTrace-B, seed 24（Llama answerer + Qwen judge，+ chains + deposit） |
+| `memtrace_seed124.jsonl` | MemTrace-B, seed 124（Llama answerer + Qwen judge，+ chains + deposit） |
 | `memtrace_observations.jsonl` | seed 24 别名（统一分析入口） |
 | `memfail_observations.jsonl` | MemFail 跨环境复现（no chains） |
 
 ---
 
-## GPU 1（SSH 2）— Qwen MemTrace-B seed 224 + STALE + Llama
+## GPU 1（SSH 2）— MemTrace-B seed 224 + STALE + replicate seed 24
 
 ```bash
 cd ~/wsy/CMD_Memory
@@ -68,49 +66,48 @@ cd ~/wsy/CMD_Memory
 # 冒烟（50 case，确认连通，~2min）
 ./run_remaining_experiments.sh --role gpu1 --smoke
 
-# 正式运行（~3.5h）
-./run_remaining_experiments.sh --role gpu1
+# 正式运行（断开 SSH 仍继续）
+./run_remaining_experiments.sh --role gpu1 --detach
 ```
 
-分两阶段自动执行：
-
-**Phase 1 — Qwen 单端点（~2h）**
-
-| 步骤 | 时长 |
-|------|------|
-| MemTrace-B seed 224（+ chains + deposit） | ~1.5h |
-| STALE（no chains） | ~25min |
-
-**Phase 2 — Llama 双端点（~1.5h）**
-
-脚本自动停 Qwen vLLM，起双端点（Qwen judge :8000 + Llama answerer :8001），然后跑 MemTrace-B。
+三个 phase 均使用双端点：Qwen judge `:8000` 冻结用于评估，Llama answerer `:8001` 用于生成与选择。
 
 产出（`artifacts/arena/`）：
 
 | 文件 | 内容 |
 |------|------|
-| `memtrace_seed224.jsonl` | Qwen MemTrace-B, seed 224（+ chains + deposit） |
+| `memtrace_seed224.jsonl` | MemTrace-B, seed 224（Llama answerer + Qwen judge，+ chains + deposit） |
 | `stale_observations.jsonl` | STALE 邻接生态位竞争（no chains） |
-| `memtrace_llama.jsonl` | Llama-3.1-8B MemTrace-B（Qwen judge 冻结，+ chains + deposit） |
+| `memtrace_llama.jsonl` | MemTrace-B replicate seed 24（Llama answerer + Qwen judge，+ chains + deposit） |
 
 ---
 
-## 断点续跑
+## 断线存活、日志与断点续跑
 
-每个 Arena 独立，出错可以单独重跑：
+正式运行使用 `--detach`。它会以 `nohup + setsid` 启动独立会话，主日志写入
+`artifacts/arena/run_<role>_<timestamp>.log`；SSH 断开不会终止 arena 进程。启动后按脚本打印的路径查看进度，或使用：
 
 ```bash
-# GPU 0 只跑 MemTrace-B seed 124（跳过已完成的 seed 24）
-./run_remaining_experiments.sh --role gpu0 --only memtrace_seed124
+tail -f artifacts/arena/run_gpu0_<timestamp>.log
+```
+
+Python 已启用无缓冲输出，phase 日志（`memtrace_*.log`、`memfail_run.log`、`stale_run.log`）和主日志均会持续更新。vLLM 冷启动就绪探测默认最多等待 300 秒。
+
+每个 Arena phase 在输出 JSONL 已存在且非空时会自动跳过。因此断线或前序 phase 完成后，直接重新执行同一条正式命令即可继续；如需强制重跑某个 phase，先删除它的 JSONL，再运行：
+
+```bash
+# GPU 0 强制重跑 MemTrace-B seed 124
+rm artifacts/arena/memtrace_seed124.jsonl
+./run_remaining_experiments.sh --role gpu0 --only memtrace_seed124 --detach
 
 # GPU 0 只跑 MemFail
-./run_remaining_experiments.sh --role gpu0 --only memfail
+./run_remaining_experiments.sh --role gpu0 --only memfail --detach
 
 # GPU 1 只跑 STALE
-./run_remaining_experiments.sh --role gpu1 --only stale
+./run_remaining_experiments.sh --role gpu1 --only stale --detach
 
 # GPU 1 只跑 Llama（自动起双端点）
-./run_remaining_experiments.sh --role gpu1 --only memtrace_llama
+./run_remaining_experiments.sh --role gpu1 --only memtrace_llama --detach
 ```
 
 ## 汇聚 + 统一分析
@@ -152,7 +149,7 @@ scp user@gpu1:~/wsy/CMD_Memory/artifacts/arena/memtrace_llama.jsonl \
 | 数据集 | cases | families | 运行位置 | chains |
 |--------|-------|----------|----------|--------|
 | MemTrace-B | 2047 | 182 | GPU 0 (×2 seeds) + GPU 1 (×1 seed) | yes |
-| MemTrace-B Llama | 2047 | 182 | GPU 1 | yes |
+| MemTrace-B replicate seed 24 | 2047 | 182 | GPU 1 | yes |
 | MemFail | 692 | — | GPU 0 | no |
 | STALE | 1200 | ~400 | GPU 1 | no |
 
@@ -163,13 +160,13 @@ scp user@gpu1:~/wsy/CMD_Memory/artifacts/arena/memtrace_llama.jsonl \
 | MemTrace-B (with chains) | 2047 | ~30K | ~1.5h |
 | MemFail (no chains) | 692 | ~8K | ~20min |
 | STALE (no chains) | 1200 | ~14K | ~25min |
-| MemTrace-B Llama | 2047 | ~30K | ~1.5h |
+| MemTrace-B replicate seed 24 | 2047 | ~30K | 取决于实际吞吐 |
 
-**双卡并行 wall-clock：~3.5h**（vs 单卡串行 ~5h）
+`--deposit-after` 会将 MemTrace 限制为 `--case-workers 1`，实际墙钟时间应以主日志为准，不应把旧的 3.5h 估算当作上限。
 
-## 多模型复现设计
+## 双端点评估设计
 
-Llama 阶段使用双端点：
+所有 GPU phase 使用双端点：
 
 | 端点 | 端口 | 模型 | 用途 |
 |------|------|------|------|
@@ -183,7 +180,7 @@ Judge 冻结保证了跨模型可比性——gold-free 排名和 shadow 评分�
 
 | 模型 | 定位 | 理由 |
 |------|------|------|
-| Qwen2.5-7B-Instruct | 主力 | 2025 年开源 agent 论文最常见选择 |
+| Qwen2.5-7B-Instruct | 冻结 judge | 提供跨 phase 一致的选择与评估标尺 |
 | Llama-3.1-8B-Instruct | 跨家族复现 | 不同 pretrain corpus/tokenizer，真正测方法泛化 |
 
 不推荐的选择：

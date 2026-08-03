@@ -507,10 +507,10 @@ def _metric_row(
     *,
     timeout_count: int = 0,
 ) -> dict[str, str]:
-    value = numerator / denominator if denominator else 0.0
+    value = f"{numerator / denominator:.6f}" if denominator else ""
     return {
         "metric_name": metric_name,
-        "value": f"{value:.6f}",
+        "value": value,
         "numerator": str(numerator),
         "denominator": str(denominator),
         "timeout_count": str(timeout_count),
@@ -519,26 +519,25 @@ def _metric_row(
 
 
 def _mcts_primary_action_name(result: AuditResult) -> str | None:
-    mcts_result = getattr(result, "mcts_result", None)
-    if mcts_result is None:
+    attribution_result = result.attribution_result
+    if attribution_result is None:
         return None
-    primary = getattr(mcts_result, "primary_attribution_label", None)
+    primary = attribution_result.primary_attribution_label
     if primary is None:
         return None
     return _action_name(primary)
 
 
 def _mcts_primary_credit(result: AuditResult) -> float:
-    mcts_result = getattr(result, "mcts_result", None)
-    culprit = getattr(mcts_result, "main_culprit", None)
+    culprit = result.attribution_result.main_culprit if result.attribution_result else None
     if culprit is not None and len(culprit) >= 3:
         return float(culprit[2])
     return 0.0
 
 
 def _mcts_has_identity_baseline(result: AuditResult) -> bool:
-    mcts_result = getattr(result, "mcts_result", None)
-    action_credits = getattr(mcts_result, "action_credits", {})
+    attribution_result = result.attribution_result
+    action_credits = attribution_result.action_credits if attribution_result else {}
     if not action_credits:
         return False
     return all(

@@ -72,6 +72,7 @@ class TopPSaturationEvent:
     case_id: str
     failure_type: str
     subset: str
+    runtime_branch: str
     attempted_skill_ids: tuple[str, ...]
     finite_skill_ids: tuple[str, ...]
     positive_skill_ids: tuple[str, ...]

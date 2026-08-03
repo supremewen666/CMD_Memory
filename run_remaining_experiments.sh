@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
-# CMD 观测式实验 — 双卡并行（2× A100，不同 SSH 连接，Qwen2.5-7B + Llama-3.1-8B）
+# CMD 观测式实验 — 双卡并行（每卡双端点：Llama answer/selection + frozen Qwen evaluation）
 #
 # Usage:
 #   SSH 1 (GPU 0):  ./run_remaining_experiments.sh --role gpu0
 #   SSH 2 (GPU 1):  ./run_remaining_experiments.sh --role gpu1
+#   后台运行:        ./run_remaining_experiments.sh --role gpu0 --detach
 #   任一台:         ./run_remaining_experiments.sh --role analyze   （先 scp 汇聚 JSONL）
 #   冒烟:           ./run_remaining_experiments.sh --role gpu0 --smoke
 #   单 Arena 调试:  ./run_remaining_experiments.sh --role gpu0 --only memtrace_seed24
 #
-# GPU 0 (~3.5h):  MemTrace-B seed 24 → seed 124 → MemFail
-# GPU 1 (~3.5h):  MemTrace-B seed 224 → STALE → MemTrace-B Llama (Qwen judge + Llama answerer)
+# GPU 0: MemTrace-B seed 24 → seed 124 → MemFail
+# GPU 1: MemTrace-B seed 224 → STALE → replicate seed 24
 #
 # 产出：artifacts/arena/*.jsonl，分析后 artifacts/arena/analysis/*.csv
 
 set -euo pipefail
+export PYTHONUNBUFFERED=1
 
 # ── 路径 ────────────────────────────────────────────────────────────────────
 CMD_ROOT="$HOME/wsy/CMD_Memory"
@@ -27,11 +29,14 @@ LOG_FILE="/tmp/vllm_shared.log"
 JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://localhost:${LLAMA_JUDGE_PORT}/v1}"
 JUDGE_MODEL="${JUDGE_MODEL:-qwen2.5-7b-instruct}"
 JUDGE_API_KEY="${JUDGE_API_KEY:-dummy}"
+CMD_CASE_WORKERS="${CMD_CASE_WORKERS:-32}"
+VLLM_READY_TIMEOUT_SECONDS="${VLLM_READY_TIMEOUT_SECONDS:-300}"
 
 # ── 参数 ────────────────────────────────────────────────────────────────────
 ROLE=""
 SMOKE=false
 ONLY=""
+DETACH=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,15 +46,18 @@ while [[ $# -gt 0 ]]; do
       SMOKE=true; shift ;;
     --only)
       ONLY="$2"; shift 2 ;;
+    --detach)
+      DETACH=true; shift ;;
     --help|-h)
-      echo "Usage: $0 --role gpu0|gpu1|analyze [--smoke] [--only NAME]"
+      echo "Usage: $0 --role gpu0|gpu1|analyze [--smoke] [--only NAME] [--detach]"
       echo ""
       echo "  GPU 0 (~3.5h): MemTrace-B seeds 24+124 → MemFail"
-      echo "  GPU 1 (~3.5h): MemTrace-B seed 224 → STALE → MemTrace-B Llama"
+      echo "  GPU 1 (~3.5h): MemTrace-B seed 224 → STALE → replicate seed 24"
       echo "  analyze:        unified analysis (run after scp-ing results to one machine)"
+      echo "  --detach:       run in a new session; logs to artifacts/arena/run_ROLE_TIMESTAMP.log"
       echo ""
       echo "  --only:  skip straight to one named phase (memtrace_seed24, memtrace_seed124,"
-      echo "           memtrace_seed224, memfail, stale, memtrace_llama, analysis)"
+      echo "           memtrace_seed224, memfail, stale, memtrace_llama)"
       exit 0 ;;
     *)
       echo "Unknown: $1" >&2; exit 1 ;;
@@ -59,6 +67,20 @@ done
 if [[ -z "$ROLE" ]]; then
   echo "ERROR: --role is required (gpu0 | gpu1 | analyze)" >&2
   exit 1
+fi
+
+if $DETACH && [[ -z "${CMD_EXPERIMENTS_DETACHED:-}" ]]; then
+  mkdir -p "$ARTIFACTS"
+  detach_log="${ARTIFACTS}/run_${ROLE}_$(date +%Y%m%d_%H%M%S).log"
+  detach_args=(--role "$ROLE")
+  $SMOKE && detach_args+=(--smoke)
+  [[ -n "$ONLY" ]] && detach_args+=(--only "$ONLY")
+  nohup setsid env CMD_EXPERIMENTS_DETACHED=1 "$0" "${detach_args[@]}" \
+    > "$detach_log" 2>&1 < /dev/null &
+  detach_pid=$!
+  echo "[detach] started PID ${detach_pid} (log: ${detach_log})"
+  echo "[detach] follow: tail -f ${detach_log}"
+  exit 0
 fi
 
 cd "$CMD_ROOT"
@@ -82,7 +104,7 @@ PY
 }
 
 start_qwen_vllm() {
-  if curl -s "localhost:${QWVLLM_PORT}/v1/models" >/dev/null 2>&1; then
+  if curl --noproxy '*' -s "localhost:${QWVLLM_PORT}/v1/models" >/dev/null 2>&1; then
     echo "[vLLM] Qwen port ${QWVLLM_PORT} already up, reusing"
     return 0
   fi
@@ -109,8 +131,8 @@ start_qwen_vllm() {
   echo "[vLLM] Qwen pid $(cat "$PID_FILE")"
 
   echo -n "[vLLM] waiting for port ${QWVLLM_PORT} …"
-  for i in $(seq 1 120); do
-    if curl -s "localhost:${QWVLLM_PORT}/v1/models" >/dev/null 2>&1; then
+  for i in $(seq 1 "$VLLM_READY_TIMEOUT_SECONDS"); do
+    if curl --noproxy '*' -s "localhost:${QWVLLM_PORT}/v1/models" >/dev/null 2>&1; then
       echo " ready (${i}s)"
       return 0
     fi
@@ -141,8 +163,8 @@ start_llama_dual_vllm() {
   qwen_up=false
   llma_up=false
 
-  curl -s "localhost:${LLAMA_JUDGE_PORT}/v1/models" >/dev/null 2>&1 && qwen_up=true
-  curl -s "localhost:${LLAMA_ANSWER_PORT}/v1/models" >/dev/null 2>&1 && llma_up=true
+  curl --noproxy '*' -s "localhost:${LLAMA_JUDGE_PORT}/v1/models" >/dev/null 2>&1 && qwen_up=true
+  curl --noproxy '*' -s "localhost:${LLAMA_ANSWER_PORT}/v1/models" >/dev/null 2>&1 && llma_up=true
 
   if $qwen_up && $llma_up; then
     echo "[vLLM] dual endpoints already up, reusing"
@@ -191,10 +213,10 @@ start_llama_dual_vllm() {
   fi
 
   echo -n "[vLLM] waiting for dual endpoints …"
-  for i in $(seq 1 120); do
+  for i in $(seq 1 "$VLLM_READY_TIMEOUT_SECONDS"); do
     local ok=true
-    curl -s "localhost:${LLAMA_JUDGE_PORT}/v1/models" >/dev/null 2>&1 || ok=false
-    curl -s "localhost:${LLAMA_ANSWER_PORT}/v1/models" >/dev/null 2>&1 || ok=false
+    curl --noproxy '*' -s "localhost:${LLAMA_JUDGE_PORT}/v1/models" >/dev/null 2>&1 || ok=false
+    curl --noproxy '*' -s "localhost:${LLAMA_ANSWER_PORT}/v1/models" >/dev/null 2>&1 || ok=false
     if $ok; then
       echo " ready (${i}s)"
       return 0
@@ -271,19 +293,24 @@ run_memtrace() {
   local extra=("$@")
   local output="${ARTIFACTS}/memtrace_${label}.jsonl"
 
+  if [[ -s "$output" ]]; then
+    echo "[skip] ${output} exists and is non-empty; remove it to rerun this phase"
+    return 0
+  fi
+
   echo "===== Arena: MemTrace-B (${label}) ====="
 
   if $SMOKE; then
     python -m experiments.run_arena_memtrace \
       --backend-factory experiments.arena_backends:create_vllm_backend \
-      --limit 50 --chains \
+      --limit 50 --chains --case-workers "$CMD_CASE_WORKERS" --best-of-n-control \
       "${extra[@]}" \
       --output "$output" \
       2>&1 | tee "${ARTIFACTS}/memtrace_${label}.log"
   else
     python -m experiments.run_arena_memtrace \
       --backend-factory experiments.arena_backends:create_vllm_backend \
-      --chains --deposit-after 0.5 --deposit-min-benefit 0.05 --deposit-min-support 3 \
+      --chains --case-workers 1 --best-of-n-control --deposit-after 0.5 --deposit-min-benefit 0.05 --deposit-min-support 3 \
       "${extra[@]}" \
       --output "$output" \
       2>&1 | tee "${ARTIFACTS}/memtrace_${label}.log"
@@ -292,21 +319,33 @@ run_memtrace() {
 }
 
 run_memfail() {
+  local output="${ARTIFACTS}/memfail_observations.jsonl"
+  if [[ -s "$output" ]]; then
+    echo "[skip] ${output} exists and is non-empty; remove it to rerun this phase"
+    return 0
+  fi
+
   echo "===== Arena: MemFail ====="
   python -m experiments.run_arena_memfail \
     --backend-factory experiments.arena_backends:create_vllm_backend \
-    --no-chains \
-    --output "${ARTIFACTS}/memfail_observations.jsonl" \
+    --no-chains --case-workers "$CMD_CASE_WORKERS" --best-of-n-control \
+    --output "$output" \
     2>&1 | tee "${ARTIFACTS}/memfail_run.log"
   echo "[done] MemFail → ${ARTIFACTS}/memfail_observations.jsonl"
 }
 
 run_stale() {
+  local output="${ARTIFACTS}/stale_observations.jsonl"
+  if [[ -s "$output" ]]; then
+    echo "[skip] ${output} exists and is non-empty; remove it to rerun this phase"
+    return 0
+  fi
+
   echo "===== Arena: STALE ====="
   python -m experiments.run_arena_stale \
     --backend-factory experiments.arena_backends:create_vllm_backend \
-    --no-chains \
-    --output "${ARTIFACTS}/stale_observations.jsonl" \
+    --no-chains --case-workers "$CMD_CASE_WORKERS" --best-of-n-control \
+    --output "$output" \
     2>&1 | tee "${ARTIFACTS}/stale_run.log"
   echo "[done] STALE → ${ARTIFACTS}/stale_observations.jsonl"
 }
@@ -332,8 +371,8 @@ run_analysis() {
 
 main_gpu0() {
   mkdir -p "$ARTIFACTS"
-  start_qwen_vllm
-  qwen_env
+  start_llama_dual_vllm
+  llama_dual_env
   gate_g0
 
   case "$ONLY" in
@@ -350,7 +389,7 @@ main_gpu0() {
       if $SMOKE; then
         run_memtrace "smoke" --seed 24
         echo "[smoke] done — check ${ARTIFACTS}/memtrace_smoke.jsonl"
-        stop_qwen_vllm
+        stop_llama_dual_vllm
         return 0
       fi
       run_memtrace "seed24" --seed 24
@@ -368,7 +407,7 @@ main_gpu0() {
 
   echo ""
   echo "===== GPU 0 DONE ====="
-  stop_qwen_vllm
+  stop_llama_dual_vllm
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -377,37 +416,36 @@ main_gpu0() {
 
 main_gpu1() {
   mkdir -p "$ARTIFACTS"
-
-  # ── Phase 1: Qwen ──────────────────────────────────────────────────────
-  start_qwen_vllm
-  qwen_env
+  start_llama_dual_vllm
+  llama_dual_env
   gate_g0
 
   case "$ONLY" in
     memtrace_seed224)
       run_memtrace "seed224" --seed 224
-      stop_qwen_vllm
+      stop_llama_dual_vllm
       return 0
       ;;
     stale)
       run_stale
-      stop_qwen_vllm
+      stop_llama_dual_vllm
       return 0
       ;;
     memtrace_llama)
-      # Fall through to Llama phase below — stop Qwen first
-      stop_qwen_vllm
+      run_memtrace "llama" --seed 24
+      stop_llama_dual_vllm
+      return 0
       ;;
     "")
       if $SMOKE; then
         run_memtrace "smoke" --seed 224
         echo "[smoke] done — check ${ARTIFACTS}/memtrace_smoke.jsonl"
-        stop_qwen_vllm
+        stop_llama_dual_vllm
         return 0
       fi
       run_memtrace "seed224" --seed 224
       run_stale
-      stop_qwen_vllm
+      run_memtrace "llama" --seed 24
       ;;
     *)
       echo "ERROR: unknown --only target: $ONLY" >&2
@@ -415,15 +453,6 @@ main_gpu1() {
       exit 1
       ;;
   esac
-
-  # ── Phase 2: Llama (dual-endpoint: Qwen judge frozen + Llama answerer) ──
-  echo ""
-  echo "===== Switching to Llama dual-endpoint ====="
-  start_llama_dual_vllm
-  llama_dual_env
-  gate_g0
-
-  run_memtrace "llama" --seed 24
 
   echo ""
   echo "===== GPU 1 DONE ====="

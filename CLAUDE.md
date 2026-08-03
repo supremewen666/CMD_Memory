@@ -6,11 +6,11 @@ CMD frames agent-memory failure diagnosis as counterfactual attribution. The run
 
 ```text
 retrieval recall
-  -> hook (6 confidence factors -> evidence present in recall?)
+  -> hook (4 live confidence factors, 0 LLM calls -> evidence present in recall?)
        ├─ NO  (missing) -> FILL: generate this turn, async re-extract. No diagnosis, no label.
        └─ YES (present) -> FIX: lightweight correction (de-conflict / re-rank) -> generate
                               -> Tier 2 item gate (item signals folded into counterfactual, not predicted labels)
-                              -> Tier 3 step-level single-point counterfactual scan (4 pipeline step actions, generation-point search)
+                              -> Tier 3 single-point counterfactual scan (exhaustive over legal step actions at one generation point; SINGLE_POINT_DEPTH = 1)
                               -> ECS draft -> RepairExecutor / RepairOrchestrator
                               -> Post-Repair Context Replay (quality gate)
                               -> Failure Memory for future similar failures
@@ -18,7 +18,7 @@ retrieval recall
                                  (skill body = executable repair operator, fingerprint-retrieved, recovery-gated accept-if-improves)
 ```
 
-The deliverable is a standalone **CMD-Audit** harness whose headline is **counterfactual repair efficacy** — a self-repair + self-evolution loop, not a fault classifier reporting label macro-F1. The **4 live pipeline step actions** (`retrieval_error`, `injection_error`, `granularity_error`, `safety_error`) and **5 item labels** (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) are an internal action space for repair search, not prediction targets scored against gold; recovery gain Δk is the fitness signal. Construction of repaired context is gold-free by structure — a pure function of `(recall_set, pipeline_action)` that never reads `case.gold_*` (scoring uses gold, construction does not). Online attribution is offline-oracle / online-student: an offline exhaustive single-point scan distills transferable `(gen_point, action)` priors, online search is a budgeted top-2 directed seed plus single-point remainder (MCTS tree search retired from the mainline per C6: TRUE_COUPLED 1/30; the `counterfactual/` package keeps the historical import path). Formation failures (write / compression / premature_extraction / ingestion) are absorbed by the Fill branch, not labeled; reasoning faults emerge through back-prop, not labeled. `CONTEXT.md` is the authority on the target design; `SKILL_EVOLUTION_DESIGN.md` is the authority on the operator DSL / skill-library layer.
+The deliverable is a standalone **CMD-Audit** harness whose headline is **counterfactual repair efficacy** — a self-repair + self-evolution loop, not a fault classifier reporting label macro-F1. The **4 live pipeline step actions** (`retrieval_error`, `injection_error`, `granularity_error`, `safety_error`) and **5 item labels** (`item_wrong`, `item_stale`, `item_conflict`, `item_poisoned`, `item_compression_distorted`) are an internal action space for repair search, not prediction targets scored against gold; recovery gain Δk is the fitness signal. Construction of repaired context is gold-free by structure — a pure function of `(recall_set, pipeline_action)` that never reads `case.gold_*`. **Selection is not gold-free**: `_rollout_score` → `rollout_to_terminal(..., gold_answer, answer_verifier)` ranks actions by `score_answer_with_verifier(answer, gold_answer)`. Any experiment that needs a gold-free *choice* (e.g. the observational arena's CMD arm) must inject a reference-free `answer_verifier` and a non-empty sentinel `gold_answer` — `_compute_recovery_gain` short-circuits to `0.0` on a falsy gold. Online attribution is offline-oracle / online-student: an offline exhaustive single-point scan distills transferable `(gen_point, action)` priors; online, priors re-order the action list. The scan is bounded by both `max_iterations` (intervention-rollout budget) and `time_limit_seconds`; `attribute_single_point` forwards both to `SinglePointConfig`. On either cutoff, `SearchResult` records `truncated`, `unscored_actions`, and `timed_out_actions`, so claims of exhaustiveness are conditional on no recorded truncation (tree search retired from the mainline per C6: TRUE_COUPLED 1/30, recorded in `DISCUSSION.md`; there is no `cmd_audit/mcts/` package). `SinglePointConfig.include_item_actions` defaults to `False` and `harness.py` does not override it, so the live Tier 3 scan proposes only the 4 step actions; item findings enter through `intervention_config["item_signal_hints"]`, not as searchable actions. Formation failures (write / compression / premature_extraction / ingestion) are absorbed by the Fill branch, not labeled; reasoning faults emerge through back-prop, not labeled. `CONTEXT.md` is the authority on the target design; `SKILL_EVOLUTION_DESIGN.md` is the authority on the operator DSL / skill-library layer.
 
 ## Required Reading
 
@@ -63,7 +63,7 @@ data/probe_cases/*.json
     -> hook/ two-branch confidence gate (Fill vs Fix)
     -> baselines/ comparators and memory-probe baseline
     -> item_gate/ Tier 2 item labels (reference-contrast divergence)
-    -> counterfactual/ Tier 3 step-level single-point scan over generation points 
+    -> counterfactual/ Tier 3 single-point scan (depth 1, exhaustive over legal step actions)
     -> scoring/ LLM SubagentScorer + AnswerRubricScorer (G-Eval logprob)
     -> attribution/ recovery-gain / credit-based label assignment
     -> repair/ ECS + RepairExecutor / RepairOrchestrator + failure_memory
@@ -73,7 +73,7 @@ cmd_audit/adapters/
   -> mem0.py / letta.py recorded-trace adapters, stale.py STALE item-layer adapter
 ```
 
-`replays/` is now a legacy/internal offline-baseline shim. The live attribution path is `item_gate/` (Tier 2) + `counterfactual/` operator specs (Tier 3); formation oracle, reasoning, route, and portfolio replays are not paper-facing live modules.
+`replays/` is a legacy/internal offline-baseline shim for *attribution*: the live attribution path is `item_gate/` (Tier 2) + `counterfactual/` operator specs (Tier 3), and formation oracle, reasoning, route, and portfolio replays are not paper-facing live modules. It is **not fully detached** — `repair/post_repair.py` imports `ReplayResult` and `core.labels.REPLAY_TO_LABEL`, and `draft_ecs` (on the live `_run_full` path) uses them, falling back to `_gold_free_runtime_evidence_block` when no replay matches. Removing `replays/` requires cutting that dependency first.
 
 Probe datasets (`data/probe_cases/`, built by `experiments/build_probe_cases.py`): `real_multihop_cases.json` (4-action single-fault chains, C4/C5), `real_recurrent_cases.json` (same-chain query families with fixed label across paraphrased variants — the recurrence structure C7 self-evolution needs), `real_three_source_cases.json` (cross-source, item labels retained), `real_coupled_failure_boundary_cases.json` (C6), `real_item_layer_cases.json` + `real_item_poisoned_hitl_cases.json` (STALE item-layer), `real_longmemeval_cases.json` / `real_memoryarena_cases.json` / `real_toolbench_cases.json` (external benchmark sources), `coupled_failure_inspected_subset.json` (inspected C6 subset).
 
@@ -83,16 +83,16 @@ Probe datasets (`data/probe_cases/`, built by `experiments/build_probe_cases.py`
 | `core/labels.py` | `PIPELINE_LABEL_ORDER` (4 live step actions), `ITEM_LABELS` (5), validators; `REPLAY_TO_LABEL` is legacy/offline replay mapping only. |
 | `core/llm_client.py` | Provider-agnostic LLM API client (`generate(prompt, *, system=None) -> str`) |
 | `data_io/` | `load_probe_cases`, `load_all_real_cases`, `load_real_cases_by_source` |
-| `replays/` | Legacy/internal offline-baseline shim; not exported from top-level `cmd_audit` and not part of the live operator-skill path. |
+| `replays/` | Legacy/internal offline-baseline shim; not exported from top-level `cmd_audit`, but still imported by `repair/post_repair.py` (`ReplayResult`, `REPLAY_TO_LABEL`) on the live `draft_ecs` path. |
 | `attribution/` | Legacy/offline replay ranking helpers; live attribution uses `counterfactual/` operator search. |
 | `scoring/phrase.py` | `answer_score`, `evidence_recall_from_text` (phrase-matching fallback) |
 | `scoring/llm.py` | `SubagentScorer`, `EvidenceVerifier`, `AnswerVerifier`; `AnswerRubricScorer` (continuous answer-axis G-Eval) |
 | `scoring/retrieval.py` | BM25 deterministic retrieval, `RetrievalMetrics`, evidence boundary enforcement |
 | `harness.py` | 3 public entry points: `run_case`, `run_cases`, `run_real_suite`; kwargs control hook/repair/post_repair |
 | `adapters/` | CMD-Skill Adapter package: `base.py`, `harness.py`, `mem0.py` (2 cut points), `letta.py` (3 cut points), `stale.py` (STALE item-layer scenarios: `M_old` stale item vs `M_new` current item + gold) |
-| `hook/` | Two-branch confidence gate: `post_retrieve_hook.py`, `constants.py` (6-factor schema) |
+| `hook/` | Two-branch confidence gate (live at `harness.py:690`, **0 LLM calls** — token overlap, Shannon entropy, negation-based conflict, logistic): `post_retrieve_hook.py`, `constants.py`. Schema declares 6 factors; `memory_recency_min` / `memory_recency_spread` are hardcoded `0.0` (`RetrievedItem` carries no timestamp), so 4 are live. |
 | `item_gate/` | Tier 2 item gate (live in `harness.py`): `divergence.py`, `collision.py`, `loo.py`, `gate.py` |
-| `counterfactual/` | Tier 3 step-level single-point scan: `actions.py`, `rollout.py`, `context.py`, `search.py` (`SinglePointAttributor`), `operators.py` (composable operator specs); tree.py/value.py/distill.py deleted per C6 |
+| `counterfactual/` | Tier 3 single-point scan: `actions.py` (`SINGLE_POINT_DEPTH = 1`), `rollout.py`, `context.py`, `search.py` (`SinglePointAttributor`), `operators.py` (composable operator specs); tree.py/value.py/distill.py deleted per C6. Cost model: `_step_context` = 1 call, `rollout_to_terminal` = 2 (1 generate + 1 judge), so a scan is `3 + 3A` calls for `A` legal non-identity actions (A = 3, or 4 when any item has safety metadata). |
 | `repair/post_repair.py` | `ECSDraft`, `RepairedContext`, `PostRepairResult`; `draft_ecs`, `run_post_repair_context_replay` |
 | `repair/executor.py` | `RepairExecutor`, `RepairExecutorResult`; single-repair execution |
 | `repair/orchestrator.py` | Iterative repair loop over `close_deltas` |

@@ -6,6 +6,10 @@ import sys
 import pytest
 
 from experiments import analyze_arena_results
+from experiments.arena_runner_common import (
+    arena_case_ids_sha256,
+    arena_file_sha256,
+)
 
 
 def _write(path, rows):
@@ -15,16 +19,33 @@ def _write(path, rows):
     )
 
 
+def _manifest(
+    arena_id: str,
+    *,
+    case_ids: tuple[str, ...] = ("case-1",),
+    runtime_uses_gold: bool = False,
+) -> dict[str, object]:
+    return {
+        "record_type": "arena_manifest",
+        "arena_id": arena_id,
+        "case_count": len(case_ids),
+        "runtime_uses_gold": runtime_uses_gold,
+        "dataset_fingerprint_version": "arena-dataset-v1",
+        "dataset_source_kind": "file",
+        "dataset_source_path": "/unmounted/fixture-cases.json",
+        "dataset_source_sha256": "a" * 64,
+        "dataset_source_size_bytes": 1,
+        "selected_case_ids_sha256": arena_case_ids_sha256(case_ids),
+        "selected_cases_sha256": "b" * 64,
+    }
+
+
 def test_unified_analysis_writes_descriptive_tables(tmp_path, monkeypatch):
     source = tmp_path / "arena.jsonl"
     _write(
         source,
         (
-            {
-                "record_type": "arena_manifest",
-                "arena_id": "fixture",
-                "runtime_uses_gold": False,
-            },
+            _manifest("fixture"),
             {
                 "record_type": "gold_free_observation",
                 "arena_id": "fixture",
@@ -128,12 +149,193 @@ def test_analysis_rejects_gold_dependent_runtime_manifest(tmp_path):
     _write(
         source,
         (
-            {
-                "record_type": "arena_manifest",
-                "arena_id": "bad",
-                "runtime_uses_gold": True,
-            },
+            _manifest("bad", runtime_uses_gold=True),
         ),
     )
     with pytest.raises(ValueError, match="runtime_uses_gold"):
         analyze_arena_results._load_artifacts((source,))
+
+
+def test_analysis_rejects_unfingerprinted_arena_artifact(tmp_path) -> None:
+    source = tmp_path / "unfingerprinted.jsonl"
+    _write(
+        source,
+        (
+            {
+                "record_type": "arena_manifest",
+                "arena_id": "legacy",
+                "runtime_uses_gold": False,
+            },
+        ),
+    )
+
+    with pytest.raises(ValueError, match="dataset fingerprint"):
+        analyze_arena_results._load_artifacts((source,))
+
+
+def test_analysis_rejects_case_ids_that_do_not_match_manifest(tmp_path) -> None:
+    source = tmp_path / "wrong-case.jsonl"
+    _write(
+        source,
+        (
+            _manifest("fixture"),
+            {
+                "record_type": "top_p_saturation_event",
+                "case_id": "different-case",
+            },
+        ),
+    )
+
+    with pytest.raises(ValueError, match="case ids do not match"):
+        analyze_arena_results._load_artifacts((source,))
+
+
+def test_analysis_rejects_changed_mounted_dataset_bytes(tmp_path) -> None:
+    dataset = tmp_path / "cases.json"
+    dataset.write_text('[{"case_id":"case-1"}]\n', encoding="utf-8")
+    manifest = {
+        **_manifest("fixture"),
+        "dataset_source_path": str(dataset),
+        "dataset_source_sha256": arena_file_sha256(dataset),
+        "dataset_source_size_bytes": dataset.stat().st_size,
+    }
+    artifact = tmp_path / "changed-source.jsonl"
+    _write(
+        artifact,
+        (
+            manifest,
+            {
+                "record_type": "top_p_saturation_event",
+                "case_id": "case-1",
+            },
+        ),
+    )
+    dataset.write_text('[{"case_id":"tampered"}]\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="dataset (size|bytes) differs"):
+        analyze_arena_results._load_artifacts((artifact,))
+
+
+def test_cmd_vs_best_of_n_summary_reports_structural_delta() -> None:
+    rows = [
+        {
+            "arena_id": "fixture",
+            "failure_type": "retrieval_error",
+            "runtime_branch": "fix",
+            "candidate_budget": 2,
+            "cmd_selected_skill_id": "a",
+            "cmd_abstained": False,
+            "cmd_shadow_gold_gain": 0.6,
+            "best_of_n_selected_index": 0,
+            "best_of_n_abstained": False,
+            "best_of_n_shadow_gold_gain": 0.2,
+            "budget_aligned": True,
+            "status": "ok",
+        },
+        {
+            "arena_id": "fixture",
+            "failure_type": "retrieval_error",
+            "runtime_branch": "fix",
+            "candidate_budget": 2,
+            "cmd_selected_skill_id": "a",
+            "cmd_abstained": False,
+            "cmd_shadow_gold_gain": 0.1,
+            "best_of_n_selected_index": 0,
+            "best_of_n_abstained": False,
+            "best_of_n_shadow_gold_gain": 0.3,
+            "budget_aligned": True,
+            "status": "ok",
+        },
+        {
+            "arena_id": "fixture",
+            "failure_type": "retrieval_error",
+            "runtime_branch": "fill",
+            "candidate_budget": 2,
+            "cmd_selected_skill_id": None,
+            "cmd_abstained": True,
+            "cmd_shadow_gold_gain": 0.0,
+            "best_of_n_selected_index": 0,
+            "best_of_n_abstained": False,
+            "best_of_n_shadow_gold_gain": 1.0,
+            "budget_aligned": True,
+            "status": "ok",
+        },
+    ]
+
+    summary = analyze_arena_results._arm_comparison_summary(rows)[0]
+
+    assert summary["n_total"] == 2
+    assert summary["n_paired"] == 2
+    assert summary["budget_aligned_count"] == 2
+    assert summary["cmd_wins"] == 1
+    assert summary["best_of_n_wins"] == 1
+    assert summary["mean_structural_delta"] == pytest.approx(0.1)
+
+
+def test_comparison_summary_drops_failures_misalignment_and_abstentions() -> None:
+    base = {
+        "arena_id": "fixture",
+        "failure_type": "retrieval_error",
+        "runtime_branch": "fix",
+        "candidate_budget": 3,
+        "cmd_selected_skill_id": "a",
+        "cmd_abstained": False,
+        "cmd_shadow_gold_gain": 0.5,
+        "best_of_n_selected_index": 0,
+        "best_of_n_abstained": False,
+        "best_of_n_shadow_gold_gain": 0.4,
+        "budget_aligned": True,
+        "status": "ok",
+    }
+    rows = [
+        base,
+        {
+            **base,
+            "best_of_n_shadow_gold_gain": None,
+            "status": "selection_score_unavailable",
+        },
+        {**base, "budget_aligned": False},
+        {
+            **base,
+            "cmd_selected_skill_id": None,
+            "cmd_abstained": True,
+            "cmd_shadow_gold_gain": None,
+        },
+    ]
+
+    summary = analyze_arena_results._arm_comparison_summary(rows)[0]
+
+    assert summary["n_total"] == 4
+    assert summary["n_paired"] == 1
+    assert summary["n_dropped_control_fail"] == 1
+    assert summary["n_dropped_budget_mismatch"] == 1
+    assert summary["n_cmd_abstain"] == 1
+
+
+def test_comparison_is_stratified_by_candidate_budget() -> None:
+    rows = [
+        {
+            "arena_id": "fixture",
+            "failure_type": "retrieval_error",
+            "runtime_branch": "fix",
+            "candidate_budget": budget,
+            "cmd_selected_skill_id": "a",
+            "cmd_abstained": False,
+            "cmd_shadow_gold_gain": 0.5,
+            "best_of_n_selected_index": 0,
+            "best_of_n_abstained": False,
+            "best_of_n_shadow_gold_gain": 0.4,
+            "budget_aligned": True,
+            "status": "ok",
+        }
+        for budget in (1, 3, 3)
+    ]
+
+    strata = analyze_arena_results._arm_comparison_by_budget(rows)
+
+    assert [(row["candidate_budget"], row["n_total"]) for row in strata] == [
+        (1, 1),
+        (3, 2),
+    ]
+    assert strata[0]["selection_is_nontrivial"] is False
+    assert strata[1]["selection_is_nontrivial"] is True

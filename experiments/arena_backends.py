@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+from threading import Lock
 from typing import Any, Mapping, Sequence
 
 from cmd_audit.core.llm_client import LLMResponse
@@ -30,6 +31,7 @@ from cmd_audit.scoring.llm import (
 )
 from experiments.arena_runner_common import (
     ArenaCase,
+    BestOfNControlExecution,
     DualScoreExecution,
 )
 from experiments.experiment_runner_common import (
@@ -159,11 +161,12 @@ class ReferenceFreeAnswerScorer:
 
 
 class VLLMDualScoreArenaBackend:
-    """Real answerer+judge backend with isolated runtime/shadow scoring.
+    """Real answerer plus isolated selection/evaluation judges.
 
-    Runtime ranking uses only a reference-free judge.  ``gold_answer`` is read
-    in :meth:`_shadow_score` and nowhere in candidate retrieval or runtime
-    scoring.
+    Runtime ranking uses the answerer endpoint as a reference-free selection
+    judge. The frozen evaluation judge is used only for shadow scoring.
+    ``gold_answer`` is read in :meth:`_shadow_score` and nowhere in candidate
+    retrieval or runtime scoring.
     """
 
     gold_free_signal_name = (
@@ -177,6 +180,7 @@ class VLLMDualScoreArenaBackend:
         *,
         answer_client: Any | None = None,
         judge_client: Any | None = None,
+        selection_judge_client: Any | None = None,
         shadow_verifier: Any | None = None,
         validate_endpoints: bool = True,
         max_reference_free_retries: int = 1,
@@ -187,19 +191,29 @@ class VLLMDualScoreArenaBackend:
             built_answer, built_judge = build_clients()
             answer_client = answer_client or built_answer
             judge_client = judge_client or built_judge
+        # The answerer endpoint doubles as the reference-free *selection*
+        # judge.  The frozen judge endpoint is reserved for shadow evaluation.
+        # This keeps runtime argmax and reported outcome measurement from
+        # optimizing the same judge signal.
+        selection_judge_client = selection_judge_client or answer_client
         if validate_endpoints:
+            _assert_distinct_judge_identities(
+                selection_judge_client,
+                judge_client,
+            )
             assert_g_eval_available(
                 judge_client,
                 role="observational-arena-shadow-judge",
             )
         self.answer_client = answer_client
+        self.selection_judge_client = selection_judge_client
         self.judge_client = judge_client
         self.shadow_verifier = shadow_verifier or build_answer_verifier(
             judge_client,
             answer_mode="answer-rubric",
         )
         self.reference_free_scorer = ReferenceFreeAnswerScorer(
-            judge_client,
+            selection_judge_client,
             max_retries=max_reference_free_retries,
         )
         self._runtime_views: dict[str, RuntimeCaseView] = {}
@@ -207,10 +221,28 @@ class VLLMDualScoreArenaBackend:
         self._runtime_score_cache: dict[tuple[str, str], float | None] = {}
         self._shadow_score_cache: dict[tuple[str, str], float] = {}
         self._deposited: list[ChainDepositionEvent] = []
+        self._cache_lock_guard = Lock()
+        self._cache_locks: dict[tuple[str, object], Lock] = {}
+        self._counter_guard = Lock()
+        self._cmd_call_counts: dict[str, list[int]] = {}
 
     @property
     def deposited_events(self) -> tuple[ChainDepositionEvent, ...]:
         return tuple(self._deposited)
+
+    @property
+    def selection_judge_identity(self) -> str:
+        return _client_identity(self.selection_judge_client)
+
+    @property
+    def evaluation_judge_identity(self) -> str:
+        return _client_identity(self.judge_client)
+
+    def cmd_call_counts(self, case: ArenaCase) -> tuple[int, int]:
+        """Actual candidate answer/selection API attempts for one case."""
+        with self._counter_guard:
+            counts = self._cmd_call_counts.get(case.case_id, [0, 0])
+            return counts[0], counts[1]
 
     def candidates(self, case: ArenaCase) -> Sequence[SkillCandidate]:
         view = self._runtime_view(case)
@@ -263,17 +295,27 @@ class VLLMDualScoreArenaBackend:
                 input_context=input_context,
                 view=view,
             )
-            baseline_answer = self._answer(case, origin_context)
-            repaired_answer = self._answer(case, repaired_context)
+            baseline_answer = self._answer(
+                case,
+                origin_context,
+                purpose="baseline",
+            )
+            repaired_answer = self._answer(
+                case,
+                repaired_context,
+                purpose="cmd_candidate",
+            )
             baseline_runtime = self._runtime_score(
                 case,
                 context=origin_context,
                 answer=baseline_answer,
+                purpose="baseline",
             )
             repaired_runtime = self._runtime_score(
                 case,
                 context=repaired_context,
                 answer=repaired_answer,
+                purpose="cmd_candidate",
             )
             gold_free_gain = (
                 repaired_runtime - baseline_runtime
@@ -333,34 +375,174 @@ class VLLMDualScoreArenaBackend:
             return
         self._deposited.append(event)
 
+    def evaluate_best_of_n(
+        self,
+        case: ArenaCase,
+        *,
+        candidate_count: int,
+        origin_context: str,
+    ) -> BestOfNControlExecution:
+        """Same-budget generic answer search without CMD routing/operators.
+
+        The control sees an unstructured information superset (origin context
+        plus every candidate item), generates ``N`` independent answer
+        candidates, and uses the same reference-free selection scorer as the
+        CMD arm. Only the selected answer reaches the frozen shadow evaluator.
+        """
+        if candidate_count <= 0:
+            raise ValueError("candidate_count must be > 0")
+        view = self._runtime_view(case)
+        pool_context = _unstructured_pool_context(
+            origin_context,
+            view.candidate_items,
+        )
+        baseline_answer = self._answer(case, origin_context, purpose="baseline")
+        baseline_runtime = self._runtime_score(
+            case,
+            context=origin_context,
+            answer=baseline_answer,
+            purpose="baseline",
+        )
+        scored: list[tuple[float, int, str]] = []
+        answer_calls = 0
+        selection_calls = 0
+        for index in range(candidate_count):
+            prompt = "\n\n".join(
+                (
+                    "UNSTRUCTURED BEST-OF-N CONTROL.",
+                    "Do not diagnose a pipeline action or use a repair taxonomy.",
+                    f"CANDIDATE INDEX: {index + 1}/{candidate_count}",
+                    "CONTEXT AND FLAT MEMORY POOL:",
+                    pool_context,
+                    "QUERY:",
+                    view.query,
+                    "Produce one independent candidate answer.",
+                    "ANSWER:",
+                )
+            )
+            try:
+                answer_calls += 1
+                answer = self.answer_client.generate(
+                    prompt,
+                    system=AGENT_SYSTEM_PROMPT,
+                )
+                selection_calls += 1
+                score = self.reference_free_scorer.score(
+                    query=view.query,
+                    context=pool_context,
+                    answer=answer,
+                )
+            except Exception as exc:
+                _logger.warning(
+                    "best-of-N candidate failed case=%s index=%s: %s",
+                    case.case_id,
+                    index,
+                    exc,
+                )
+                continue
+            if score is not None:
+                scored.append((float(score), index, answer))
+
+        if not scored or baseline_runtime is None:
+            return BestOfNControlExecution(
+                candidate_count=candidate_count,
+                finite_candidate_count=len(scored),
+                selected_index=None,
+                selection_gain=None,
+                shadow_gold_gain=None,
+                answer_calls=answer_calls,
+                selection_judge_calls=selection_calls,
+                status="selection_score_unavailable",
+            )
+        best_score, best_index, best_answer = min(
+            scored,
+            key=lambda row: (-row[0], row[1]),
+        )
+        selection_gain = best_score - baseline_runtime
+        if len(scored) != candidate_count:
+            return BestOfNControlExecution(
+                candidate_count=candidate_count,
+                finite_candidate_count=len(scored),
+                selected_index=None,
+                selection_gain=selection_gain,
+                shadow_gold_gain=None,
+                answer_calls=answer_calls,
+                selection_judge_calls=selection_calls,
+                status="partial_selection_score_unavailable",
+            )
+        if selection_gain <= 0.0:
+            return BestOfNControlExecution(
+                candidate_count=candidate_count,
+                finite_candidate_count=len(scored),
+                selected_index=None,
+                selection_gain=selection_gain,
+                shadow_gold_gain=None,
+                answer_calls=answer_calls,
+                selection_judge_calls=selection_calls,
+                status="abstained_nonpositive_gain",
+                abstained=True,
+            )
+        try:
+            baseline_shadow = self._shadow_score(case, baseline_answer)
+            selected_shadow = self._shadow_score(case, best_answer)
+        except Exception as exc:
+            _logger.warning(
+                "best-of-N shadow evaluation failed case=%s: %s",
+                case.case_id,
+                exc,
+            )
+            return BestOfNControlExecution(
+                candidate_count=candidate_count,
+                finite_candidate_count=len(scored),
+                selected_index=best_index,
+                selection_gain=selection_gain,
+                shadow_gold_gain=None,
+                answer_calls=answer_calls,
+                selection_judge_calls=selection_calls,
+                status=f"shadow_evaluation_failed:{type(exc).__name__}",
+            )
+        return BestOfNControlExecution(
+            candidate_count=candidate_count,
+            finite_candidate_count=len(scored),
+            selected_index=best_index,
+            selection_gain=selection_gain,
+            shadow_gold_gain=selected_shadow - baseline_shadow,
+            answer_calls=answer_calls,
+            selection_judge_calls=selection_calls,
+        )
+
     def _runtime_view(self, case: ArenaCase) -> RuntimeCaseView:
         cached = self._runtime_views.get(case.case_id)
         if cached is not None:
             return cached
-        raw = case.raw
-        candidate_items = tuple(
-            MemoryItem.from_mapping(dict(item))
-            for item in raw.get("extracted_memory", ())
-        )
-        by_id = {item.memory_id: item for item in candidate_items}
-        baselines = raw.get("baseline_outputs") or ()
-        baseline = baselines[0] if baselines else {}
-        recall_set = tuple(
-            by_id[memory_id]
-            for memory_id in baseline.get("retrieved_memory_ids", ())
-            if memory_id in by_id
-        )
-        view = RuntimeCaseView(
-            query=str(raw.get("query", "")),
-            recall_set=recall_set,
-            candidate_items=candidate_items,
-            raw_events=tuple(
-                RawEvent.from_mapping(dict(item))
-                for item in raw.get("raw_events", ())
-            ),
-        )
-        self._runtime_views[case.case_id] = view
-        return view
+        with self._cache_lock("runtime_view", case.case_id):
+            cached = self._runtime_views.get(case.case_id)
+            if cached is not None:
+                return cached
+            raw = case.raw
+            candidate_items = tuple(
+                MemoryItem.from_mapping(dict(item))
+                for item in raw.get("extracted_memory", ())
+            )
+            by_id = {item.memory_id: item for item in candidate_items}
+            baselines = raw.get("baseline_outputs") or ()
+            baseline = baselines[0] if baselines else {}
+            recall_set = tuple(
+                by_id[memory_id]
+                for memory_id in baseline.get("retrieved_memory_ids", ())
+                if memory_id in by_id
+            )
+            view = RuntimeCaseView(
+                query=str(raw.get("query", "")),
+                recall_set=recall_set,
+                candidate_items=candidate_items,
+                raw_events=tuple(
+                    RawEvent.from_mapping(dict(item))
+                    for item in raw.get("raw_events", ())
+                ),
+            )
+            self._runtime_views[case.case_id] = view
+            return view
 
     def _apply_candidate(
         self,
@@ -391,27 +573,39 @@ class VLLMDualScoreArenaBackend:
             intervention_config=config,
         )
 
-    def _answer(self, case: ArenaCase, context: str) -> str:
+    def _answer(
+        self,
+        case: ArenaCase,
+        context: str,
+        *,
+        purpose: str = "unspecified",
+    ) -> str:
         key = (case.case_id, _hash_text(context))
         cached = self._answer_cache.get(key)
         if cached is not None:
             return cached
-        query = self._runtime_view(case).query
-        prompt = "\n\n".join(
-            (
-                "CONTEXT:",
-                context or "(empty)",
-                "QUERY:",
-                query,
-                "ANSWER:",
+        with self._cache_lock("answer", key):
+            cached = self._answer_cache.get(key)
+            if cached is not None:
+                return cached
+            query = self._runtime_view(case).query
+            prompt = "\n\n".join(
+                (
+                    "CONTEXT:",
+                    context or "(empty)",
+                    "QUERY:",
+                    query,
+                    "ANSWER:",
+                )
             )
-        )
-        answer = self.answer_client.generate(
-            prompt,
-            system=AGENT_SYSTEM_PROMPT,
-        )
-        self._answer_cache[key] = answer
-        return answer
+            if purpose == "cmd_candidate":
+                self._increment_cmd_call(case.case_id, answer_calls=1)
+            answer = self.answer_client.generate(
+                prompt,
+                system=AGENT_SYSTEM_PROMPT,
+            )
+            self._answer_cache[key] = answer
+            return answer
 
     def _runtime_score(
         self,
@@ -419,36 +613,108 @@ class VLLMDualScoreArenaBackend:
         *,
         context: str,
         answer: str,
+        purpose: str = "unspecified",
     ) -> float | None:
         key = (case.case_id, _hash_text(context + "\0" + answer))
-        if key not in self._runtime_score_cache:
-            self._runtime_score_cache[key] = self.reference_free_scorer.score(
-                query=self._runtime_view(case).query,
-                context=context,
-                answer=answer,
-            )
-        return self._runtime_score_cache[key]
+        if key in self._runtime_score_cache:
+            return self._runtime_score_cache[key]
+        with self._cache_lock("runtime_score", key):
+            if key not in self._runtime_score_cache:
+                if purpose == "cmd_candidate":
+                    self._increment_cmd_call(
+                        case.case_id,
+                        selection_calls=1,
+                    )
+                self._runtime_score_cache[key] = self.reference_free_scorer.score(
+                    query=self._runtime_view(case).query,
+                    context=context,
+                    answer=answer,
+                )
+            return self._runtime_score_cache[key]
 
     def _shadow_score(self, case: ArenaCase, answer: str) -> float:
         key = (case.case_id, _hash_text(answer))
         cached = self._shadow_score_cache.get(key)
         if cached is not None:
             return cached
-        # This is the only method in the runtime backend that reads gold_answer.
-        gold_answer = str(case.raw["gold_answer"])
-        score = score_answer_with_verifier(
-            self.shadow_verifier,
-            answer,
-            gold_answer,
-        )
-        self._shadow_score_cache[key] = score
-        return score
+        with self._cache_lock("shadow_score", key):
+            cached = self._shadow_score_cache.get(key)
+            if cached is not None:
+                return cached
+            # This is the only method in the runtime backend that reads gold_answer.
+            gold_answer = str(case.raw["gold_answer"])
+            score = score_answer_with_verifier(
+                self.shadow_verifier,
+                answer,
+                gold_answer,
+            )
+            self._shadow_score_cache[key] = score
+            return score
+
+    def _cache_lock(self, namespace: str, key: object) -> Lock:
+        lock_key = (namespace, key)
+        with self._cache_lock_guard:
+            lock = self._cache_locks.get(lock_key)
+            if lock is None:
+                lock = Lock()
+                self._cache_locks[lock_key] = lock
+            return lock
+
+    def _increment_cmd_call(
+        self,
+        case_id: str,
+        *,
+        answer_calls: int = 0,
+        selection_calls: int = 0,
+    ) -> None:
+        with self._counter_guard:
+            counts = self._cmd_call_counts.setdefault(case_id, [0, 0])
+            counts[0] += int(answer_calls)
+            counts[1] += int(selection_calls)
 
 
 def create_vllm_backend(*, cases, args) -> VLLMDualScoreArenaBackend:
     """Default ``arena_cli`` factory for configured OpenAI/vLLM endpoints."""
     del cases, args
     return VLLMDualScoreArenaBackend()
+
+
+def _assert_distinct_judge_identities(selection_client: Any, evaluation_client: Any) -> None:
+    """Reject a circular arena where selection and evaluation share a judge."""
+    if selection_client is evaluation_client:
+        raise ValueError("arena selection judge and evaluation judge must differ")
+    selection_config = getattr(selection_client, "config", None)
+    evaluation_config = getattr(evaluation_client, "config", None)
+    if selection_config is None or evaluation_config is None:
+        return
+    selection_identity = (
+        str(getattr(selection_config, "base_url", "")).rstrip("/"),
+        str(getattr(selection_config, "model", "")),
+    )
+    evaluation_identity = (
+        str(getattr(evaluation_config, "base_url", "")).rstrip("/"),
+        str(getattr(evaluation_config, "model", "")),
+    )
+    same_model = (
+        bool(selection_identity[1])
+        and selection_identity[1] == evaluation_identity[1]
+    )
+    if selection_identity == evaluation_identity or same_model:
+        raise ValueError(
+            "arena selection judge and evaluation judge resolve to the same "
+            f"model identity: selection={selection_identity!r}, "
+            f"evaluation={evaluation_identity!r}"
+        )
+
+
+def _client_identity(client: Any) -> str:
+    config = getattr(client, "config", None)
+    if config is None:
+        return type(client).__name__
+    return (
+        f"{str(getattr(config, 'base_url', '')).rstrip('/')}|"
+        f"{getattr(config, 'model', '')}"
+    )
 
 
 def parse_reference_free_score(response: str) -> int | None:
@@ -488,6 +754,22 @@ def _reference_free_prompt(
             context,
             "ANSWER:",
             answer,
+        )
+    )
+
+
+def _unstructured_pool_context(
+    origin_context: str,
+    items: Sequence[MemoryItem],
+) -> str:
+    flat_pool = "\n".join(
+        f"- [{item.memory_id}] {item.text}" for item in items
+    ) or "(empty)"
+    return "\n\n".join(
+        (
+            origin_context,
+            "FLAT MEMORY POOL (no routing, action, or item-gate labels):",
+            flat_pool,
         )
     )
 

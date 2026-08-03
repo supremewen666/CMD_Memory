@@ -20,7 +20,7 @@ from cmd_audit.core.models import MemoryItem
 from cmd_audit.counterfactual.actions import PipelineAction
 from cmd_audit.counterfactual.operators import OperatorSpec, evaluate_operator_spec
 from cmd_audit.counterfactual.rollout import rollout_to_terminal
-from cmd_audit.counterfactual.search import SinglePointAttributor
+from cmd_audit.counterfactual.search import SinglePointAttributor, attribute_single_point
 from cmd_audit.eval.writers import (
     recovery_case_outcomes,
     recovery_mean,
@@ -179,6 +179,40 @@ class ConsumerTimeoutTest(unittest.TestCase):
         )
         self.assertEqual(error_score, 0.0)
 
+    def test_identity_timeout_is_recorded_not_converted_to_zero_credit(self) -> None:
+        result = attribute_single_point(
+            TimeoutClient(),
+            "ctx",
+            RECALL,
+            (),
+            "Paris",
+            max_depth=1,
+            answer_verifier=answer_verifier,
+            time_limit_seconds=10.0,
+        )
+
+        self.assertTrue(result.truncated)
+        self.assertIn((0, PipelineAction.IDENTITY), result.timed_out_actions)
+        self.assertFalse(result.action_credits)
+        self.assertIsNone(result.main_culprit)
+
+    def test_max_iterations_caps_and_reports_unscored_actions(self) -> None:
+        result = attribute_single_point(
+            OkClient(),
+            "ctx",
+            RECALL,
+            (),
+            "Paris",
+            max_depth=1,
+            max_iterations=1,
+            answer_verifier=answer_verifier,
+            time_limit_seconds=10.0,
+        )
+
+        self.assertEqual(result.iterations_completed, 1)
+        self.assertTrue(result.truncated)
+        self.assertTrue(result.unscored_actions)
+
     def test_run_single_repair_reports_nan_on_timeout(self) -> None:
         case = SimpleNamespace(
             case_id="case-1",
@@ -289,7 +323,7 @@ class WriterTimeoutColumnTest(unittest.TestCase):
             return SimpleNamespace(
                 runtime_branch="fix",
                 perturbation_label="retrieval_error",
-                mcts_result=SimpleNamespace(
+                attribution_result=SimpleNamespace(
                     primary_attribution_label=PipelineAction.RETRIEVAL_ERROR,
                     main_culprit=(0, PipelineAction.RETRIEVAL_ERROR, credit),
                     action_credits={

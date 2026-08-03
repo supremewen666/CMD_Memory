@@ -1,14 +1,16 @@
 """Shared single-path runner for observational memory-repair arenas."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
+import hashlib
 import json
 import math
 from pathlib import Path
 import random
 from typing import Mapping, Protocol, Sequence
 
-from cmd_audit.core.models import ProbeCase
+from cmd_audit.core.models import ProbeCase, RetrievedItem
 from cmd_audit.data_io.probe_cases import load_probe_cases
 from cmd_audit.eval.gold_free_observer import (
     GoldFreeObservation,
@@ -18,6 +20,7 @@ from cmd_audit.eval.gold_free_observer import (
 from cmd_audit.eval.gold_free_identifiability import (
     RuntimeSelectionProvenance,
 )
+from cmd_audit.hook import post_retrieve_hook
 from cmd_audit.repair.chain_dynamics import (
     ChainAttempt,
     ChainDepositionEvent,
@@ -49,6 +52,22 @@ class ArenaCase:
     coordinates: ProbeCoordinates
     subset: str
     raw: Mapping[str, object]
+    runtime_branch: str = "fix"
+    hook_confidence: float = 1.0
+
+
+ARENA_DATASET_FINGERPRINT_VERSION = "arena-dataset-v1"
+
+
+@dataclass(frozen=True)
+class ArenaDatasetFingerprint:
+    version: str
+    source_kind: str
+    source_path: str
+    source_sha256: str | None
+    source_size_bytes: int | None
+    selected_case_ids_sha256: str
+    selected_cases_sha256: str
 
 
 @dataclass(frozen=True)
@@ -59,6 +78,19 @@ class DualScoreExecution:
     shadow_gold_gain: float | None
     execution_cost: float
     status: str = "ok"
+
+
+@dataclass(frozen=True)
+class BestOfNControlExecution:
+    candidate_count: int
+    finite_candidate_count: int
+    selected_index: int | None
+    selection_gain: float | None
+    shadow_gold_gain: float | None
+    answer_calls: int
+    selection_judge_calls: int
+    status: str = "ok"
+    abstained: bool = False
 
 
 class DualScoreArenaBackend(Protocol):
@@ -85,6 +117,16 @@ class DualScoreArenaBackend(Protocol):
         """Add an observed composite to subsequent candidate retrieval."""
         ...
 
+    def evaluate_best_of_n(
+        self,
+        case: ArenaCase,
+        *,
+        candidate_count: int,
+        origin_context: str,
+    ) -> BestOfNControlExecution:
+        """Evaluate an unstructured, same-selection-budget control arm."""
+        ...
+
 
 @dataclass(frozen=True)
 class ArenaManifest:
@@ -101,6 +143,21 @@ class ArenaManifest:
     perturbation_enabled: bool
     perturbation_strategy: str
     seed: int
+    fill_case_count: int
+    fix_case_count: int
+    fill_policy: str
+    case_workers: int
+    best_of_n_control_enabled: bool
+    selection_judge_identity: str
+    evaluation_judge_identity: str
+    cmd_budget_accounting: str
+    dataset_fingerprint_version: str
+    dataset_source_kind: str
+    dataset_source_path: str
+    dataset_source_sha256: str | None
+    dataset_source_size_bytes: int | None
+    selected_case_ids_sha256: str
+    selected_cases_sha256: str
 
 
 @dataclass(frozen=True)
@@ -113,6 +170,49 @@ class ArenaRunResult:
     coactivation_snapshots: tuple[CoactivationSnapshot, ...]
     deposition_events: tuple[ChainDepositionEvent, ...]
     perturbation_events: tuple[PerturbationEvent, ...]
+    arm_comparison_events: tuple["ArenaArmComparisonEvent", ...]
+
+
+@dataclass(frozen=True)
+class ArenaArmComparisonEvent:
+    arena_id: str
+    case_id: str
+    failure_type: str
+    runtime_branch: str
+    candidate_budget: int
+    cmd_selected_skill_id: str | None
+    cmd_abstained: bool
+    cmd_selection_gain: float | None
+    cmd_shadow_gold_gain: float | None
+    best_of_n_selected_index: int | None
+    best_of_n_abstained: bool
+    best_of_n_selection_gain: float | None
+    best_of_n_shadow_gold_gain: float | None
+    cmd_answer_calls: int
+    cmd_selection_judge_calls: int
+    best_of_n_answer_calls: int
+    best_of_n_selection_judge_calls: int
+    budget_aligned: bool
+    cmd_budget_source: str
+    status: str
+
+    def to_dict(self) -> dict[str, object]:
+        value = asdict(self)
+        value["record_type"] = "arena_arm_comparison_event"
+        return value
+
+
+@dataclass(frozen=True)
+class _EvaluatedArenaCase:
+    case: ArenaCase
+    candidates: tuple[SkillCandidate, ...]
+    result: AdditiveSaturationResult
+    dual_by_skill: Mapping[str, DualScoreExecution]
+    chain_executions: tuple[ChainExecution, ...]
+    best_of_n: BestOfNControlExecution | None
+    cmd_answer_calls: int
+    cmd_selection_judge_calls: int
+    cmd_budget_source: str
 
 
 class ObservationalArenaRunner:
@@ -135,9 +235,15 @@ class ObservationalArenaRunner:
         perturb_window_size: int = 25,
         perturb_stability_threshold: float = 0.05,
         perturb_stable_windows: int = 2,
+        case_workers: int = 1,
+        enable_best_of_n_control: bool = False,
+        dataset_source_path: str | Path | None = None,
     ) -> None:
         if not cases:
             raise ValueError("arena requires at least one case")
+        case_ids = [case.case_id for case in cases]
+        if len(case_ids) != len(set(case_ids)):
+            raise ValueError("arena case_id values must be unique")
         if backend.runtime_uses_gold:
             raise ValueError(
                 "arena backend declares gold-dependent runtime selection"
@@ -167,6 +273,22 @@ class ObservationalArenaRunner:
             raise ValueError("perturbation fraction must be in (0, 1)")
         if perturb_strategy not in {"keystone", "specialist"}:
             raise ValueError("perturbation strategy must be keystone or specialist")
+        if case_workers <= 0:
+            raise ValueError("case_workers must be > 0")
+        if case_workers > 1 and (
+            deposition_after_fraction is not None
+            or perturb_after_fraction is not None
+        ):
+            raise ValueError(
+                "cross-case concurrency is incompatible with deposition or "
+                "perturbation because those change later candidate sets"
+            )
+        if enable_best_of_n_control and not callable(
+            getattr(backend, "evaluate_best_of_n", None)
+        ):
+            raise ValueError(
+                "best-of-N control requires backend.evaluate_best_of_n"
+            )
         self.cases = tuple(cases)
         self.backend = backend
         self.saturation_threshold = float(saturation_threshold)
@@ -185,6 +307,12 @@ class ObservationalArenaRunner:
             perturb_stability_threshold
         )
         self.perturb_stable_windows = int(perturb_stable_windows)
+        self.case_workers = int(case_workers)
+        self.enable_best_of_n_control = bool(enable_best_of_n_control)
+        self.dataset_fingerprint = build_arena_dataset_fingerprint(
+            self.cases,
+            source_path=dataset_source_path,
+        )
 
     def run(self) -> ArenaRunResult:
         arena_id = self.cases[0].arena_id
@@ -196,9 +324,6 @@ class ObservationalArenaRunner:
             total_cases=len(self.cases),
         )
         chain_observer = ChainObserver(arena_id=arena_id)
-        executor = AdditiveSaturationExecutor(
-            saturation_threshold=self.saturation_threshold,
-        )
         candidate_catalog: dict[str, SkillCandidate] = {}
         deposition_position = (
             math.ceil(len(self.cases) * self.deposition_after_fraction)
@@ -216,43 +341,82 @@ class ObservationalArenaRunner:
         )
         removed_skill_id: str | None = None
         perturbation_probe: PerturbationProbe | None = None
+        arm_comparison_events: list[ArenaArmComparisonEvent] = []
+
+        parallel_evaluations: tuple[_EvaluatedArenaCase, ...] | None = None
+        if self.case_workers > 1:
+            # ``map`` preserves input order, so observer reduction and JSONL
+            # serialization remain deterministic for deterministic backends.
+            with ThreadPoolExecutor(max_workers=self.case_workers) as pool:
+                parallel_evaluations = tuple(
+                    pool.map(self._evaluate_case, self.cases)
+                )
 
         for position, case in enumerate(self.cases, start=1):
-            candidates = tuple(self.backend.candidates(case))
-            if removed_skill_id is not None:
-                candidates = tuple(
-                    candidate
-                    for candidate in candidates
-                    if candidate.skill_id != removed_skill_id
+            evaluated = (
+                parallel_evaluations[position - 1]
+                if parallel_evaluations is not None
+                else self._evaluate_case(
+                    case,
+                    removed_skill_id=removed_skill_id,
                 )
-            if self.candidate_limit is not None:
-                candidates = candidates[: self.candidate_limit]
+            )
+            candidates = evaluated.candidates
+            result = evaluated.result
+            dual_by_skill = dict(evaluated.dual_by_skill)
+            chain_executions = evaluated.chain_executions
+            if evaluated.best_of_n is not None:
+                cmd_winner = result.selected[0] if result.selected else None
+                cmd_dual = (
+                    dual_by_skill.get(cmd_winner.skill_id)
+                    if cmd_winner is not None
+                    else None
+                )
+                control = evaluated.best_of_n
+                cmd_budget = evaluated.cmd_answer_calls
+                arm_comparison_events.append(
+                    ArenaArmComparisonEvent(
+                        arena_id=arena_id,
+                        case_id=case.case_id,
+                        failure_type=case.failure_type,
+                        runtime_branch=case.runtime_branch,
+                        candidate_budget=cmd_budget,
+                        cmd_selected_skill_id=(
+                            cmd_winner.skill_id if cmd_winner is not None else None
+                        ),
+                        cmd_abstained=cmd_winner is None,
+                        cmd_selection_gain=(
+                            float(cmd_winner.recovery_gain)
+                            if cmd_winner is not None
+                            and cmd_winner.recovery_gain is not None
+                            else None
+                        ),
+                        cmd_shadow_gold_gain=(
+                            cmd_dual.shadow_gold_gain if cmd_dual is not None else None
+                        ),
+                        best_of_n_selected_index=control.selected_index,
+                        best_of_n_abstained=control.abstained,
+                        best_of_n_selection_gain=control.selection_gain,
+                        best_of_n_shadow_gold_gain=control.shadow_gold_gain,
+                        cmd_answer_calls=evaluated.cmd_answer_calls,
+                        cmd_selection_judge_calls=(
+                            evaluated.cmd_selection_judge_calls
+                        ),
+                        best_of_n_answer_calls=control.answer_calls,
+                        best_of_n_selection_judge_calls=(
+                            control.selection_judge_calls
+                        ),
+                        budget_aligned=(
+                            evaluated.cmd_answer_calls == control.answer_calls
+                            and evaluated.cmd_selection_judge_calls
+                            == control.selection_judge_calls
+                        ),
+                        cmd_budget_source=evaluated.cmd_budget_source,
+                        status=control.status,
+                    )
+                )
             candidate_catalog.update(
                 (candidate.skill_id, candidate) for candidate in candidates
-            )
-            dual_by_skill: dict[str, DualScoreExecution] = {}
-
-            def evaluate(
-                candidate: SkillCandidate,
-                context: str,
-            ) -> SkillExecution:
-                dual = self.backend.evaluate(
-                    case,
-                    candidate,
-                    input_context=context,
-                    origin_context=case.base_context,
-                )
-                if dual.skill_id != candidate.skill_id:
-                    raise ValueError("backend returned a mismatched skill id")
-                dual_by_skill[candidate.skill_id] = dual
-                return _skill_execution(candidate, dual)
-
-            result = executor.execute(
-                case_id=case.case_id,
-                failure_type=case.failure_type,
-                base_context=case.base_context,
-                candidates=candidates,
-                evaluator=evaluate,
             )
             gold_observer.record(
                 case_id=case.case_id,
@@ -279,6 +443,7 @@ class ObservationalArenaRunner:
                 dual_by_skill=dual_by_skill,
                 checkpoint=f"{arena_id}:{position}/{len(self.cases)}",
                 subset=case.subset,
+                runtime_branch=case.runtime_branch,
             )
             snapshot = ecology_observer.record(
                 event,
@@ -293,11 +458,6 @@ class ObservationalArenaRunner:
                         else None
                     ),
                 )
-            chain_executions = (
-                self._evaluate_chains(case, candidates, dual_by_skill)
-                if self.enable_chains
-                else ()
-            )
             chain_observer.record_case(
                 case_id=case.case_id,
                 failure_type=case.failure_type,
@@ -371,6 +531,43 @@ class ObservationalArenaRunner:
                     else ""
                 ),
                 seed=self.seed,
+                fill_case_count=sum(
+                    case.runtime_branch == "fill" for case in self.cases
+                ),
+                fix_case_count=sum(
+                    case.runtime_branch == "fix" for case in self.cases
+                ),
+                fill_policy="explicit_routed_no_diagnosis_excluded_from_cmd_selection",
+                case_workers=self.case_workers,
+                best_of_n_control_enabled=self.enable_best_of_n_control,
+                selection_judge_identity=str(
+                    getattr(self.backend, "selection_judge_identity", "")
+                ),
+                evaluation_judge_identity=str(
+                    getattr(self.backend, "evaluation_judge_identity", "")
+                ),
+                cmd_budget_accounting=(
+                    "backend_call_counters"
+                    if callable(getattr(self.backend, "cmd_call_counts", None))
+                    else "logical_fallback"
+                ),
+                dataset_fingerprint_version=(
+                    self.dataset_fingerprint.version
+                ),
+                dataset_source_kind=self.dataset_fingerprint.source_kind,
+                dataset_source_path=self.dataset_fingerprint.source_path,
+                dataset_source_sha256=(
+                    self.dataset_fingerprint.source_sha256
+                ),
+                dataset_source_size_bytes=(
+                    self.dataset_fingerprint.source_size_bytes
+                ),
+                selected_case_ids_sha256=(
+                    self.dataset_fingerprint.selected_case_ids_sha256
+                ),
+                selected_cases_sha256=(
+                    self.dataset_fingerprint.selected_cases_sha256
+                ),
             ),
             gold_free_observations=gold_observer.observations,
             saturation_events=ecology_observer.events,
@@ -383,6 +580,103 @@ class ObservationalArenaRunner:
                 if perturbation_probe is not None
                 else ()
             ),
+            arm_comparison_events=tuple(arm_comparison_events),
+        )
+
+    def _evaluate_case(
+        self,
+        case: ArenaCase,
+        *,
+        removed_skill_id: str | None = None,
+    ) -> _EvaluatedArenaCase:
+        # Fill consumes no candidate calls and remains an explicit routed
+        # abstention rather than a failed/no-repair CMD observation.
+        candidates = (
+            tuple(self.backend.candidates(case))
+            if case.runtime_branch == "fix"
+            else ()
+        )
+        if removed_skill_id is not None:
+            candidates = tuple(
+                candidate
+                for candidate in candidates
+                if candidate.skill_id != removed_skill_id
+            )
+        if self.candidate_limit is not None:
+            candidates = candidates[: self.candidate_limit]
+        dual_by_skill: dict[str, DualScoreExecution] = {}
+        count_reader = getattr(self.backend, "cmd_call_counts", None)
+        before_counts = (
+            tuple(count_reader(case))
+            if callable(count_reader)
+            else None
+        )
+
+        def evaluate(candidate: SkillCandidate, context: str) -> SkillExecution:
+            dual = self.backend.evaluate(
+                case,
+                candidate,
+                input_context=context,
+                origin_context=case.base_context,
+            )
+            if dual.skill_id != candidate.skill_id:
+                raise ValueError("backend returned a mismatched skill id")
+            dual_by_skill[candidate.skill_id] = dual
+            return _skill_execution(candidate, dual)
+
+        result = AdditiveSaturationExecutor(
+            saturation_threshold=self.saturation_threshold,
+        ).execute(
+            case_id=case.case_id,
+            failure_type=case.failure_type,
+            base_context=case.base_context,
+            candidates=candidates,
+            evaluator=evaluate,
+        )
+        if callable(count_reader) and before_counts is not None:
+            after_counts = tuple(count_reader(case))
+            cmd_answer_calls = int(after_counts[0]) - int(before_counts[0])
+            cmd_selection_judge_calls = (
+                int(after_counts[1]) - int(before_counts[1])
+            )
+            cmd_budget_source = "backend_call_counters"
+        else:
+            # Fixture/custom backends without counters retain a deterministic
+            # logical fallback based on cache-distinct non-baseline contexts.
+            logical_budget = len(
+                {
+                    row.repaired_context
+                    for row in dual_by_skill.values()
+                    if row.repaired_context != case.base_context
+                }
+            )
+            cmd_answer_calls = logical_budget
+            cmd_selection_judge_calls = logical_budget
+            cmd_budget_source = "logical_fallback"
+        chain_executions = (
+            self._evaluate_chains(case, candidates, dual_by_skill)
+            if self.enable_chains
+            else ()
+        )
+        best_of_n = (
+            self.backend.evaluate_best_of_n(
+                case,
+                candidate_count=cmd_answer_calls,
+                origin_context=case.base_context,
+            )
+            if self.enable_best_of_n_control and cmd_answer_calls > 0
+            else None
+        )
+        return _EvaluatedArenaCase(
+            case=case,
+            candidates=candidates,
+            result=result,
+            dual_by_skill=dual_by_skill,
+            chain_executions=chain_executions,
+            best_of_n=best_of_n,
+            cmd_answer_calls=cmd_answer_calls,
+            cmd_selection_judge_calls=cmd_selection_judge_calls,
+            cmd_budget_source=cmd_budget_source,
         )
 
     def _evaluate_chains(
@@ -450,6 +744,63 @@ class ObservationalArenaRunner:
         return tuple(output)
 
 
+def arena_case_ids_sha256(case_ids: Sequence[str]) -> str:
+    """Hash the ordered case-id sequence used by one arena run."""
+    return _canonical_json_sha256([str(case_id) for case_id in case_ids])
+
+
+def arena_file_sha256(path: str | Path) -> str:
+    """Hash exact source bytes without loading the whole dataset into memory."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_arena_dataset_fingerprint(
+    cases: Sequence[ArenaCase],
+    *,
+    source_path: str | Path | None,
+) -> ArenaDatasetFingerprint:
+    """Bind an artifact to both source bytes and the ordered selected stream."""
+    selected_case_ids = [case.case_id for case in cases]
+    selected_cases = [asdict(case) for case in cases]
+    if source_path is None:
+        source_kind = "in_memory"
+        resolved_source = ""
+        source_sha256 = None
+        source_size_bytes = None
+    else:
+        source = Path(source_path).expanduser().resolve()
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        source_kind = "file"
+        resolved_source = str(source)
+        source_sha256 = arena_file_sha256(source)
+        source_size_bytes = source.stat().st_size
+    return ArenaDatasetFingerprint(
+        version=ARENA_DATASET_FINGERPRINT_VERSION,
+        source_kind=source_kind,
+        source_path=resolved_source,
+        source_sha256=source_sha256,
+        source_size_bytes=source_size_bytes,
+        selected_case_ids_sha256=arena_case_ids_sha256(selected_case_ids),
+        selected_cases_sha256=_canonical_json_sha256(selected_cases),
+    )
+
+
+def _canonical_json_sha256(value: object) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def write_arena_artifacts(result: ArenaRunResult, output: str | Path) -> Path:
     """Write one append-only JSONL stream with a manifest first."""
     target = Path(output)
@@ -467,6 +818,7 @@ def write_arena_artifacts(result: ArenaRunResult, output: str | Path) -> Path:
     rows.extend(row.to_dict() for row in result.coactivation_snapshots)
     rows.extend(row.to_dict() for row in result.deposition_events)
     rows.extend(row.to_dict() for row in result.perturbation_events)
+    rows.extend(row.to_dict() for row in result.arm_comparison_events)
     with target.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(
@@ -575,6 +927,15 @@ def _arena_case(
         if memory_id in memory_by_id
     ]
     injected = case.primary_baseline.injected_context or "\n".join(recalled)
+    retrieved_items = tuple(
+        RetrievedItem(
+            memory_id=memory_id,
+            text=memory_by_id[memory_id].text,
+        )
+        for memory_id in case.primary_baseline.retrieved_memory_ids
+        if memory_id in memory_by_id
+    )
+    hook_decision = post_retrieve_hook(case.query, retrieved_items)
     return ArenaCase(
         arena_id=arena_id,
         case_id=case.case_id,
@@ -584,6 +945,8 @@ def _arena_case(
         coordinates=coordinates,
         subset=subset,
         raw=_probe_case_mapping(case),
+        runtime_branch=hook_decision.branch,
+        hook_confidence=hook_decision.confidence,
     )
 
 
@@ -613,6 +976,7 @@ def _top_p_saturation_event(
     dual_by_skill: Mapping[str, DualScoreExecution],
     checkpoint: str,
     subset: str,
+    runtime_branch: str,
 ) -> TopPSaturationEvent:
     selected_ids = tuple(item.skill_id for item in result.selected)
     positive = sorted(
@@ -664,6 +1028,7 @@ def _top_p_saturation_event(
         case_id=result.case_id,
         failure_type=result.failure_type,
         subset=str(subset),
+        runtime_branch=str(runtime_branch),
         attempted_skill_ids=tuple(
             item.skill_id for item in result.executions
         ),

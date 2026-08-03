@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 
 import pytest
 
@@ -10,6 +12,7 @@ from cmd_audit.eval.gold_free_observer import ProbeCoordinates
 from cmd_audit.repair.skill_ecology import SkillCandidate
 from experiments.arena_runner_common import (
     ArenaCase,
+    BestOfNControlExecution,
     DualScoreExecution,
     ObservationalArenaRunner,
     load_memfail_arena_cases,
@@ -65,6 +68,18 @@ class FakeDualBackend:
     def deposit_composite(self, event):
         self.depositions.append(event)
 
+    def evaluate_best_of_n(self, case, *, candidate_count, origin_context):
+        del case, origin_context
+        return BestOfNControlExecution(
+            candidate_count=candidate_count,
+            finite_candidate_count=candidate_count,
+            selected_index=0,
+            selection_gain=0.15,
+            shadow_gold_gain=0.2,
+            answer_calls=candidate_count,
+            selection_judge_calls=candidate_count,
+        )
+
 
 def _cases(count=4):
     return tuple(
@@ -115,6 +130,45 @@ def test_arena_runs_one_path_and_observers_do_not_change_selection(tmp_path):
     assert not any(row["record_type"] == "competition_event" for row in rows)
 
 
+def test_manifest_binds_source_bytes_and_ordered_selected_cases(tmp_path) -> None:
+    source = tmp_path / "cases.json"
+    source.write_text('[{"case_id":"source-case"}]\n', encoding="utf-8")
+    cases = _cases(2)
+
+    result = ObservationalArenaRunner(
+        cases,
+        backend=FakeDualBackend(),
+        enable_chains=False,
+        dataset_source_path=source,
+    ).run()
+
+    manifest = result.manifest
+    assert manifest.dataset_fingerprint_version == "arena-dataset-v1"
+    assert manifest.dataset_source_kind == "file"
+    assert manifest.dataset_source_path == str(source.resolve())
+    assert manifest.dataset_source_sha256 == hashlib.sha256(
+        source.read_bytes()
+    ).hexdigest()
+    assert manifest.dataset_source_size_bytes == source.stat().st_size
+    assert len(manifest.selected_case_ids_sha256) == 64
+    assert len(manifest.selected_cases_sha256) == 64
+
+    reversed_result = ObservationalArenaRunner(
+        tuple(reversed(cases)),
+        backend=FakeDualBackend(),
+        enable_chains=False,
+        dataset_source_path=source,
+    ).run()
+    assert (
+        reversed_result.manifest.selected_case_ids_sha256
+        != manifest.selected_case_ids_sha256
+    )
+    assert (
+        reversed_result.manifest.selected_cases_sha256
+        != manifest.selected_cases_sha256
+    )
+
+
 def test_deposition_requires_and_calls_backend_hook():
     backend = FakeDualBackend()
     result = ObservationalArenaRunner(
@@ -143,6 +197,118 @@ def test_gold_dependent_runtime_backend_is_rejected():
     backend.runtime_uses_gold = True
     with pytest.raises(ValueError, match="gold-dependent"):
         ObservationalArenaRunner(_cases(), backend=backend)
+
+
+def test_fill_cases_are_explicit_routed_abstentions() -> None:
+    backend = FakeDualBackend()
+    fill = ArenaCase(
+        **{
+            **_cases(1)[0].__dict__,
+            "runtime_branch": "fill",
+            "hook_confidence": 0.1,
+        }
+    )
+
+    result = ObservationalArenaRunner((fill,), backend=backend).run()
+
+    assert backend.inputs == []
+    assert result.manifest.fill_case_count == 1
+    assert result.manifest.fix_case_count == 0
+    assert result.saturation_events[0].runtime_branch == "fill"
+    assert result.saturation_events[0].attempted_skill_ids == ()
+    assert not result.saturation_events[0].repair_effective
+
+
+def test_stateless_arena_runs_cases_concurrently_and_reduces_in_order() -> None:
+    class ConcurrentBackend(FakeDualBackend):
+        def __init__(self):
+            super().__init__()
+            self.barrier = threading.Barrier(2)
+            self.first_seen: set[str] = set()
+
+        def evaluate(self, case, candidate, *, input_context, origin_context):
+            if case.case_id not in self.first_seen:
+                self.first_seen.add(case.case_id)
+                self.barrier.wait(timeout=2)
+            return super().evaluate(
+                case,
+                candidate,
+                input_context=input_context,
+                origin_context=origin_context,
+            )
+
+    result = ObservationalArenaRunner(
+        _cases(2),
+        backend=ConcurrentBackend(),
+        enable_chains=False,
+        case_workers=2,
+    ).run()
+
+    assert result.manifest.case_workers == 2
+    assert [row.case_id for row in result.saturation_events] == ["c0", "c1"]
+
+
+def test_cross_case_concurrency_rejects_stateful_stream_interventions() -> None:
+    with pytest.raises(ValueError, match="cross-case concurrency"):
+        ObservationalArenaRunner(
+            _cases(4),
+            backend=FakeDualBackend(),
+            case_workers=2,
+            deposition_after_fraction=0.5,
+        )
+
+
+def test_best_of_n_control_is_serialized_as_budget_aligned_single_winner() -> None:
+    result = ObservationalArenaRunner(
+        _cases(1),
+        backend=FakeDualBackend(),
+        enable_chains=False,
+        enable_best_of_n_control=True,
+    ).run()
+
+    event = result.arm_comparison_events[0]
+    assert event.candidate_budget == 2
+    assert event.cmd_selected_skill_id == "a"
+    assert event.best_of_n_selected_index == 0
+    assert event.budget_aligned
+    assert event.cmd_answer_calls == event.best_of_n_answer_calls == 2
+
+
+def test_cmd_abstention_is_missing_not_a_finite_zero_shadow_gain() -> None:
+    class AbstainingBackend(FakeDualBackend):
+        def evaluate(
+            self,
+            case,
+            candidate,
+            *,
+            input_context,
+            origin_context,
+        ):
+            row = super().evaluate(
+                case,
+                candidate,
+                input_context=input_context,
+                origin_context=origin_context,
+            )
+            return DualScoreExecution(
+                skill_id=row.skill_id,
+                repaired_context=row.repaired_context,
+                gold_free_gain=-0.1,
+                shadow_gold_gain=0.8,
+                execution_cost=row.execution_cost,
+            )
+
+    result = ObservationalArenaRunner(
+        _cases(1),
+        backend=AbstainingBackend(),
+        enable_chains=False,
+        enable_best_of_n_control=True,
+    ).run()
+
+    event = result.arm_comparison_events[0]
+    assert event.cmd_abstained
+    assert event.cmd_selected_skill_id is None
+    assert event.cmd_shadow_gold_gain is None
 
 
 def test_perturbation_removes_keystone_and_records_recovery(tmp_path):

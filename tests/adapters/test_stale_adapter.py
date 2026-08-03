@@ -79,6 +79,29 @@ def test_stale_type_t2_maps_to_item_conflict() -> None:
     assert stores["m_current"] == "2026-01-03T00:00:00Z"
 
 
+def test_stale_case_exposes_item_actions_when_requested() -> None:
+    """STALE's timestamped recalled pair must make its repair action legal."""
+    from cmd_audit.counterfactual.actions import PipelineAction, get_legal_actions
+
+    case = stale_record_to_probe_cases(_record("actions", "T1"))[0]
+    recalled = {item.memory_id: item for item in case.extracted_memory}
+    recall_set = tuple(
+        recalled[item_id] for item_id in case.primary_baseline.retrieved_memory_ids
+    )
+
+    actions = get_legal_actions(
+        recall_set,
+        0,
+        include_item_actions=True,
+        intervention_config={
+            "candidate_items": case.extracted_memory,
+            "raw_events": case.raw_events,
+        },
+    )
+
+    assert PipelineAction.ITEM_STALE in actions
+
+
 def test_stale_loader_keeps_full_dataset_by_default(tmp_path) -> None:
     source = tmp_path / "stale.json"
     source.write_text(
