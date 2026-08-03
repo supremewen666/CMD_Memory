@@ -31,6 +31,9 @@ JUDGE_MODEL="${JUDGE_MODEL:-qwen2.5-7b-instruct}"
 JUDGE_API_KEY="${JUDGE_API_KEY:-dummy}"
 CMD_CASE_WORKERS="${CMD_CASE_WORKERS:-32}"
 VLLM_READY_TIMEOUT_SECONDS="${VLLM_READY_TIMEOUT_SECONDS:-300}"
+CMD_PRETRAINED_LMS_ROOT="${CMD_PRETRAINED_LMS_ROOT:-$HOME/pretrained_lms}"
+VLLM_QWEN_GPU_MEMORY_UTILIZATION="${VLLM_QWEN_GPU_MEMORY_UTILIZATION:-0.25}"
+VLLM_LLAMA_GPU_MEMORY_UTILIZATION="${VLLM_LLAMA_GPU_MEMORY_UTILIZATION:-0.50}"
 
 # ── 参数 ────────────────────────────────────────────────────────────────────
 ROLE=""
@@ -90,6 +93,21 @@ cd "$CMD_ROOT"
 # ══════════════════════════════════════════════════════════════════════════════
 
 resolve_qwen_dir() {
+  if [[ -n "${CMD_QWEN_MODEL_DIR:-}" ]]; then
+    if [[ ! -d "$CMD_QWEN_MODEL_DIR" ]]; then
+      echo "ERROR: CMD_QWEN_MODEL_DIR is not a directory: $CMD_QWEN_MODEL_DIR" >&2
+      return 1
+    fi
+    printf '%s\n' "$CMD_QWEN_MODEL_DIR"
+    return 0
+  fi
+
+  local pretrained_dir="${CMD_PRETRAINED_LMS_ROOT}/Qwen2.5-7B-Instruct"
+  if [[ -d "$pretrained_dir" ]]; then
+    printf '%s\n' "$pretrained_dir"
+    return 0
+  fi
+
   env PYTHONPATH="$CMD_VLLM_OVERLAY" HF_HUB_OFFLINE=1 python - <<'PY'
 from huggingface_hub import snapshot_download
 print(snapshot_download("Qwen/Qwen2.5-7B-Instruct", local_files_only=True))
@@ -97,6 +115,21 @@ PY
 }
 
 resolve_llama_dir() {
+  if [[ -n "${CMD_LLAMA_MODEL_DIR:-}" ]]; then
+    if [[ ! -d "$CMD_LLAMA_MODEL_DIR" ]]; then
+      echo "ERROR: CMD_LLAMA_MODEL_DIR is not a directory: $CMD_LLAMA_MODEL_DIR" >&2
+      return 1
+    fi
+    printf '%s\n' "$CMD_LLAMA_MODEL_DIR"
+    return 0
+  fi
+
+  local pretrained_dir="${CMD_PRETRAINED_LMS_ROOT}/Meta-Llama-3.1-8B-Instruct"
+  if [[ -d "$pretrained_dir" ]]; then
+    printf '%s\n' "$pretrained_dir"
+    return 0
+  fi
+
   env PYTHONPATH="$CMD_VLLM_OVERLAY" HF_HUB_OFFLINE=1 python - <<'PY'
 from huggingface_hub import snapshot_download
 print(snapshot_download("meta-llama/Llama-3.1-8B-Instruct", local_files_only=True))
@@ -157,6 +190,23 @@ stop_qwen_vllm() {
   rm -f "$PID_FILE"
 }
 
+wait_for_vllm_endpoint() {
+  local port="$1"
+  local label="$2"
+
+  echo -n "[vLLM] waiting for ${label} on port ${port} …"
+  for i in $(seq 1 "$VLLM_READY_TIMEOUT_SECONDS"); do
+    if curl --noproxy '*' -s "localhost:${port}/v1/models" >/dev/null 2>&1; then
+      echo " ready (${i}s)"
+      return 0
+    fi
+    sleep 1
+    echo -n "."
+  done
+  echo " TIMEOUT"
+  return 1
+}
+
 start_llama_dual_vllm() {
   # Qwen judge (frozen) on port 8000 + Llama answerer on port 8001
   local qwen_up llma_up
@@ -186,15 +236,20 @@ start_llama_dual_vllm() {
       --host 127.0.0.1 \
       --served-model-name qwen2.5-7b-instruct \
       --port "$LLAMA_JUDGE_PORT" \
-      --gpu-memory-utilization 0.40 \
+      --gpu-memory-utilization "$VLLM_QWEN_GPU_MEMORY_UTILIZATION" \
       --max-model-len 8192 \
       --max-num-seqs 32 \
       --enable-prefix-caching \
       > /tmp/vllm_qwen_judge.log 2>&1 &
     echo "[vLLM] Qwen judge pid $!"
+    # Do not load both 8B models concurrently on one GPU: simultaneous KV-cache
+    # profiling can leave either engine with no usable cache blocks.
+    wait_for_vllm_endpoint "$LLAMA_JUDGE_PORT" "Qwen judge"
   fi
 
   if ! $llma_up; then
+    # The second engine starts after Qwen and needs a larger share of the
+    # remaining GPU-memory budget to reserve its KV cache.
     nohup env \
       PYTHONPATH="$CMD_VLLM_OVERLAY" \
       HF_HUB_OFFLINE=1 \
@@ -204,28 +259,14 @@ start_llama_dual_vllm() {
       --host 127.0.0.1 \
       --served-model-name llama-3.1-8b-instruct \
       --port "$LLAMA_ANSWER_PORT" \
-      --gpu-memory-utilization 0.40 \
+      --gpu-memory-utilization "$VLLM_LLAMA_GPU_MEMORY_UTILIZATION" \
       --max-model-len 8192 \
       --max-num-seqs 32 \
       --enable-prefix-caching \
       > /tmp/vllm_llama_answer.log 2>&1 &
     echo "[vLLM] Llama answerer pid $!"
+    wait_for_vllm_endpoint "$LLAMA_ANSWER_PORT" "Llama answerer"
   fi
-
-  echo -n "[vLLM] waiting for dual endpoints …"
-  for i in $(seq 1 "$VLLM_READY_TIMEOUT_SECONDS"); do
-    local ok=true
-    curl --noproxy '*' -s "localhost:${LLAMA_JUDGE_PORT}/v1/models" >/dev/null 2>&1 || ok=false
-    curl --noproxy '*' -s "localhost:${LLAMA_ANSWER_PORT}/v1/models" >/dev/null 2>&1 || ok=false
-    if $ok; then
-      echo " ready (${i}s)"
-      return 0
-    fi
-    sleep 1
-    echo -n "."
-  done
-  echo " TIMEOUT"
-  return 1
 }
 
 stop_llama_dual_vllm() {

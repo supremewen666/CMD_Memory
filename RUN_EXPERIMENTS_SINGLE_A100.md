@@ -33,6 +33,34 @@ git status          # 确认在 main，无未提交改动
 python -m pytest tests/ -q   # 预期 467 passed
 ```
 
+### 本地模型目录与缓存回退
+
+脚本优先直接使用 `~/pretrained_lms` 中的本地权重：
+
+- `~/pretrained_lms/Qwen2.5-7B-Instruct`
+- `~/pretrained_lms/Meta-Llama-3.1-8B-Instruct`
+
+因此本机已有这两个目录时，下面的命令无需额外环境变量：
+
+```bash
+./run_remaining_experiments.sh --role gpu0 --smoke
+```
+
+可用 `CMD_PRETRAINED_LMS_ROOT` 覆盖该父目录；若本地目录不存在，脚本才通过 Hugging Face 的当前离线缓存查找，且不会联网下载。若仍报出 `LocalEntryNotFoundError`，先在 GPU 机器上寻找此前下载的 snapshot：
+
+```bash
+find "$HOME/wsy" -type d -path '*/models--Qwen--Qwen2.5-7B-Instruct/snapshots/*' 2>/dev/null
+find "$HOME/wsy" -type d -path '*/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/*' 2>/dev/null
+```
+
+将找到的两个 snapshot 目录显式传给脚本即可，无需重新下载：
+
+```bash
+CMD_QWEN_MODEL_DIR=/path/to/models--Qwen--Qwen2.5-7B-Instruct/snapshots/<revision> \
+CMD_LLAMA_MODEL_DIR=/path/to/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/<revision> \
+./run_remaining_experiments.sh --role gpu0 --smoke
+```
+
 ---
 
 ## GPU 0（SSH 1）— MemTrace-B ×2 + MemFail
@@ -70,7 +98,7 @@ cd ~/wsy/CMD_Memory
 ./run_remaining_experiments.sh --role gpu1 --detach
 ```
 
-三个 phase 均使用双端点：Qwen judge `:8000` 冻结用于评估，Llama answerer `:8001` 用于生成与选择。
+三个 phase 均使用双端点：Qwen judge `:8000` 冻结用于评估，Llama answerer `:8001` 用于生成与选择。为避免同卡显存与 KV-cache 初始化竞争，脚本会先等待 Qwen ready，再启动 Llama；默认显存配额分别为 `0.25` 和 `0.50`，可通过 `VLLM_QWEN_GPU_MEMORY_UTILIZATION`、`VLLM_LLAMA_GPU_MEMORY_UTILIZATION` 覆盖。Qwen 的 KV 预算较小，但本次带 `--deposit-after` 的 MemTrace 固定使用单 case worker，足以满足跑批需求。
 
 产出（`artifacts/arena/`）：
 
