@@ -24,12 +24,14 @@ def _manifest(
     *,
     case_ids: tuple[str, ...] = ("case-1",),
     runtime_uses_gold: bool = False,
+    seed: int = 24,
 ) -> dict[str, object]:
     return {
         "record_type": "arena_manifest",
         "arena_id": arena_id,
         "case_count": len(case_ids),
         "runtime_uses_gold": runtime_uses_gold,
+        "seed": seed,
         "dataset_fingerprint_version": "arena-dataset-v1",
         "dataset_source_kind": "file",
         "dataset_source_path": "/unmounted/fixture-cases.json",
@@ -154,6 +156,62 @@ def test_analysis_rejects_gold_dependent_runtime_manifest(tmp_path):
     )
     with pytest.raises(ValueError, match="runtime_uses_gold"):
         analyze_arena_results._load_artifacts((source,))
+
+
+def test_analysis_namespaces_replicated_arena_artifacts(tmp_path) -> None:
+    paths = []
+    for index, seed in enumerate((24, 124, 24), start=1):
+        artifact = tmp_path / f"replicate-{index}.jsonl"
+        _write(
+            artifact,
+            (
+                _manifest("memtrace", seed=seed),
+                {
+                    "record_type": "top_p_saturation_event",
+                    "checkpoint": "memtrace:1/1",
+                    "case_id": "case-1",
+                },
+            ),
+        )
+        paths.append(artifact)
+
+    records = analyze_arena_results._load_artifacts(tuple(paths))
+
+    assert [
+        row["arena_id"] for row in records["arena_manifest"]
+    ] == [
+        "memtrace_seed24",
+        "memtrace_seed124",
+        "memtrace_seed24_rep2",
+    ]
+    assert [
+        row["arena_family"] for row in records["arena_manifest"]
+    ] == ["memtrace", "memtrace", "memtrace"]
+    assert [
+        row["checkpoint"] for row in records["top_p_saturation_event"]
+    ] == [
+        "memtrace_seed24:1/1",
+        "memtrace_seed124:1/1",
+        "memtrace_seed24_rep2:1/1",
+    ]
+
+
+def test_analysis_rejects_duplicate_artifact_path(tmp_path) -> None:
+    artifact = tmp_path / "arena.jsonl"
+    _write(
+        artifact,
+        (
+            _manifest("fixture"),
+            {
+                "record_type": "top_p_saturation_event",
+                "checkpoint": "fixture:1/1",
+                "case_id": "case-1",
+            },
+        ),
+    )
+
+    with pytest.raises(ValueError, match="duplicate artifact path"):
+        analyze_arena_results._load_artifacts((artifact, artifact))
 
 
 def test_analysis_rejects_unfingerprinted_arena_artifact(tmp_path) -> None:

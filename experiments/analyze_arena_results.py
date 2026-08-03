@@ -147,10 +147,17 @@ def _load_artifacts(
     paths: Sequence[Path],
 ) -> dict[str, list[dict[str, object]]]:
     records: dict[str, list[dict[str, object]]] = {}
-    seen_arenas: set[str] = set()
+    artifacts: list[
+        tuple[Path, dict[str, object], list[dict[str, object]]]
+    ] = []
+    seen_paths: set[Path] = set()
     for path in paths:
         if not path.exists():
             raise FileNotFoundError(path)
+        resolved_path = path.resolve()
+        if resolved_path in seen_paths:
+            raise ValueError(f"duplicate artifact path: {path}")
+        seen_paths.add(resolved_path)
         file_rows: list[dict[str, object]] = []
         manifest_rows: list[dict[str, object]] = []
         with path.open(encoding="utf-8") as handle:
@@ -172,14 +179,54 @@ def _load_artifacts(
         if len(manifest_rows) != 1:
             raise ValueError(f"{path}: expected exactly one arena manifest")
         manifest = manifest_rows[0]
-        arena_id = str(manifest["arena_id"])
-        if arena_id in seen_arenas:
-            raise ValueError(f"duplicate arena artifact: {arena_id}")
         _validate_dataset_provenance(path, manifest, file_rows)
-        seen_arenas.add(arena_id)
-        for row in file_rows:
+        artifacts.append((path, manifest, file_rows))
+
+    arena_counts: dict[str, int] = {}
+    for _path, manifest, _rows in artifacts:
+        arena_id = str(manifest["arena_id"])
+        arena_counts[arena_id] = arena_counts.get(arena_id, 0) + 1
+
+    run_id_counts: dict[str, int] = {}
+    for _path, manifest, file_rows in artifacts:
+        arena_id = str(manifest["arena_id"])
+        run_id = arena_id
+        if arena_counts[arena_id] > 1:
+            seed = manifest.get("seed", "unknown")
+            base_run_id = f"{arena_id}_seed{seed}"
+            occurrence = run_id_counts.get(base_run_id, 0) + 1
+            run_id_counts[base_run_id] = occurrence
+            run_id = (
+                base_run_id
+                if occurrence == 1
+                else f"{base_run_id}_rep{occurrence}"
+            )
+        for row in _namespace_artifact_rows(file_rows, arena_id, run_id):
             records.setdefault(str(row["record_type"]), []).append(row)
     return records
+
+
+def _namespace_artifact_rows(
+    rows: Sequence[Mapping[str, object]],
+    arena_id: str,
+    run_id: str,
+) -> list[dict[str, object]]:
+    """Give replicated arena artifacts distinct analysis-time identities."""
+    output: list[dict[str, object]] = []
+    for source_row in rows:
+        row = dict(source_row)
+        if run_id != arena_id:
+            if str(row.get("arena_id", "")) == arena_id:
+                row["arena_id"] = run_id
+            checkpoint = row.get("checkpoint")
+            if isinstance(checkpoint, str) and (
+                checkpoint == arena_id or checkpoint.startswith(f"{arena_id}:")
+            ):
+                row["checkpoint"] = f"{run_id}{checkpoint[len(arena_id):]}"
+            if row.get("record_type") == "arena_manifest":
+                row["arena_family"] = arena_id
+        output.append(row)
+    return output
 
 
 def _validate_dataset_provenance(

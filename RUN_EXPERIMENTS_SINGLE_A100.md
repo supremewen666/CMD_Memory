@@ -155,6 +155,10 @@ scp user@gpu1:~/wsy/CMD_Memory/artifacts/arena/memtrace_llama.jsonl \
 ./run_remaining_experiments.sh --role analyze
 ```
 
+分析器会按 manifest 中的 seed 为重复的 `arena_id` 建立独立 run ID，例如
+`memtrace_seed24`、`memtrace_seed124`；同 seed 的额外复现依次标记为
+`memtrace_seed24_rep2`，避免 ecology checkpoint 和跨 arena 统计互相覆盖。
+
 分析产出（`artifacts/arena/analysis/`）：
 
 | 文件 | 内容 |
