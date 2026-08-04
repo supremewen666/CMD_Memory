@@ -159,6 +159,61 @@ scp user@gpu1:~/wsy/CMD_Memory/artifacts/arena/memtrace_llama.jsonl \
 `memtrace_seed24`、`memtrace_seed124`；同 seed 的额外复现依次标记为
 `memtrace_seed24_rep2`，避免 ecology checkpoint 和跨 arena 统计互相覆盖。
 
+## Phase 1 双臂重测（离线闸门通过后）
+
+Phase 1 不复用旧 `gpu0` / `gpu1` 角色。每个 Arena 的 evolution-on 与
+all-frozen 必须留在同一张 GPU、同一组 Qwen/Llama 端点上，避免把硬件差异
+混入实验臂：
+
+```text
+GPU 0: MemTrace seed 24 — evolution-on → all-frozen
+GPU 1: STALE            — evolution-on → all-frozen
+```
+
+先在汇聚了四个 MemTrace JSONL 的机器上运行零调用 Phase 0：
+
+```bash
+python -m experiments.run_evolution_governance_phase0
+```
+
+确认 `artifacts/evolution_governance/phase0/phase0_summary.json` 中
+`phase1_gate_passed=true`，再把同一份 summary 复制到两台 GPU 的相同路径。
+
+两台先分别冒烟：
+
+```bash
+# GPU 0
+./run_remaining_experiments.sh --role phase1_gpu0 --smoke
+
+# GPU 1
+./run_remaining_experiments.sh --role phase1_gpu1 --smoke
+```
+
+冒烟只跑每个 Arena 的前 50 case，写入 `gpu0_smoke/`、`gpu1_smoke/`，
+不会占用正式输出。确认后并行启动：
+
+```bash
+# GPU 0
+./run_remaining_experiments.sh --role phase1_gpu0 --detach
+
+# GPU 1
+./run_remaining_experiments.sh --role phase1_gpu1 --detach
+```
+
+GPU 1 完成后，将整个 `gpu1` 结果目录复制到 GPU 0：
+
+```bash
+scp -r user@gpu1:~/wsy/CMD_Memory/artifacts/evolution_governance/phase1/gpu1 \
+  artifacts/evolution_governance/phase1/
+./run_remaining_experiments.sh --role phase1_analyze
+```
+
+合并器会校验两端使用相同的 Phase 0 SHA256、seed 和 candidate budget，并要求
+Arena 恰好为 `memtrace` 与 `stale`。最终产物：
+
+- `phase1/combined/phase1_combined_summary.json`
+- `phase1/combined/phase1_combined_arena_summary.csv`
+
 分析产出（`artifacts/arena/analysis/`）：
 
 | 文件 | 内容 |

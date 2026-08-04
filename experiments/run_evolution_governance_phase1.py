@@ -45,6 +45,25 @@ def main() -> int:
         "--output-dir",
         default="artifacts/evolution_governance/phase1",
     )
+    parser.add_argument(
+        "--arena",
+        dest="arenas",
+        action="append",
+        choices=("memtrace", "stale"),
+        help=(
+            "Run only this arena; repeat to select both. Omit to run both "
+            "sequentially on one machine."
+        ),
+    )
+    parser.add_argument(
+        "--merge-summaries",
+        nargs="+",
+        metavar="SUMMARY",
+        help=(
+            "Zero-call merge of per-GPU phase1_summary.json files. "
+            "No datasets or model endpoints are opened."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=24)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--candidate-budget", type=int, default=2)
@@ -57,6 +76,20 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    output = Path(args.output_dir)
+    if args.merge_summaries:
+        merged = merge_phase1_summaries(
+            tuple(Path(value) for value in args.merge_summaries),
+            output_dir=output,
+        )
+        print(f"[RESULT] model_calls=0")
+        print(f"[RESULT] g_e3_passed={int(merged['g_e3_passed'])}")
+        print(
+            "[RESULT] summary="
+            f"{output / 'phase1_combined_summary.json'}"
+        )
+        return 0
+
     phase0_path = Path(args.phase0_summary)
     phase0 = json.loads(phase0_path.read_text(encoding="utf-8"))
     if phase0.get("phase1_gate_passed") is not True:
@@ -64,13 +97,20 @@ def main() -> int:
     if args.candidate_budget < 2:
         parser.error("--candidate-budget must be >=2 for directed chains")
 
-    datasets = (
-        (
-            "memtrace",
+    datasets_by_id = {
+        "memtrace": (
             Path(args.memtrace_cases),
             load_memtrace_arena_cases,
         ),
-        ("stale", Path(args.stale_cases), load_stale_arena_cases),
+        "stale": (Path(args.stale_cases), load_stale_arena_cases),
+    }
+    selected_arenas = tuple(dict.fromkeys(args.arenas or datasets_by_id))
+    datasets = tuple(
+        (
+            arena_id,
+            *datasets_by_id[arena_id],
+        )
+        for arena_id in selected_arenas
     )
     loaded = [
         (
@@ -95,7 +135,6 @@ def main() -> int:
         )
         return 0
 
-    output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     arena_summaries = []
     all_curve_rows = []
@@ -140,6 +179,8 @@ def main() -> int:
         "phase": 1,
         "seed": args.seed,
         "candidate_budget": args.candidate_budget,
+        "selected_arenas": list(selected_arenas),
+        "complete_suite": set(selected_arenas) == set(datasets_by_id),
         "phase0_summary": str(phase0_path.resolve()),
         "phase0_summary_sha256": hashlib.sha256(
             phase0_path.read_bytes()
@@ -160,6 +201,79 @@ def main() -> int:
     print(f"[RESULT] g_e3_passed={int(combined_passed)}")
     print(f"[RESULT] summary={output / 'phase1_summary.json'}")
     return 0
+
+
+def merge_phase1_summaries(
+    paths: Sequence[Path],
+    *,
+    output_dir: Path,
+) -> dict[str, object]:
+    """Merge disjoint per-GPU summaries with provenance and consistency checks."""
+    if len(paths) < 2:
+        raise ValueError("at least two Phase 1 summaries are required")
+    source_rows = []
+    arenas: dict[str, Mapping[str, object]] = {}
+    phase0_sha256: str | None = None
+    seed: int | None = None
+    candidate_budget: int | None = None
+    for path in paths:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("phase") != 1:
+            raise ValueError(f"{path}: not a Phase 1 summary")
+        current_phase0 = str(payload.get("phase0_summary_sha256", ""))
+        current_seed = int(payload["seed"])
+        current_budget = int(payload["candidate_budget"])
+        if phase0_sha256 is None:
+            phase0_sha256 = current_phase0
+            seed = current_seed
+            candidate_budget = current_budget
+        elif (
+            current_phase0 != phase0_sha256
+            or current_seed != seed
+            or current_budget != candidate_budget
+        ):
+            raise ValueError("Phase 1 summaries use inconsistent protocols")
+        for row in payload.get("arenas", ()):
+            arena_id = str(row["arena_id"])
+            if arena_id in arenas:
+                raise ValueError(f"duplicate Phase 1 arena: {arena_id}")
+            arenas[arena_id] = dict(row)
+        source_rows.append(
+            {
+                "path": str(path.resolve()),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    expected = {"memtrace", "stale"}
+    if set(arenas) != expected:
+        raise ValueError(
+            "combined Phase 1 summary requires exactly memtrace and stale"
+        )
+    ordered = [arenas[arena_id] for arena_id in sorted(arenas)]
+    passed = all(bool(row["g_e3_passed"]) for row in ordered)
+    result = {
+        "phase": 1,
+        "seed": seed,
+        "candidate_budget": candidate_budget,
+        "phase0_summary_sha256": phase0_sha256,
+        "source_summaries": source_rows,
+        "arenas": ordered,
+        "g_e2_passed": all(bool(row["g_e2_passed"]) for row in ordered),
+        "g_e3_passed": passed,
+        "decision": (
+            "positive_evolution_result"
+            if passed
+            else "negative_result_chapter"
+        ),
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "phase1_combined_summary.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+    _write_csv(output_dir / "phase1_combined_arena_summary.csv", ordered)
+    return result
 
 
 def _run_arm(

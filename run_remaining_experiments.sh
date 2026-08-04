@@ -6,6 +6,9 @@
 #   SSH 2 (GPU 1):  ./run_remaining_experiments.sh --role gpu1
 #   后台运行:        ./run_remaining_experiments.sh --role gpu0 --detach
 #   任一台:         ./run_remaining_experiments.sh --role analyze   （先 scp 汇聚 JSONL）
+#   Phase 1 GPU 0:  ./run_remaining_experiments.sh --role phase1_gpu0 --detach
+#   Phase 1 GPU 1:  ./run_remaining_experiments.sh --role phase1_gpu1 --detach
+#   Phase 1 汇聚:   ./run_remaining_experiments.sh --role phase1_analyze
 #   冒烟:           ./run_remaining_experiments.sh --role gpu0 --smoke
 #   单 Arena 调试:  ./run_remaining_experiments.sh --role gpu0 --only memtrace_seed24
 #
@@ -21,6 +24,7 @@ export PYTHONUNBUFFERED=1
 CMD_ROOT="$HOME/wsy/CMD_Memory"
 CMD_VLLM_OVERLAY="$HOME/wsy/runtime/vllm085-transformers451"
 ARTIFACTS="$CMD_ROOT/artifacts/arena"
+EVOLUTION_ARTIFACTS="$CMD_ROOT/artifacts/evolution_governance"
 QWVLLM_PORT=8000
 LLAMA_JUDGE_PORT=8000
 LLAMA_ANSWER_PORT=8001
@@ -52,12 +56,15 @@ while [[ $# -gt 0 ]]; do
     --detach)
       DETACH=true; shift ;;
     --help|-h)
-      echo "Usage: $0 --role gpu0|gpu1|analyze [--smoke] [--only NAME] [--detach]"
+      echo "Usage: $0 --role gpu0|gpu1|analyze|phase1_gpu0|phase1_gpu1|phase1_analyze [--smoke] [--only NAME] [--detach]"
       echo ""
       echo "  GPU 0 (~3.5h): MemTrace-B seeds 24+124 → MemFail"
       echo "  GPU 1 (~3.5h): MemTrace-B seed 224 → STALE → replicate seed 24"
       echo "  analyze:        unified analysis (run after scp-ing results to one machine)"
-      echo "  --detach:       run in a new session; logs to artifacts/arena/run_ROLE_TIMESTAMP.log"
+      echo "  phase1_gpu0:    evolution-on vs frozen on MemTrace (same GPU/endpoints)"
+      echo "  phase1_gpu1:    evolution-on vs frozen on STALE (same GPU/endpoints)"
+      echo "  phase1_analyze: merge the two per-GPU Phase 1 summaries (zero calls)"
+      echo "  --detach:       run in a new session; logs to the role-specific artifacts directory"
       echo ""
       echo "  --only:  skip straight to one named phase (memtrace_seed24, memtrace_seed124,"
       echo "           memtrace_seed224, memfail, stale, memtrace_llama)"
@@ -68,13 +75,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$ROLE" ]]; then
-  echo "ERROR: --role is required (gpu0 | gpu1 | analyze)" >&2
+  echo "ERROR: --role is required (gpu0 | gpu1 | analyze | phase1_gpu0 | phase1_gpu1 | phase1_analyze)" >&2
   exit 1
 fi
 
 if $DETACH && [[ -z "${CMD_EXPERIMENTS_DETACHED:-}" ]]; then
-  mkdir -p "$ARTIFACTS"
-  detach_log="${ARTIFACTS}/run_${ROLE}_$(date +%Y%m%d_%H%M%S).log"
+  detach_log_root="$ARTIFACTS"
+  if [[ "$ROLE" == phase1_* ]]; then
+    detach_log_root="${EVOLUTION_ARTIFACTS}/phase1/logs"
+  fi
+  mkdir -p "$detach_log_root"
+  detach_log="${detach_log_root}/run_${ROLE}_$(date +%Y%m%d_%H%M%S).log"
   detach_args=(--role "$ROLE")
   $SMOKE && detach_args+=(--smoke)
   [[ -n "$ONLY" ]] && detach_args+=(--only "$ONLY")
@@ -351,7 +362,7 @@ run_memtrace() {
   else
     python -m experiments.run_arena_memtrace \
       --backend-factory experiments.arena_backends:create_vllm_backend \
-      --chains --case-workers 1 --best-of-n-control --deposit-after 0.5 --deposit-min-benefit 0.05 --deposit-min-support 3 \
+      --chains --case-workers 1 --best-of-n-control --deposit-after 0.5 --deposit-min-benefit 0.05 --deposit-min-support 10 \
       "${extra[@]}" \
       --output "$output" \
       2>&1 | tee "${ARTIFACTS}/memtrace_${label}.log"
@@ -404,6 +415,73 @@ run_analysis() {
       "${ARTIFACTS}/memtrace_llama.jsonl" \
     --output-dir "${ARTIFACTS}/analysis"
   echo "[done] Analysis → ${ARTIFACTS}/analysis/"
+}
+
+require_phase0_summary() {
+  local summary="${EVOLUTION_ARTIFACTS}/phase0/phase0_summary.json"
+  if [[ ! -s "$summary" ]]; then
+    echo "ERROR: Phase 0 summary is missing: ${summary}" >&2
+    echo "Run Phase 0 after gathering the four MemTrace JSONLs, or copy the" >&2
+    echo "same phase0_summary.json to this GPU host before Phase 1." >&2
+    return 1
+  fi
+  python - "$summary" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text(encoding="utf-8"))
+if payload.get("phase1_gate_passed") is not True:
+    raise SystemExit(f"Phase 0 gate did not authorize Phase 1: {path}")
+print(f"[gate] Phase 0 authorized Phase 1: {path}")
+PY
+}
+
+run_phase1_arena() {
+  local arena="$1"
+  local lane="$2"
+  local output_dir="${EVOLUTION_ARTIFACTS}/phase1/${lane}"
+  local summary="${output_dir}/phase1_summary.json"
+  local phase0_summary="${EVOLUTION_ARTIFACTS}/phase0/phase0_summary.json"
+
+  if [[ -s "$summary" ]] && ! $SMOKE; then
+    echo "[skip] ${summary} exists and is non-empty; archive it to rerun"
+    return 0
+  fi
+  if $SMOKE; then
+    output_dir="${EVOLUTION_ARTIFACTS}/phase1/${lane}_smoke"
+  fi
+  mkdir -p "$output_dir"
+  echo "===== Phase 1: ${arena} evolution-on vs all-frozen ====="
+  local phase1_args=(
+    --phase0-summary "$phase0_summary"
+    --arena "$arena"
+    --output-dir "$output_dir"
+    --candidate-budget 2
+    --live
+  )
+  $SMOKE && phase1_args+=(--limit 50 --permutations 199 --bootstrap-samples 500)
+  python -m experiments.run_evolution_governance_phase1 \
+    "${phase1_args[@]}" \
+    2>&1 | tee "${output_dir}/phase1_${arena}.log"
+  echo "[done] Phase 1 ${arena} → ${output_dir}"
+}
+
+run_phase1_analysis() {
+  local gpu0_summary="${EVOLUTION_ARTIFACTS}/phase1/gpu0/phase1_summary.json"
+  local gpu1_summary="${EVOLUTION_ARTIFACTS}/phase1/gpu1/phase1_summary.json"
+  local output_dir="${EVOLUTION_ARTIFACTS}/phase1/combined"
+  if [[ ! -s "$gpu0_summary" || ! -s "$gpu1_summary" ]]; then
+    echo "ERROR: both per-GPU Phase 1 summaries are required:" >&2
+    echo "  ${gpu0_summary}" >&2
+    echo "  ${gpu1_summary}" >&2
+    return 1
+  fi
+  python -m experiments.run_evolution_governance_phase1 \
+    --merge-summaries "$gpu0_summary" "$gpu1_summary" \
+    --output-dir "$output_dir"
+  echo "[done] Phase 1 combined analysis → ${output_dir}"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -501,6 +579,30 @@ main_gpu1() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Phase 1: keep both arms of one arena on the same GPU/model endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+main_phase1_gpu0() {
+  require_phase0_summary
+  start_llama_dual_vllm
+  llama_dual_env
+  gate_g0
+  run_phase1_arena "memtrace" "gpu0"
+  stop_llama_dual_vllm
+  echo "===== PHASE 1 GPU 0 DONE ====="
+}
+
+main_phase1_gpu1() {
+  require_phase0_summary
+  start_llama_dual_vllm
+  llama_dual_env
+  gate_g0
+  run_phase1_arena "stale" "gpu1"
+  stop_llama_dual_vllm
+  echo "===== PHASE 1 GPU 1 DONE ====="
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Analyze: run after scp-ing all JSONL to one machine
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -510,15 +612,24 @@ main_analyze() {
   echo "===== ANALYSIS DONE ====="
 }
 
+main_phase1_analyze() {
+  run_phase1_analysis
+  echo ""
+  echo "===== PHASE 1 ANALYSIS DONE ====="
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Dispatch
 # ══════════════════════════════════════════════════════════════════════════════
 
 case "$ROLE" in
-  gpu0)     main_gpu0 ;;
-  gpu1)     main_gpu1 ;;
-  analyze)  main_analyze ;;
+  gpu0)           main_gpu0 ;;
+  gpu1)           main_gpu1 ;;
+  analyze)        main_analyze ;;
+  phase1_gpu0)    main_phase1_gpu0 ;;
+  phase1_gpu1)    main_phase1_gpu1 ;;
+  phase1_analyze) main_phase1_analyze ;;
   *)
-    echo "ERROR: --role must be gpu0, gpu1, or analyze" >&2
+    echo "ERROR: invalid --role; see --help" >&2
     exit 1 ;;
 esac
