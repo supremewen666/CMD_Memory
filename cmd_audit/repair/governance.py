@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import random
-from statistics import fmean
+from statistics import fmean, median
 from typing import Iterable
 
 from ..counterfactual.operators import OperatorSpec
@@ -58,9 +58,28 @@ class OperatorLedgerEntry:
         return self.succeeded / self.applied
 
     @property
-    def ranking_score(self) -> tuple[float, float, int, int]:
+    def eta(self) -> float:
+        """Laplace-smoothed live reliability used by the lifecycle."""
+        return (self.succeeded + 1) / (self.applied + 2)
+
+    @property
+    def probation(self) -> bool:
+        """New operators remain searchable but discounted until proven live."""
+        return not self.retired and not (
+            self.applied >= 4 and self.eta >= 0.5
+        )
+
+    @property
+    def lifecycle_status(self) -> str:
+        if self.retired:
+            return "retired"
+        return "probation" if self.probation else "active"
+
+    @property
+    def ranking_score(self) -> tuple[float, float, float, int, int]:
         return (
-            self.success_rate,
+            self.eta,
+            0.0 if self.probation else 1.0,
             self.average_gain,
             self.last_success_generation or -1,
             -self.admitted_generation,
@@ -240,13 +259,20 @@ def _bootstrap_lower_bound(
     confidence: float,
     samples: int,
     seed: int,
+    aggregate: str = "mean",
 ) -> float:
+    if aggregate not in {"mean", "median"}:
+        raise ValueError("aggregate must be 'mean' or 'median'")
     rng = random.Random(seed)
     n = len(gains)
-    means = sorted(
-        fmean(gains[rng.randrange(n)] for _ in range(n))
+    statistic = fmean if aggregate == "mean" else median
+    estimates = sorted(
+        statistic(gains[rng.randrange(n)] for _ in range(n))
         for _ in range(samples)
     )
     alpha = 1.0 - confidence
-    index = max(0, min(len(means) - 1, int(alpha / 2.0 * len(means))))
-    return means[index]
+    index = max(
+        0,
+        min(len(estimates) - 1, int(alpha / 2.0 * len(estimates))),
+    )
+    return estimates[index]

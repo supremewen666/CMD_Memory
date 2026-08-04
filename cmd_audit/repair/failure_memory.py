@@ -19,7 +19,13 @@ from ..core.models import MemoryItem, ProbeCase
 from ..counterfactual import OperatorSpec, PipelineAction
 from .ecs import ECSDraft
 from .governance import GovernanceDecision, OperatorGovernance
-from .operator_library import PatternRecord, canonical_json, content_id, hash_text
+from .operator_library import (
+    CompositeOperatorSpec,
+    PatternRecord,
+    canonical_json,
+    content_id,
+    hash_text,
+)
 from ..scoring import evidence_recall_from_text
 from ..eval.writers import write_csv_table, write_text_artifact
 
@@ -214,7 +220,44 @@ def _signature_from(query: str, memory_texts: tuple[str, ...]) -> str:
     return " ".join(_extract_keywords(query)[:10])
 
 
+def _normalize_skill_id(value: str) -> str:
+    """Match seed/composite scheduling ids to their action-family suffix."""
+    text = str(value).casefold()
+    return text.rsplit(":", 1)[-1]
+
+
 # ── Data types ──────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class AntiPatternRecord:
+    """Negative chain evidence retained for scheduling and audit."""
+
+    first_skill_id: str
+    second_skill_id: str
+    cluster_id: str
+    n_support: int
+    ci_upper: float
+    thresholds: Mapping[str, float | int]
+    seed: int
+    source_sha256: str
+    provenance_sha256: str
+    weight: float = 0.25
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "record_type": "anti_pattern_event",
+            "first_skill_id": self.first_skill_id,
+            "second_skill_id": self.second_skill_id,
+            "cluster_id": self.cluster_id,
+            "n_support": self.n_support,
+            "ci_upper": self.ci_upper,
+            "thresholds": dict(self.thresholds),
+            "seed": self.seed,
+            "source_sha256": self.source_sha256,
+            "provenance_sha256": self.provenance_sha256,
+            "weight": self.weight,
+        }
 
 
 @dataclass(frozen=True)
@@ -1719,6 +1762,44 @@ class FailureMemoryStore:
         self._records: list[StepLevelRecord | FailureMemoryRecord] = []
         self._label_success_rates: dict[str, tuple[int, int]] = {}  # label -> (success, total)
         self._governance = OperatorGovernance()
+        self._anti_patterns: list[AntiPatternRecord] = []
+
+    def record_anti_pattern(
+        self,
+        record: AntiPatternRecord,
+    ) -> AntiPatternRecord:
+        """Append negative evidence; records are archived rather than deleted."""
+        if not 0.0 <= record.weight <= 1.0:
+            raise ValueError("anti-pattern weight must be between zero and one")
+        self._anti_patterns.append(record)
+        return record
+
+    @property
+    def anti_patterns(self) -> tuple[AntiPatternRecord, ...]:
+        return tuple(self._anti_patterns)
+
+    def chain_pair_weight(
+        self,
+        first_skill_id: str,
+        second_skill_id: str,
+        cluster_id: str,
+    ) -> float:
+        """Return the strongest applicable anti-pattern downweight."""
+        pair = (
+            _normalize_skill_id(first_skill_id),
+            _normalize_skill_id(second_skill_id),
+        )
+        weights = [
+            row.weight
+            for row in self._anti_patterns
+            if (
+                _normalize_skill_id(row.first_skill_id),
+                _normalize_skill_id(row.second_skill_id),
+            )
+            == pair
+            and row.cluster_id in {str(cluster_id), "*"}
+        ]
+        return min(weights, default=1.0)
 
     def add(self, record: StepLevelRecord | FailureMemoryRecord) -> "FailureMemoryStore":
         """Add a record and update success rate statistics."""
@@ -1927,6 +2008,13 @@ class FailureMemoryStore:
         specs: list[OperatorSpec] = list(
             self._governance.active_operators(fingerprint)
         )
+        specs.sort(
+            key=lambda spec: self._operator_retrieval_weight(
+                spec,
+                cluster_id=fingerprint,
+            ),
+            reverse=True,
+        )
         seen = {spec.content_hash() for spec in specs}
         for record in records:
             if not isinstance(record, StepLevelRecord):
@@ -1947,6 +2035,24 @@ class FailureMemoryStore:
             if len(specs) >= top_k:
                 break
         return specs[:top_k], len(records)
+
+    def _operator_retrieval_weight(
+        self,
+        spec: OperatorSpec,
+        *,
+        cluster_id: str,
+    ) -> float:
+        if not isinstance(spec, CompositeOperatorSpec) or len(spec.stages) < 2:
+            return 1.0
+        first_action = spec.stages[0].last_action
+        second_action = spec.stages[1].last_action
+        if first_action is None or second_action is None:
+            return 1.0
+        return self.chain_pair_weight(
+            first_action.value,
+            second_action.value,
+            cluster_id,
+        )
 
     def admit_with_cluster_replay(
         self,

@@ -70,3 +70,79 @@ def test_merge_operators_preserves_same_generation_point_as_separate_stages():
     assert composite.content_hash() == merge_operators((first, second)).content_hash()
     assert first.action_by_generation_point()[0] == PipelineAction.RETRIEVAL_ERROR
 
+
+def test_d1_promotes_stable_directional_pair_across_clusters():
+    observer = ChainObserver(arena_id="memtrace")
+    for position in range(1, 13):
+        observer.record_case(
+            case_id=f"c{position}",
+            family_id=f"family-{position % 3}",
+            failure_type="retrieval_error",
+            stream_position=position,
+            activated_skill_ids=("a", "b"),
+            chain_executions=(
+                _chain("a", "b", 0.30),
+                _chain("b", "a", -0.10),
+            ),
+        )
+    candidates = {
+        "a": _candidate("a", PipelineAction.RETRIEVAL_ERROR),
+        "b": _candidate("b", PipelineAction.INJECTION_ERROR),
+    }
+
+    events = observer.promote_candidates(
+        candidates=candidates,
+        checkpoint="50%",
+        bootstrap_samples=500,
+        seed=24,
+        source_sha256="a" * 64,
+    )
+    forward = next(
+        row
+        for row in events
+        if (row.first_skill_id, row.second_skill_id) == ("a", "b")
+    )
+
+    assert forward.passed
+    assert forward.n_support == 12
+    assert forward.n_clusters == 3
+    assert forward.sign_p < 0.05
+    assert forward.ci_lower > 0.0
+    assert forward.direction_p is not None
+    assert forward.direction_p < 0.10
+    assert len(forward.provenance_sha256) == 64
+
+
+def test_d1_rejects_noise_and_marks_strong_negative_as_anti_pattern():
+    observer = ChainObserver(arena_id="memtrace")
+    for position in range(1, 13):
+        observer.record_case(
+            case_id=f"c{position}",
+            family_id=f"family-{position % 3}",
+            failure_type="retrieval_error",
+            stream_position=position,
+            activated_skill_ids=("a", "b"),
+            chain_executions=(
+                _chain("a", "b", -0.30),
+                _chain("b", "a", 0.10),
+            ),
+        )
+    candidates = {
+        "a": _candidate("a", PipelineAction.RETRIEVAL_ERROR),
+        "b": _candidate("b", PipelineAction.INJECTION_ERROR),
+    }
+
+    events = observer.promote_candidates(
+        candidates=candidates,
+        checkpoint="50%",
+        bootstrap_samples=500,
+    )
+    forward = next(
+        row
+        for row in events
+        if (row.first_skill_id, row.second_skill_id) == ("a", "b")
+    )
+
+    assert not forward.passed
+    assert forward.anti_pattern
+    assert forward.ci_upper < 0.0

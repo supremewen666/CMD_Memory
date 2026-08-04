@@ -80,6 +80,12 @@ def run_arena_cli(
         default=chains_default,
     )
     parser.add_argument(
+        "--evolve-selection-priors",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Prequentially reorder candidates from prior same-family evidence.",
+    )
+    parser.add_argument(
         "--deposit-after",
         type=float,
         default=None,
@@ -89,7 +95,14 @@ def run_arena_cli(
         ),
     )
     parser.add_argument("--deposit-min-benefit", type=float, default=0.05)
-    parser.add_argument("--deposit-min-support", type=int, default=3)
+    parser.add_argument("--deposit-min-support", type=int, default=10)
+    parser.add_argument("--deposit-min-clusters", type=int, default=3)
+    parser.add_argument("--deposit-sign-alpha", type=float, default=0.05)
+    parser.add_argument("--deposit-direction-alpha", type=float, default=0.10)
+    parser.add_argument("--deposit-confirmation-cases", type=int, default=8)
+    parser.add_argument("--deposit-max-candidates", type=int, default=2)
+    parser.add_argument("--deposit-marginal-dominance", type=float, default=0.60)
+    parser.add_argument("--deposit-confirmation-budget", type=int, default=50)
     parser.add_argument(
         "--perturb-after",
         type=float,
@@ -122,9 +135,17 @@ def run_arena_cli(
         candidate_limit=args.candidate_limit or None,
         seed=args.seed,
         enable_chains=args.chains,
+        evolve_selection_priors=args.evolve_selection_priors,
         deposition_after_fraction=args.deposit_after,
         deposition_min_benefit=args.deposit_min_benefit,
         deposition_min_support=args.deposit_min_support,
+        deposition_min_clusters=args.deposit_min_clusters,
+        deposition_sign_alpha=args.deposit_sign_alpha,
+        deposition_direction_alpha=args.deposit_direction_alpha,
+        deposition_confirmation_cases=args.deposit_confirmation_cases,
+        deposition_max_candidates=args.deposit_max_candidates,
+        deposition_marginal_dominance=args.deposit_marginal_dominance,
+        deposition_confirmation_budget=args.deposit_confirmation_budget,
         perturb_after_fraction=args.perturb_after,
         perturb_strategy=args.perturb_strategy,
         perturb_window_size=args.perturb_window_size,
@@ -168,6 +189,10 @@ def run_arena_cli(
     )
     print(f"[RESULT] chain_attempts={len(result.chain_attempts)}")
     print(f"[RESULT] deposition_events={len(result.deposition_events)}")
+    print(
+        "[RESULT] deposition_confirmation_calls="
+        f"{result.manifest.deposition_confirmation_calls}"
+    )
     print(f"[RESULT] perturbation_events={len(result.perturbation_events)}")
     print(f"[RESULT] arm_comparison_events={len(result.arm_comparison_events)}")
     print(

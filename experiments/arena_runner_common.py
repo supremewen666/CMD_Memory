@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import random
+from statistics import fmean
 from typing import Mapping, Protocol, Sequence
 
 from cmd_audit.core.models import ProbeCase, RetrievedItem
@@ -26,7 +27,10 @@ from cmd_audit.repair.chain_dynamics import (
     ChainDepositionEvent,
     ChainObserver,
     CoactivationSnapshot,
+    DepositionCandidate,
 )
+from cmd_audit.repair.failure_memory import AntiPatternRecord
+from cmd_audit.repair.governance import OperatorGovernance
 from cmd_audit.repair.memtrace_families import build_families, family_stream
 from cmd_audit.repair.skill_ecology import (
     AdditiveSaturationExecutor,
@@ -140,6 +144,7 @@ class ArenaManifest:
     runtime_uses_gold: bool
     chains_enabled: bool
     deposition_enabled: bool
+    selector_evolution_enabled: bool
     perturbation_enabled: bool
     perturbation_strategy: str
     seed: int
@@ -151,6 +156,8 @@ class ArenaManifest:
     selection_judge_identity: str
     evaluation_judge_identity: str
     cmd_budget_accounting: str
+    deposition_confirmation_calls: int
+    deposition_confirmation_budget: int
     dataset_fingerprint_version: str
     dataset_source_kind: str
     dataset_source_path: str
@@ -169,6 +176,9 @@ class ArenaRunResult:
     chain_attempts: tuple[ChainAttempt, ...]
     coactivation_snapshots: tuple[CoactivationSnapshot, ...]
     deposition_events: tuple[ChainDepositionEvent, ...]
+    deposition_candidate_events: tuple[DepositionCandidate, ...]
+    deposition_confirmation_events: tuple["DepositionConfirmationEvent", ...]
+    anti_pattern_events: tuple[AntiPatternRecord, ...]
     perturbation_events: tuple[PerturbationEvent, ...]
     arm_comparison_events: tuple["ArenaArmComparisonEvent", ...]
 
@@ -203,6 +213,37 @@ class ArenaArmComparisonEvent:
 
 
 @dataclass(frozen=True)
+class DepositionConfirmationEvent:
+    """Aggregated D2 replay and D3 marginal-contribution decision."""
+
+    arena_id: str
+    checkpoint: str
+    first_skill_id: str
+    second_skill_id: str
+    case_ids: tuple[str, ...]
+    cluster_ids: tuple[str, ...]
+    replay_gains: tuple[float | None, ...]
+    stage_max_gains: tuple[float | None, ...]
+    confirmation_ci_lower: float | None
+    marginal_dominance_rate: float
+    d2_passed: bool
+    d3_passed: bool
+    deposited: bool
+    reason: str
+    confirmation_calls: int
+    cumulative_confirmation_calls: int
+    thresholds: Mapping[str, float | int]
+    seed: int
+    source_sha256: str
+    provenance_sha256: str
+
+    def to_dict(self) -> dict[str, object]:
+        value = asdict(self)
+        value["record_type"] = "deposition_confirmation_event"
+        return value
+
+
+@dataclass(frozen=True)
 class _EvaluatedArenaCase:
     case: ArenaCase
     candidates: tuple[SkillCandidate, ...]
@@ -227,9 +268,17 @@ class ObservationalArenaRunner:
         candidate_limit: int | None = None,
         seed: int = 24,
         enable_chains: bool = True,
+        evolve_selection_priors: bool = False,
         deposition_after_fraction: float | None = None,
         deposition_min_benefit: float = 0.05,
-        deposition_min_support: int = 3,
+        deposition_min_support: int = 10,
+        deposition_min_clusters: int = 3,
+        deposition_sign_alpha: float = 0.05,
+        deposition_direction_alpha: float = 0.10,
+        deposition_confirmation_cases: int = 8,
+        deposition_max_candidates: int = 2,
+        deposition_marginal_dominance: float = 0.60,
+        deposition_confirmation_budget: int = 50,
         perturb_after_fraction: float | None = None,
         perturb_strategy: str = "keystone",
         perturb_window_size: int = 25,
@@ -267,6 +316,16 @@ class ObservationalArenaRunner:
             raise ValueError(
                 "deposition requires a backend deposit_composite hook"
             )
+        if deposition_min_support < 1 or deposition_min_clusters < 1:
+            raise ValueError("deposition support and cluster minima must be positive")
+        if deposition_confirmation_cases < 3:
+            raise ValueError("deposition confirmation requires at least 3 cases")
+        if deposition_max_candidates < 1:
+            raise ValueError("deposition_max_candidates must be positive")
+        if deposition_confirmation_budget < 1:
+            raise ValueError("deposition confirmation budget must be positive")
+        if not 0.0 <= deposition_marginal_dominance <= 1.0:
+            raise ValueError("marginal dominance threshold must be in [0, 1]")
         if perturb_after_fraction is not None and not (
             0 < perturb_after_fraction < 1
         ):
@@ -278,6 +337,7 @@ class ObservationalArenaRunner:
         if case_workers > 1 and (
             deposition_after_fraction is not None
             or perturb_after_fraction is not None
+            or evolve_selection_priors
         ):
             raise ValueError(
                 "cross-case concurrency is incompatible with deposition or "
@@ -297,9 +357,26 @@ class ObservationalArenaRunner:
         )
         self.seed = int(seed)
         self.enable_chains = bool(enable_chains)
+        self.evolve_selection_priors = bool(evolve_selection_priors)
+        self._selection_prior_history: dict[
+            tuple[str, str],
+            list[float],
+        ] = {}
+        self._chain_pair_weights: dict[tuple[str, str], float] = {}
         self.deposition_after_fraction = deposition_after_fraction
         self.deposition_min_benefit = float(deposition_min_benefit)
         self.deposition_min_support = int(deposition_min_support)
+        self.deposition_min_clusters = int(deposition_min_clusters)
+        self.deposition_sign_alpha = float(deposition_sign_alpha)
+        self.deposition_direction_alpha = float(deposition_direction_alpha)
+        self.deposition_confirmation_cases = int(deposition_confirmation_cases)
+        self.deposition_max_candidates = int(deposition_max_candidates)
+        self.deposition_marginal_dominance = float(
+            deposition_marginal_dominance
+        )
+        self.deposition_confirmation_budget = int(
+            deposition_confirmation_budget
+        )
         self.perturb_after_fraction = perturb_after_fraction
         self.perturb_strategy = str(perturb_strategy)
         self.perturb_window_size = int(perturb_window_size)
@@ -342,6 +419,19 @@ class ObservationalArenaRunner:
         removed_skill_id: str | None = None
         perturbation_probe: PerturbationProbe | None = None
         arm_comparison_events: list[ArenaArmComparisonEvent] = []
+        confirmation_events: list[DepositionConfirmationEvent] = []
+        anti_pattern_events: list[AntiPatternRecord] = []
+        deposition_confirmation_calls = 0
+        evidence_by_case: dict[
+            str,
+            tuple[ArenaCase, Mapping[str, DualScoreExecution]],
+        ] = {}
+        deposition_governance = OperatorGovernance(seed=self.seed)
+        governance_by_skill: dict[str, tuple[str, str]] = {}
+        source_sha256 = (
+            self.dataset_fingerprint.source_sha256
+            or self.dataset_fingerprint.selected_cases_sha256
+        )
 
         parallel_evaluations: tuple[_EvaluatedArenaCase, ...] | None = None
         if self.case_workers > 1:
@@ -365,6 +455,42 @@ class ObservationalArenaRunner:
             result = evaluated.result
             dual_by_skill = dict(evaluated.dual_by_skill)
             chain_executions = evaluated.chain_executions
+            evidence_by_case[case.case_id] = (case, dual_by_skill)
+            for deposition in chain_observer.depositions:
+                live_row = dual_by_skill.get(deposition.composite_skill_id)
+                governance_key = governance_by_skill.get(
+                    deposition.composite_skill_id
+                )
+                if live_row is None or governance_key is None:
+                    continue
+                fingerprint, operator_hash = governance_key
+                entry = deposition_governance.record_application(
+                    fingerprint,
+                    operator_hash,
+                    succeeded=(
+                        _finite(live_row.gold_free_gain)
+                        and float(live_row.gold_free_gain) > 0.0
+                    ),
+                    generation=position,
+                )
+                lifecycle_updater = getattr(
+                    self.backend,
+                    "update_composite_lifecycle",
+                    None,
+                )
+                if callable(lifecycle_updater):
+                    lifecycle_updater(
+                        deposition.composite_skill_id,
+                        status=entry.lifecycle_status,
+                        eta=entry.eta,
+                    )
+            if self.evolve_selection_priors:
+                for skill_id, live_row in dual_by_skill.items():
+                    if _finite(live_row.gold_free_gain):
+                        self._selection_prior_history.setdefault(
+                            (case.family_id, skill_id),
+                            [],
+                        ).append(float(live_row.gold_free_gain))
             if evaluated.best_of_n is not None:
                 cmd_winner = result.selected[0] if result.selected else None
                 cmd_dual = (
@@ -460,6 +586,7 @@ class ObservationalArenaRunner:
                 )
             chain_observer.record_case(
                 case_id=case.case_id,
+                family_id=case.family_id,
                 failure_type=case.failure_type,
                 stream_position=position,
                 activated_skill_ids=tuple(
@@ -475,14 +602,82 @@ class ObservationalArenaRunner:
                 and position >= deposition_position
                 and not deposition_done
             ):
-                deposition = chain_observer.deposit_best(
+                d1_events = chain_observer.promote_candidates(
                     candidates=candidate_catalog,
-                    deposited_after_case=position,
-                    min_chain_benefit=self.deposition_min_benefit,
                     min_support=self.deposition_min_support,
+                    min_clusters=self.deposition_min_clusters,
+                    sign_alpha=self.deposition_sign_alpha,
+                    direction_alpha=self.deposition_direction_alpha,
+                    checkpoint=f"{arena_id}:{position}/{len(self.cases)}",
+                    seed=self.seed,
+                    source_sha256=source_sha256,
                 )
-                if deposition is not None:
-                    self.backend.deposit_composite(deposition)
+                for candidate in d1_events:
+                    if not candidate.anti_pattern:
+                        continue
+                    anti_pattern_events.append(
+                        AntiPatternRecord(
+                            first_skill_id=candidate.first_skill_id,
+                            second_skill_id=candidate.second_skill_id,
+                            cluster_id="*",
+                            n_support=candidate.n_support,
+                            ci_upper=candidate.ci_upper,
+                            thresholds=candidate.thresholds,
+                            seed=candidate.seed,
+                            source_sha256=candidate.source_sha256,
+                            provenance_sha256=candidate.provenance_sha256,
+                        )
+                    )
+                    self._chain_pair_weights[
+                        (
+                            candidate.first_skill_id,
+                            candidate.second_skill_id,
+                        )
+                    ] = 0.25
+                survivors = sorted(
+                    (row for row in d1_events if row.passed),
+                    key=lambda row: (
+                        -row.ci_lower,
+                        -row.median_chain_benefit,
+                        row.first_skill_id,
+                        row.second_skill_id,
+                    ),
+                )[: self.deposition_max_candidates]
+                for candidate in survivors:
+                    confirmation, deposition, calls = (
+                        self._confirm_deposition_candidate(
+                            candidate,
+                            checkpoint=(
+                                f"{arena_id}:{position}/{len(self.cases)}"
+                            ),
+                            chain_attempts=chain_observer.attempts,
+                            evidence_by_case=evidence_by_case,
+                            governance=deposition_governance,
+                            calls_already_used=deposition_confirmation_calls,
+                            source_sha256=source_sha256,
+                        )
+                    )
+                    deposition_confirmation_calls += calls
+                    confirmation_events.append(confirmation)
+                    if deposition is not None:
+                        materialized = chain_observer.materialize_deposition(
+                            candidate,
+                            deposited_after_case=position,
+                            confirmation_ci_lower=float(
+                                confirmation.confirmation_ci_lower
+                            ),
+                            marginal_dominance_rate=(
+                                confirmation.marginal_dominance_rate
+                            ),
+                            lifecycle_status="probation",
+                            provenance_sha256=(
+                                confirmation.provenance_sha256
+                            ),
+                        )
+                        governance_by_skill[
+                            materialized.composite_skill_id
+                        ] = (arena_id, materialized.composite_spec_hash)
+                        self.backend.deposit_composite(materialized)
                 deposition_done = True
             if (
                 perturbation_position is not None
@@ -524,6 +719,7 @@ class ObservationalArenaRunner:
                 runtime_uses_gold=self.backend.runtime_uses_gold,
                 chains_enabled=self.enable_chains,
                 deposition_enabled=self.deposition_after_fraction is not None,
+                selector_evolution_enabled=self.evolve_selection_priors,
                 perturbation_enabled=self.perturb_after_fraction is not None,
                 perturbation_strategy=(
                     self.perturb_strategy
@@ -551,6 +747,12 @@ class ObservationalArenaRunner:
                     if callable(getattr(self.backend, "cmd_call_counts", None))
                     else "logical_fallback"
                 ),
+                deposition_confirmation_calls=(
+                    deposition_confirmation_calls
+                ),
+                deposition_confirmation_budget=(
+                    self.deposition_confirmation_budget
+                ),
                 dataset_fingerprint_version=(
                     self.dataset_fingerprint.version
                 ),
@@ -575,12 +777,188 @@ class ObservationalArenaRunner:
             chain_attempts=chain_observer.attempts,
             coactivation_snapshots=chain_observer.snapshots,
             deposition_events=chain_observer.depositions,
+            deposition_candidate_events=chain_observer.candidate_events,
+            deposition_confirmation_events=tuple(confirmation_events),
+            anti_pattern_events=tuple(anti_pattern_events),
             perturbation_events=(
                 (perturbation_probe.result(),)
                 if perturbation_probe is not None
                 else ()
             ),
             arm_comparison_events=tuple(arm_comparison_events),
+        )
+
+    def _confirm_deposition_candidate(
+        self,
+        candidate: DepositionCandidate,
+        *,
+        checkpoint: str,
+        chain_attempts: Sequence[ChainAttempt],
+        evidence_by_case: Mapping[
+            str,
+            tuple[ArenaCase, Mapping[str, DualScoreExecution]],
+        ],
+        governance: OperatorGovernance,
+        calls_already_used: int,
+        source_sha256: str,
+    ) -> tuple[DepositionConfirmationEvent, bool, int]:
+        """Run bounded D2 replay and D3 stage-dominance checks."""
+        if candidate.composite_spec is None:
+            raise ValueError("D2 requires a materialized composite spec")
+        selected = _select_confirmation_evidence(
+            candidate,
+            chain_attempts=chain_attempts,
+            evidence_by_case=evidence_by_case,
+            limit=self.deposition_confirmation_cases,
+            seed=self.seed,
+        )
+        composite = SkillCandidate(
+            skill_id=f"confirmation:{candidate.composite_spec_hash}",
+            operator=candidate.composite_spec,
+        )
+        replay_gains: list[float | None] = []
+        stage_max_gains: list[float | None] = []
+        case_ids: list[str] = []
+        cluster_ids: list[str] = []
+        calls_used = 0
+        confirm_hook = getattr(self.backend, "confirm_composite", None)
+        for case, stage_rows in selected:
+            # The v2 protocol budgets three model calls per confirmation case.
+            if (
+                calls_already_used + calls_used + 3
+                > self.deposition_confirmation_budget
+            ):
+                break
+            if callable(confirm_hook):
+                response = confirm_hook(case, composite)
+                if (
+                    isinstance(response, tuple)
+                    and len(response) == 2
+                    and isinstance(response[0], DualScoreExecution)
+                ):
+                    row, call_count = response
+                else:
+                    row, call_count = response, 3
+            else:
+                row = self.backend.evaluate(
+                    case,
+                    composite,
+                    input_context=case.base_context,
+                    origin_context=case.base_context,
+                )
+                call_count = 3
+            call_count = int(call_count)
+            if call_count < 0:
+                raise ValueError("confirmation call count cannot be negative")
+            calls_used += call_count
+            stage_values = [
+                float(stage_rows[skill_id].gold_free_gain)
+                for skill_id in (
+                    candidate.first_skill_id,
+                    candidate.second_skill_id,
+                )
+                if skill_id in stage_rows
+                and _finite(stage_rows[skill_id].gold_free_gain)
+            ]
+            case_ids.append(case.case_id)
+            cluster_ids.append(case.family_id)
+            replay_gains.append(
+                float(row.gold_free_gain)
+                if _finite(row.gold_free_gain)
+                else None
+            )
+            stage_max_gains.append(
+                max(stage_values) if len(stage_values) == 2 else None
+            )
+
+        finite_gains = tuple(
+            float(value) for value in replay_gains if _finite(value)
+        )
+        complete = (
+            len(case_ids) == self.deposition_confirmation_cases
+            and len(finite_gains) == len(case_ids)
+        )
+        decision = governance.admit_with_cluster_replay(
+            candidate.arena_id,
+            candidate.composite_spec,
+            finite_gains,
+            generation=len(evidence_by_case),
+        )
+        d2_passed = bool(
+            complete
+            and decision.admitted
+            and not decision.low_evidence
+            and decision.ci_lower is not None
+            and decision.ci_lower > 0.0
+        )
+        dominance_count = sum(
+            gain is not None
+            and stage is not None
+            and float(gain) > float(stage)
+            for gain, stage in zip(replay_gains, stage_max_gains)
+        )
+        dominance_rate = (
+            dominance_count / len(case_ids) if case_ids else 0.0
+        )
+        d3_passed = bool(
+            complete
+            and dominance_rate >= self.deposition_marginal_dominance
+        )
+        deposited = d2_passed and d3_passed
+        if deposited:
+            reason = "d2_d3_passed"
+        elif not complete:
+            reason = "confirmation_incomplete_or_budget_exhausted"
+        elif not d2_passed:
+            reason = decision.reason
+        else:
+            reason = "marginal_dominance_failed"
+        thresholds = {
+            **dict(candidate.thresholds),
+            "confirmation_cases": self.deposition_confirmation_cases,
+            "max_candidates": self.deposition_max_candidates,
+            "marginal_dominance": self.deposition_marginal_dominance,
+            "confirmation_budget": self.deposition_confirmation_budget,
+        }
+        provenance = _event_provenance_sha256(
+            {
+                "candidate_provenance_sha256": (
+                    candidate.provenance_sha256
+                ),
+                "checkpoint": checkpoint,
+                "case_ids": case_ids,
+                "thresholds": thresholds,
+                "seed": self.seed,
+                "source_sha256": source_sha256,
+            }
+        )
+        return (
+            DepositionConfirmationEvent(
+                arena_id=candidate.arena_id,
+                checkpoint=str(checkpoint),
+                first_skill_id=candidate.first_skill_id,
+                second_skill_id=candidate.second_skill_id,
+                case_ids=tuple(case_ids),
+                cluster_ids=tuple(cluster_ids),
+                replay_gains=tuple(replay_gains),
+                stage_max_gains=tuple(stage_max_gains),
+                confirmation_ci_lower=decision.ci_lower,
+                marginal_dominance_rate=dominance_rate,
+                d2_passed=d2_passed,
+                d3_passed=d3_passed,
+                deposited=deposited,
+                reason=reason,
+                confirmation_calls=calls_used,
+                cumulative_confirmation_calls=(
+                    calls_already_used + calls_used
+                ),
+                thresholds=thresholds,
+                seed=self.seed,
+                source_sha256=source_sha256,
+                provenance_sha256=provenance,
+            ),
+            deposited,
+            calls_used,
         )
 
     def _evaluate_case(
@@ -601,6 +979,19 @@ class ObservationalArenaRunner:
                 candidate
                 for candidate in candidates
                 if candidate.skill_id != removed_skill_id
+            )
+        if self.evolve_selection_priors:
+            candidates = tuple(
+                sorted(
+                    candidates,
+                    key=lambda candidate: (
+                        -self._selection_prior_mean(
+                            case.family_id,
+                            candidate.skill_id,
+                        ),
+                        candidate.skill_id,
+                    ),
+                )
             )
         if self.candidate_limit is not None:
             candidates = candidates[: self.candidate_limit]
@@ -679,6 +1070,17 @@ class ObservationalArenaRunner:
             cmd_budget_source=cmd_budget_source,
         )
 
+    def _selection_prior_mean(
+        self,
+        family_id: str,
+        skill_id: str,
+    ) -> float:
+        values = self._selection_prior_history.get(
+            (str(family_id), str(skill_id)),
+            (),
+        )
+        return fmean(values) if values else 0.0
+
     def _evaluate_chains(
         self,
         case: ArenaCase,
@@ -691,6 +1093,12 @@ class ObservationalArenaRunner:
                 if first.skill_id == second.skill_id:
                     continue
                 if _operator_family(first) == _operator_family(second):
+                    continue
+                if not self._chain_pair_scheduled(
+                    case.case_id,
+                    first.skill_id,
+                    second.skill_id,
+                ):
                     continue
                 first_row = standalone[first.skill_id]
                 second_row = standalone[second.skill_id]
@@ -742,6 +1150,27 @@ class ObservationalArenaRunner:
                     )
                 )
         return tuple(output)
+
+    def _chain_pair_scheduled(
+        self,
+        case_id: str,
+        first_skill_id: str,
+        second_skill_id: str,
+    ) -> bool:
+        weight = self._chain_pair_weights.get(
+            (first_skill_id, second_skill_id),
+            1.0,
+        )
+        if weight >= 1.0:
+            return True
+        digest = hashlib.sha256(
+            (
+                f"{self.seed}\0{case_id}\0{first_skill_id}\0"
+                f"{second_skill_id}"
+            ).encode("utf-8")
+        ).digest()
+        draw = int.from_bytes(digest[:8], "big") / (2**64)
+        return draw < weight
 
 
 def arena_case_ids_sha256(case_ids: Sequence[str]) -> str:
@@ -816,7 +1245,12 @@ def write_arena_artifacts(result: ArenaRunResult, output: str | Path) -> Path:
     rows.extend(row.to_dict() for row in result.ecology_snapshots)
     rows.extend(row.to_dict() for row in result.chain_attempts)
     rows.extend(row.to_dict() for row in result.coactivation_snapshots)
+    rows.extend(row.to_dict() for row in result.deposition_candidate_events)
+    rows.extend(
+        row.to_dict() for row in result.deposition_confirmation_events
+    )
     rows.extend(row.to_dict() for row in result.deposition_events)
+    rows.extend(row.to_dict() for row in result.anti_pattern_events)
     rows.extend(row.to_dict() for row in result.perturbation_events)
     rows.extend(row.to_dict() for row in result.arm_comparison_events)
     with target.open("w", encoding="utf-8") as handle:
@@ -1112,6 +1546,76 @@ def _skill_execution(
 def _operator_family(candidate: SkillCandidate) -> str:
     action = candidate.operator.last_action
     return action.value if action is not None else ""
+
+
+def _select_confirmation_evidence(
+    candidate: DepositionCandidate,
+    *,
+    chain_attempts: Sequence[ChainAttempt],
+    evidence_by_case: Mapping[
+        str,
+        tuple[ArenaCase, Mapping[str, DualScoreExecution]],
+    ],
+    limit: int,
+    seed: int,
+) -> tuple[
+    tuple[ArenaCase, Mapping[str, DualScoreExecution]],
+    ...,
+]:
+    """Deterministic cluster-round-robin sample from D1 support cases."""
+    support_ids = {
+        row.case_id
+        for row in chain_attempts
+        if row.first_skill_id == candidate.first_skill_id
+        and row.second_skill_id == candidate.second_skill_id
+        and row.chain_benefit is not None
+    }
+    by_cluster: dict[
+        str,
+        list[tuple[ArenaCase, Mapping[str, DualScoreExecution]]],
+    ] = {}
+    for case_id in sorted(support_ids):
+        evidence = evidence_by_case.get(case_id)
+        if evidence is None:
+            continue
+        case, _rows = evidence
+        by_cluster.setdefault(case.family_id, []).append(evidence)
+    cluster_ids = sorted(by_cluster)
+    pair_seed = int(
+        hashlib.sha256(
+            (
+                f"{seed}\0{candidate.first_skill_id}\0"
+                f"{candidate.second_skill_id}"
+            ).encode("utf-8")
+        ).hexdigest()[:16],
+        16,
+    )
+    random.Random(pair_seed).shuffle(cluster_ids)
+    selected = []
+    offset = 0
+    while len(selected) < limit:
+        added = False
+        for cluster_id in cluster_ids:
+            rows = by_cluster[cluster_id]
+            if offset < len(rows):
+                selected.append(rows[offset])
+                added = True
+                if len(selected) >= limit:
+                    break
+        if not added:
+            break
+        offset += 1
+    return tuple(selected)
+
+
+def _event_provenance_sha256(payload: Mapping[str, object]) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _finite(value: object) -> bool:

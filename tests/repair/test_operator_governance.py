@@ -1,7 +1,7 @@
 from cmd_audit.counterfactual.actions import PipelineAction
 from cmd_audit.counterfactual.operators import OperatorSpec
 from cmd_audit.repair.governance import OperatorGovernance
-from cmd_audit.repair.failure_memory import FailureMemoryStore
+from cmd_audit.repair.failure_memory import AntiPatternRecord, FailureMemoryStore
 
 
 def _operator(generation_point: int, action: PipelineAction) -> OperatorSpec:
@@ -99,6 +99,60 @@ def test_consecutive_failures_retire_operator() -> None:
         )
 
     assert governance.active_operators("fp") == ()
+
+
+def test_eta_probation_lifecycle_and_ranking() -> None:
+    governance = OperatorGovernance()
+    operator = _operator(0, PipelineAction.SAFETY_ERROR)
+    decision = governance.admit_with_cluster_replay("fp", operator, (0.2,))
+    entry = governance.entries("fp")[0]
+
+    assert entry.eta == 0.5
+    assert entry.lifecycle_status == "probation"
+    for generation in range(4):
+        governance.record_application(
+            "fp",
+            decision.operator_hash,
+            succeeded=generation < 2,
+            generation=generation,
+        )
+
+    assert entry.eta == 0.5
+    assert entry.lifecycle_status == "active"
+
+
+def test_anti_pattern_downweights_matching_pair_and_cluster() -> None:
+    store = FailureMemoryStore()
+    store.record_anti_pattern(
+        AntiPatternRecord(
+            first_skill_id="seed:retrieval_error",
+            second_skill_id="seed:injection_error",
+            cluster_id="cluster-a",
+            n_support=12,
+            ci_upper=-0.1,
+            thresholds={"min_support": 10},
+            seed=24,
+            source_sha256="a" * 64,
+            provenance_sha256="b" * 64,
+        )
+    )
+
+    assert (
+        store.chain_pair_weight(
+            "retrieval_error",
+            "injection_error",
+            "cluster-a",
+        )
+        == 0.25
+    )
+    assert (
+        store.chain_pair_weight(
+            "retrieval_error",
+            "injection_error",
+            "cluster-b",
+        )
+        == 1.0
+    )
 
 
 def test_failure_memory_store_retrieves_governed_operator() -> None:

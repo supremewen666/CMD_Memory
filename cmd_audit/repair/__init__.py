@@ -54,8 +54,10 @@ from .chain_dynamics import (
     ChainObserver,
     CoactivationEdge,
     CoactivationSnapshot,
+    DepositionCandidate,
 )
 from .failure_memory import (
+    AntiPatternRecord,
     FailureMemoryDiagnosis,
     FailureMemoryOutcome,
     FailureMemoryRecord,
@@ -176,6 +178,7 @@ __all__ = [
     "ChainObserver",
     "CoactivationEdge",
     "CoactivationSnapshot",
+    "DepositionCandidate",
     "CompositeOperatorSpec",
     "merge_operators",
     # competitive execution and ecology
@@ -207,6 +210,7 @@ __all__ = [
     "RepairOrchestratorResult",
     "RepairObservationSink",
     # failure_memory
+    "AntiPatternRecord",
     "FailureMemoryDiagnosis",
     "FailureMemoryOutcome",
     "FailureMemoryRecord",

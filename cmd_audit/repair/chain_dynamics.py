@@ -2,9 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
+import json
+import math
+from statistics import fmean
 from typing import Mapping, Sequence
+import warnings
 
 from ..core.math_utils import finite_float, mean_finite
+from .governance import _bootstrap_lower_bound
 from .operator_library import CompositeOperatorSpec, merge_operators
 from .skill_ecology import ChainExecution, SkillCandidate
 
@@ -22,6 +28,7 @@ class ChainAttempt:
     standalone_max: float | None
     changed_item_count: int | None
     status: str
+    family_id: str = ""
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
@@ -83,11 +90,63 @@ class ChainDepositionEvent:
     mean_chain_benefit: float
     composite_spec_hash: str
     composite_spec: CompositeOperatorSpec
+    n_support: int | None = None
+    n_clusters: int | None = None
+    sign_p: float | None = None
+    ci_lower: float | None = None
+    direction_p: float | None = None
+    confirmation_ci_lower: float | None = None
+    marginal_dominance_rate: float | None = None
+    lifecycle_status: str = "probation"
+    thresholds: Mapping[str, float | int] | None = None
+    seed: int = 0
+    source_sha256: str = ""
+    provenance_sha256: str = ""
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
         value["record_type"] = "chain_deposition_event"
         value["composite_spec"] = self.composite_spec.to_dict()
+        return value
+
+
+@dataclass(frozen=True)
+class DepositionCandidate:
+    """Auditable D1 decision for one directed pair at one checkpoint."""
+
+    arena_id: str
+    checkpoint: str
+    first_skill_id: str
+    second_skill_id: str
+    n_support: int
+    n_clusters: int
+    positive_count: int
+    negative_count: int
+    sign_p: float
+    median_chain_benefit: float
+    ci_lower: float
+    ci_upper: float
+    reverse_mean_chain_benefit: float | None
+    direction_pair_count: int
+    direction_p: float | None
+    passed: bool
+    rejection_reasons: tuple[str, ...]
+    anti_pattern: bool
+    composite_spec_hash: str | None
+    composite_spec: CompositeOperatorSpec | None
+    thresholds: Mapping[str, float | int]
+    seed: int
+    source_sha256: str
+    provenance_sha256: str
+
+    def to_dict(self) -> dict[str, object]:
+        value = asdict(self)
+        value["record_type"] = "deposition_candidate_event"
+        value["composite_spec"] = (
+            self.composite_spec.to_dict()
+            if self.composite_spec is not None
+            else None
+        )
         return value
 
 
@@ -102,6 +161,7 @@ class ChainObserver:
         self._attempts: list[ChainAttempt] = []
         self._snapshots: list[CoactivationSnapshot] = []
         self._depositions: list[ChainDepositionEvent] = []
+        self._candidate_events: list[DepositionCandidate] = []
 
     @property
     def attempts(self) -> tuple[ChainAttempt, ...]:
@@ -115,10 +175,15 @@ class ChainObserver:
     def depositions(self) -> tuple[ChainDepositionEvent, ...]:
         return tuple(self._depositions)
 
+    @property
+    def candidate_events(self) -> tuple[DepositionCandidate, ...]:
+        return tuple(self._candidate_events)
+
     def record_case(
         self,
         *,
         case_id: str,
+        family_id: str | None = None,
         failure_type: str,
         stream_position: int,
         activated_skill_ids: Sequence[str],
@@ -167,6 +232,7 @@ class ChainObserver:
                         (changed_item_counts or {}).get(pair)
                     ),
                     status=execution.status,
+                    family_id=str(family_id or failure_type or case_id),
                 )
             )
 
@@ -274,7 +340,13 @@ class ChainObserver:
         min_chain_benefit: float = 0.05,
         min_support: int = 3,
     ) -> ChainDepositionEvent | None:
-        """Materialize the best supported directed chain as a staged composite."""
+        """Deprecated v1 greedy deposition retained for artifact compatibility."""
+        warnings.warn(
+            "deposit_best is deprecated; use promote_candidates plus "
+            "materialize_deposition",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if min_support <= 0:
             raise ValueError("min_support must be > 0")
         grouped: dict[tuple[str, str], list[float]] = {}
@@ -326,3 +398,238 @@ class ChainObserver:
         )
         self._depositions.append(event)
         return event
+
+    def promote_candidates(
+        self,
+        *,
+        candidates: Mapping[str, SkillCandidate],
+        checkpoint: str,
+        min_support: int = 10,
+        min_clusters: int = 3,
+        sign_alpha: float = 0.05,
+        confidence: float = 0.95,
+        direction_alpha: float = 0.10,
+        bootstrap_samples: int = 2000,
+        seed: int = 0,
+        source_sha256: str = "",
+    ) -> tuple[DepositionCandidate, ...]:
+        """Evaluate every observed directed pair with the zero-call D1 gate."""
+        if min_support < 1 or min_clusters < 1:
+            raise ValueError("D1 support and cluster minima must be positive")
+        if bootstrap_samples < 100:
+            raise ValueError("bootstrap_samples must be >= 100")
+        if not 0.0 < sign_alpha < 1.0:
+            raise ValueError("sign_alpha must be between zero and one")
+        if not 0.0 < direction_alpha < 1.0:
+            raise ValueError("direction_alpha must be between zero and one")
+
+        thresholds: dict[str, float | int] = {
+            "min_support": int(min_support),
+            "min_clusters": int(min_clusters),
+            "sign_alpha": float(sign_alpha),
+            "confidence": float(confidence),
+            "direction_alpha": float(direction_alpha),
+            "bootstrap_samples": int(bootstrap_samples),
+        }
+        grouped: dict[tuple[str, str], list[ChainAttempt]] = {}
+        by_case_pair: dict[tuple[str, str, str], float] = {}
+        for row in self._attempts:
+            if row.chain_benefit is None:
+                continue
+            pair = (row.first_skill_id, row.second_skill_id)
+            grouped.setdefault(pair, []).append(row)
+            by_case_pair[(row.case_id, *pair)] = row.chain_benefit
+
+        output: list[DepositionCandidate] = []
+        for pair, rows in sorted(grouped.items()):
+            values = tuple(float(row.chain_benefit) for row in rows)
+            positive = sum(value > 0.0 for value in values)
+            negative = sum(value < 0.0 for value in values)
+            sign_p = _one_sided_sign_p(positive, negative)
+            ci_lower = _bootstrap_lower_bound(
+                values,
+                confidence=confidence,
+                samples=bootstrap_samples,
+                seed=_pair_seed(seed, pair),
+                aggregate="median",
+            )
+            ci_upper = -_bootstrap_lower_bound(
+                tuple(-value for value in values),
+                confidence=confidence,
+                samples=bootstrap_samples,
+                seed=_pair_seed(seed, pair),
+                aggregate="median",
+            )
+            reverse_values: list[float] = []
+            paired_differences: list[float] = []
+            for row in rows:
+                reverse = by_case_pair.get(
+                    (row.case_id, pair[1], pair[0])
+                )
+                if reverse is None:
+                    continue
+                reverse_values.append(reverse)
+                paired_differences.append(float(row.chain_benefit) - reverse)
+            direction_p = (
+                _one_sided_sign_p(
+                    sum(value > 0.0 for value in paired_differences),
+                    sum(value < 0.0 for value in paired_differences),
+                )
+                if paired_differences
+                else None
+            )
+            reverse_mean = (
+                fmean(reverse_values) if reverse_values else None
+            )
+            clusters = {row.family_id for row in rows if row.family_id}
+            first = candidates.get(pair[0])
+            second = candidates.get(pair[1])
+            composite = (
+                merge_operators((first.operator, second.operator))
+                if first is not None and second is not None
+                else None
+            )
+            reasons = []
+            if len(values) < min_support:
+                reasons.append("insufficient_support")
+            if len(clusters) < min_clusters:
+                reasons.append("insufficient_cluster_diversity")
+            if sign_p >= sign_alpha:
+                reasons.append("sign_test_failed")
+            if ci_lower <= 0.0:
+                reasons.append("ci_crosses_zero")
+            if reverse_mean is None or fmean(values) <= reverse_mean:
+                reasons.append("direction_mean_failed")
+            if direction_p is None or direction_p >= direction_alpha:
+                reasons.append("direction_test_failed")
+            if composite is None:
+                reasons.append("candidate_operator_unavailable")
+            anti_pattern = len(values) >= min_support and ci_upper < 0.0
+            provenance = _provenance_sha256(
+                {
+                    "arena_id": self.arena_id,
+                    "checkpoint": checkpoint,
+                    "pair": pair,
+                    "thresholds": thresholds,
+                    "seed": seed,
+                    "source_sha256": source_sha256,
+                }
+            )
+            output.append(
+                DepositionCandidate(
+                    arena_id=self.arena_id,
+                    checkpoint=str(checkpoint),
+                    first_skill_id=pair[0],
+                    second_skill_id=pair[1],
+                    n_support=len(values),
+                    n_clusters=len(clusters),
+                    positive_count=positive,
+                    negative_count=negative,
+                    sign_p=sign_p,
+                    median_chain_benefit=float(
+                        sorted(values)[len(values) // 2]
+                        if len(values) % 2
+                        else (
+                            sorted(values)[len(values) // 2 - 1]
+                            + sorted(values)[len(values) // 2]
+                        )
+                        / 2.0
+                    ),
+                    ci_lower=ci_lower,
+                    ci_upper=ci_upper,
+                    reverse_mean_chain_benefit=reverse_mean,
+                    direction_pair_count=len(paired_differences),
+                    direction_p=direction_p,
+                    passed=not reasons,
+                    rejection_reasons=tuple(reasons),
+                    anti_pattern=anti_pattern,
+                    composite_spec_hash=(
+                        composite.content_hash() if composite is not None else None
+                    ),
+                    composite_spec=composite,
+                    thresholds=thresholds,
+                    seed=int(seed),
+                    source_sha256=str(source_sha256),
+                    provenance_sha256=provenance,
+                )
+            )
+        self._candidate_events.extend(output)
+        return tuple(output)
+
+    def materialize_deposition(
+        self,
+        candidate: DepositionCandidate,
+        *,
+        deposited_after_case: int,
+        confirmation_ci_lower: float,
+        marginal_dominance_rate: float,
+        lifecycle_status: str = "probation",
+        provenance_sha256: str | None = None,
+    ) -> ChainDepositionEvent:
+        """Materialize a D1 survivor only after the D2 and D3 gates pass."""
+        if not candidate.passed or candidate.composite_spec is None:
+            raise ValueError("only a passed D1 candidate can be deposited")
+        event = ChainDepositionEvent(
+            arena_id=self.arena_id,
+            deposited_after_case=int(deposited_after_case),
+            composite_skill_id=(
+                f"composite:{candidate.composite_spec.content_hash()[:16]}"
+            ),
+            first_skill_id=candidate.first_skill_id,
+            second_skill_id=candidate.second_skill_id,
+            supporting_attempts=candidate.n_support,
+            mean_chain_benefit=float(
+                fmean(
+                    row.chain_benefit
+                    for row in self._attempts
+                    if row.chain_benefit is not None
+                    and row.first_skill_id == candidate.first_skill_id
+                    and row.second_skill_id == candidate.second_skill_id
+                )
+            ),
+            composite_spec_hash=candidate.composite_spec.content_hash(),
+            composite_spec=candidate.composite_spec,
+            n_support=candidate.n_support,
+            n_clusters=candidate.n_clusters,
+            sign_p=candidate.sign_p,
+            ci_lower=candidate.ci_lower,
+            direction_p=candidate.direction_p,
+            confirmation_ci_lower=float(confirmation_ci_lower),
+            marginal_dominance_rate=float(marginal_dominance_rate),
+            lifecycle_status=str(lifecycle_status),
+            thresholds=candidate.thresholds,
+            seed=candidate.seed,
+            source_sha256=candidate.source_sha256,
+            provenance_sha256=(
+                str(provenance_sha256)
+                if provenance_sha256 is not None
+                else candidate.provenance_sha256
+            ),
+        )
+        self._depositions.append(event)
+        return event
+
+
+def _one_sided_sign_p(positive: int, negative: int) -> float:
+    """Exact P[X >= positive] under Binomial(n, 0.5), discarding ties."""
+    n = int(positive) + int(negative)
+    if n <= 0:
+        return 1.0
+    return sum(math.comb(n, k) for k in range(int(positive), n + 1)) / (2**n)
+
+
+def _pair_seed(seed: int, pair: tuple[str, str]) -> int:
+    digest = hashlib.sha256(
+        f"{int(seed)}\0{pair[0]}\0{pair[1]}".encode("utf-8")
+    ).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+def _provenance_sha256(payload: Mapping[str, object]) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()

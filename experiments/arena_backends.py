@@ -221,6 +221,7 @@ class VLLMDualScoreArenaBackend:
         self._runtime_score_cache: dict[tuple[str, str], float | None] = {}
         self._shadow_score_cache: dict[tuple[str, str], float] = {}
         self._deposited: list[ChainDepositionEvent] = []
+        self._composite_lifecycle: dict[str, tuple[str, float]] = {}
         self._cache_lock_guard = Lock()
         self._cache_locks: dict[tuple[str, object], Lock] = {}
         self._counter_guard = Lock()
@@ -270,6 +271,12 @@ class VLLMDualScoreArenaBackend:
             and action.value in _ARENA_ACTION_WHITELIST
         ]
         for event in self._deposited:
+            lifecycle, _eta = self._composite_lifecycle.get(
+                event.composite_skill_id,
+                ("probation", 0.5),
+            )
+            if lifecycle == "retired":
+                continue
             candidates.append(
                 SkillCandidate(
                     skill_id=event.composite_skill_id,
@@ -278,7 +285,15 @@ class VLLMDualScoreArenaBackend:
             )
         # V2 evaluates every legal operator. Stable ids make invocation order
         # deterministic without using labels, gold answers, or length proxies.
-        return tuple(sorted(candidates, key=lambda candidate: candidate.skill_id))
+        return tuple(
+            sorted(
+                candidates,
+                key=lambda candidate: (
+                    self._candidate_lifecycle_rank(candidate.skill_id),
+                    candidate.skill_id,
+                ),
+            )
+        )
 
     def evaluate(
         self,
@@ -374,6 +389,118 @@ class VLLMDualScoreArenaBackend:
         ):
             return
         self._deposited.append(event)
+        self._composite_lifecycle[event.composite_skill_id] = (
+            event.lifecycle_status,
+            0.5,
+        )
+
+    def update_composite_lifecycle(
+        self,
+        composite_skill_id: str,
+        *,
+        status: str,
+        eta: float,
+    ) -> None:
+        if status not in {"probation", "active", "retired"}:
+            raise ValueError("invalid composite lifecycle status")
+        self._composite_lifecycle[str(composite_skill_id)] = (
+            str(status),
+            float(eta),
+        )
+
+    def _candidate_lifecycle_rank(self, skill_id: str) -> tuple[int, float]:
+        status, eta = self._composite_lifecycle.get(
+            skill_id,
+            ("active", 1.0),
+        )
+        return (1 if status == "probation" else 0, -eta)
+
+    def confirm_composite(
+        self,
+        case: ArenaCase,
+        candidate: SkillCandidate,
+    ) -> tuple[DualScoreExecution, int]:
+        """Fresh, separately-budgeted D2 replay for one composite."""
+        view = self._runtime_view(case)
+        calls = 0
+        try:
+            repaired_context = self._apply_candidate(
+                candidate,
+                input_context=case.base_context,
+                view=view,
+            )
+            baseline_answer = self._answer(
+                case,
+                case.base_context,
+                purpose="baseline",
+            )
+            baseline_runtime = self._runtime_score(
+                case,
+                context=case.base_context,
+                answer=baseline_answer,
+                purpose="baseline",
+            )
+            prompt = "\n\n".join(
+                (
+                    "CONTEXT:",
+                    repaired_context or "(empty)",
+                    "QUERY:",
+                    view.query,
+                    "ANSWER:",
+                )
+            )
+            calls += 1
+            repaired_answer = self.answer_client.generate(
+                prompt,
+                system=AGENT_SYSTEM_PROMPT,
+            )
+            calls += 1
+            repaired_runtime = self.reference_free_scorer.score(
+                query=view.query,
+                context=repaired_context,
+                answer=repaired_answer,
+            )
+            gold_free_gain = (
+                float(repaired_runtime) - float(baseline_runtime)
+                if repaired_runtime is not None and baseline_runtime is not None
+                else None
+            )
+            baseline_shadow = self._shadow_score(case, baseline_answer)
+            calls += 1
+            repaired_shadow = score_answer_with_verifier(
+                self.shadow_verifier,
+                repaired_answer,
+                str(case.raw["gold_answer"]),
+            )
+            shadow_gain = repaired_shadow - baseline_shadow
+            return (
+                DualScoreExecution(
+                    skill_id=candidate.skill_id,
+                    repaired_context=repaired_context,
+                    gold_free_gain=gold_free_gain,
+                    shadow_gold_gain=shadow_gain,
+                    execution_cost=3.0,
+                ),
+                calls,
+            )
+        except Exception as exc:
+            _logger.warning(
+                "deposition confirmation failed case=%s skill=%s: %s",
+                case.case_id,
+                candidate.skill_id,
+                exc,
+            )
+            return (
+                DualScoreExecution(
+                    skill_id=candidate.skill_id,
+                    repaired_context=case.base_context,
+                    gold_free_gain=None,
+                    shadow_gold_gain=None,
+                    execution_cost=float(calls),
+                    status=f"confirmation_error:{type(exc).__name__}",
+                ),
+                calls,
+            )
 
     def evaluate_best_of_n(
         self,

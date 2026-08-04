@@ -41,7 +41,13 @@ def main() -> int:
     snapshots = records.get("ecology_snapshot", [])
     attempts = records.get("chain_attempt", [])
     coactivation = records.get("coactivation_snapshot", [])
+    deposition_candidates = records.get("deposition_candidate_event", [])
+    deposition_confirmations = records.get(
+        "deposition_confirmation_event",
+        [],
+    )
     depositions = records.get("chain_deposition_event", [])
+    anti_patterns = records.get("anti_pattern_event", [])
     perturbations = records.get("perturbation_event", [])
     saturation = records.get("top_p_saturation_event", [])
     arm_comparisons = records.get("arena_arm_comparison_event", [])
@@ -108,6 +114,19 @@ def main() -> int:
     paths.append(_write_csv(output / "depositions.csv", depositions))
     paths.append(
         _write_csv(
+            output / "deposition_candidates.csv",
+            deposition_candidates,
+        )
+    )
+    paths.append(
+        _write_csv(
+            output / "deposition_confirmations.csv",
+            deposition_confirmations,
+        )
+    )
+    paths.append(_write_csv(output / "anti_patterns.csv", anti_patterns))
+    paths.append(
+        _write_csv(
             output / "perturbation_response.csv",
             _flatten_perturbations(perturbations),
         )
@@ -123,6 +142,9 @@ def main() -> int:
         "ecology_snapshots": len(snapshots),
         "chain_attempts": len(attempts),
         "deposition_events": len(depositions),
+        "deposition_candidate_events": len(deposition_candidates),
+        "deposition_confirmation_events": len(deposition_confirmations),
+        "anti_pattern_events": len(anti_patterns),
         "perturbation_events": len(perturbations),
         "source_manifests": manifests,
         "outputs": [str(path) for path in paths],
@@ -180,6 +202,7 @@ def _load_artifacts(
             raise ValueError(f"{path}: expected exactly one arena manifest")
         manifest = manifest_rows[0]
         _validate_dataset_provenance(path, manifest, file_rows)
+        _validate_evolution_provenance(path, manifest, file_rows)
         artifacts.append((path, manifest, file_rows))
 
     arena_counts: dict[str, int] = {}
@@ -297,6 +320,53 @@ def _validate_dataset_provenance(
 def _is_sha256(value: object) -> bool:
     text = str(value or "")
     return len(text) == 64 and all(character in "0123456789abcdef" for character in text)
+
+
+def _validate_evolution_provenance(
+    artifact_path: Path,
+    manifest: Mapping[str, object],
+    rows: Sequence[Mapping[str, object]],
+) -> None:
+    """Fail closed for every v2 governance event written by an arena."""
+    governed_types = {
+        "deposition_candidate_event",
+        "deposition_confirmation_event",
+        "anti_pattern_event",
+    }
+    if any(
+        row.get("record_type") == "deposition_candidate_event"
+        for row in rows
+    ):
+        governed_types.add("chain_deposition_event")
+    expected_source = (
+        manifest.get("dataset_source_sha256")
+        or manifest.get("selected_cases_sha256")
+    )
+    for row in rows:
+        if row.get("record_type") not in governed_types:
+            continue
+        if not isinstance(row.get("thresholds"), dict):
+            raise ValueError(
+                f"{artifact_path}: governed event missing thresholds"
+            )
+        try:
+            int(row["seed"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"{artifact_path}: governed event missing seed"
+            ) from exc
+        if not _is_sha256(row.get("source_sha256")):
+            raise ValueError(
+                f"{artifact_path}: governed event has invalid source_sha256"
+            )
+        if row.get("source_sha256") != expected_source:
+            raise ValueError(
+                f"{artifact_path}: governed event source_sha256 mismatch"
+            )
+        if not _is_sha256(row.get("provenance_sha256")):
+            raise ValueError(
+                f"{artifact_path}: governed event has invalid provenance_sha256"
+            )
 
 
 def _signal_slices(

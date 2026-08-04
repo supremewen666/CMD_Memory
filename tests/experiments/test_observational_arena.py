@@ -55,7 +55,17 @@ class FakeDualBackend:
         self.inputs.append((case.case_id, candidate.skill_id, input_context))
         chained = input_context != origin_context
         standalone = 0.2 if candidate.skill_id == "a" else 0.1
-        gold_free = 0.6 if chained else standalone
+        if candidate.skill_id.startswith("confirmation:"):
+            gold_free = 0.6
+        elif chained:
+            gold_free = (
+                0.6
+                if input_context.endswith("->a")
+                and candidate.skill_id == "b"
+                else 0.1
+            )
+        else:
+            gold_free = standalone
         shadow = 0.7 if candidate.skill_id == "a" else 0.3
         return DualScoreExecution(
             skill_id=candidate.skill_id,
@@ -169,17 +179,41 @@ def test_manifest_binds_source_bytes_and_ordered_selected_cases(tmp_path) -> Non
     )
 
 
-def test_deposition_requires_and_calls_backend_hook():
+def test_deposition_requires_and_calls_backend_hook(tmp_path):
     backend = FakeDualBackend()
     result = ObservationalArenaRunner(
-        _cases(6),
+        _cases(20),
         backend=backend,
         saturation_threshold=0.25,
         deposition_after_fraction=0.5,
-        deposition_min_support=3,
     ).run()
     assert len(result.deposition_events) == 1
+    assert any(row.passed for row in result.deposition_candidate_events)
+    assert result.deposition_confirmation_events[0].d2_passed
+    assert result.deposition_confirmation_events[0].d3_passed
+    assert result.manifest.deposition_confirmation_calls == 24
+    assert result.manifest.deposition_confirmation_calls <= 50
     assert backend.depositions == list(result.deposition_events)
+    forward_attempts = sum(
+        (row.first_skill_id, row.second_skill_id) == ("a", "b")
+        for row in result.chain_attempts
+    )
+    reverse_attempts = sum(
+        (row.first_skill_id, row.second_skill_id) == ("b", "a")
+        for row in result.chain_attempts
+    )
+    assert reverse_attempts < forward_attempts
+    output = write_arena_artifacts(result, tmp_path / "deposition.jsonl")
+    record_types = {
+        json.loads(line)["record_type"]
+        for line in output.read_text(encoding="utf-8").splitlines()
+    }
+    assert {
+        "deposition_candidate_event",
+        "deposition_confirmation_event",
+        "chain_deposition_event",
+        "anti_pattern_event",
+    } <= record_types
 
     class MissingHook(FakeDualBackend):
         deposit_composite = None
@@ -309,6 +343,25 @@ def test_cmd_abstention_is_missing_not_a_finite_zero_shadow_gain() -> None:
     assert event.cmd_abstained
     assert event.cmd_selected_skill_id is None
     assert event.cmd_shadow_gold_gain is None
+
+
+def test_evolving_selector_is_strictly_test_then_update() -> None:
+    backend = FakeDualBackend()
+    backend.base_candidates = list(reversed(backend.base_candidates))
+
+    result = ObservationalArenaRunner(
+        _cases(2),
+        backend=backend,
+        candidate_limit=2,
+        enable_chains=False,
+        evolve_selection_priors=True,
+    ).run()
+
+    assert result.saturation_events[0].attempted_skill_ids[0] == "a"
+    # With no prior both skills tie and stable id order applies; only case two
+    # can consume case one's gold-free evidence.
+    assert result.saturation_events[1].attempted_skill_ids[0] == "a"
+    assert result.manifest.selector_evolution_enabled
 
 
 def test_perturbation_removes_keystone_and_records_recovery(tmp_path):
