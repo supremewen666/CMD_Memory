@@ -115,6 +115,21 @@ from .operator_library import (
     CompositeOperatorSpec,
     merge_operators,
 )
+from .niche_archive import (
+    ArchiveTransition,
+    BehaviorDescriptor,
+    NicheArchive,
+    NicheCandidateRecord,
+    NicheValidationEvidence,
+)
+from .reasoning_template import StructuredReasoningTemplate
+from .skill_graph import (
+    AuditedSkillGraph,
+    CompositionEvidence,
+    SkillGraphAttempt,
+    SkillGraphEdge,
+    TransferEvidence,
+)
 from .post_repair import (
     REPAIR_ASSESSMENT_VALUES,
     AgentGenerate,
@@ -181,6 +196,18 @@ __all__ = [
     "DepositionCandidate",
     "CompositeOperatorSpec",
     "merge_operators",
+    # audited niche evolution
+    "ArchiveTransition",
+    "BehaviorDescriptor",
+    "NicheArchive",
+    "NicheCandidateRecord",
+    "NicheValidationEvidence",
+    "StructuredReasoningTemplate",
+    "AuditedSkillGraph",
+    "CompositionEvidence",
+    "SkillGraphAttempt",
+    "SkillGraphEdge",
+    "TransferEvidence",
     # competitive execution and ecology
     "AdditiveSaturationExecutor",
     "AdditiveSaturationResult",

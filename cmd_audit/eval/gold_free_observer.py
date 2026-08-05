@@ -102,6 +102,7 @@ class GoldFreeObserver:
         gold_free_scores: Mapping[str, float | None],
         shadow_gold_scores: Mapping[str, float | None],
         runtime_abstained: bool,
+        runtime_selected_skill_id: str | None = None,
         coordinates: ProbeCoordinates = ProbeCoordinates(),
         runtime_provenance: RuntimeSelectionProvenance = (
             RuntimeSelectionProvenance()
@@ -120,7 +121,15 @@ class GoldFreeObserver:
             tie_tolerance=self.tie_tolerance,
         )
         row = rows[0]
-        selected = None if runtime_abstained else row.gold_free_top_skill
+        selected = (
+            None
+            if runtime_abstained
+            else runtime_selected_skill_id or row.gold_free_top_skill
+        )
+        if selected is not None and selected not in gold_free_scores:
+            raise ValueError(
+                "runtime selected skill is absent from the score vectors"
+            )
         shadow_finite = _finite_scores(shadow_gold_scores)
         selected_shadow = (
             shadow_finite.get(selected) if selected is not None else None

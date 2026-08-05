@@ -9,6 +9,9 @@
 #   Phase 1 GPU 0:  ./run_remaining_experiments.sh --role phase1_gpu0 --detach
 #   Phase 1 GPU 1:  ./run_remaining_experiments.sh --role phase1_gpu1 --detach
 #   Phase 1 汇聚:   ./run_remaining_experiments.sh --role phase1_analyze
+#   SIGIL Stage 1 GPU 0: ./run_remaining_experiments.sh --role sigil_gpu0 --detach
+#   SIGIL Stage 1 GPU 1: ./run_remaining_experiments.sh --role sigil_gpu1 --detach
+#   SIGIL Stage 1 审计:  ./run_remaining_experiments.sh --role sigil_analyze
 #   冒烟:           ./run_remaining_experiments.sh --role gpu0 --smoke
 #   单 Arena 调试:  ./run_remaining_experiments.sh --role gpu0 --only memtrace_seed24
 #
@@ -25,6 +28,7 @@ CMD_ROOT="$HOME/wsy/CMD_Memory"
 CMD_VLLM_OVERLAY="$HOME/wsy/runtime/vllm085-transformers451"
 ARTIFACTS="$CMD_ROOT/artifacts/arena"
 EVOLUTION_ARTIFACTS="$CMD_ROOT/artifacts/evolution_governance"
+SIGIL_ARTIFACTS="$CMD_ROOT/artifacts/sigil_qd"
 QWVLLM_PORT=8000
 LLAMA_JUDGE_PORT=8000
 LLAMA_ANSWER_PORT=8001
@@ -56,7 +60,7 @@ while [[ $# -gt 0 ]]; do
     --detach)
       DETACH=true; shift ;;
     --help|-h)
-      echo "Usage: $0 --role gpu0|gpu1|analyze|phase1_gpu0|phase1_gpu1|phase1_analyze [--smoke] [--only NAME] [--detach]"
+      echo "Usage: $0 --role gpu0|gpu1|analyze|phase1_gpu0|phase1_gpu1|phase1_analyze|sigil_gpu0|sigil_gpu1|sigil_analyze [--smoke] [--only NAME] [--detach]"
       echo ""
       echo "  GPU 0 (~3.5h): MemTrace-B seeds 24+124 → MemFail"
       echo "  GPU 1 (~3.5h): MemTrace-B seed 224 → STALE → replicate seed 24"
@@ -64,10 +68,14 @@ while [[ $# -gt 0 ]]; do
       echo "  phase1_gpu0:    evolution-on vs frozen on MemTrace (same GPU/endpoints)"
       echo "  phase1_gpu1:    evolution-on vs frozen on STALE (same GPU/endpoints)"
       echo "  phase1_analyze: merge the two per-GPU Phase 1 summaries (zero calls)"
+      echo "  sigil_gpu0:     Stage 1 live item-gate shadow on MemTrace + MemFail"
+      echo "  sigil_gpu1:     Stage 1 live item-gate shadow on STALE"
+      echo "  sigil_analyze:  repair-validity audit + scope ledger (zero calls)"
       echo "  --detach:       run in a new session; logs to the role-specific artifacts directory"
       echo ""
       echo "  --only:  skip straight to one named phase (memtrace_seed24, memtrace_seed124,"
-      echo "           memtrace_seed224, memfail, stale, memtrace_llama)"
+      echo "           memtrace_seed224, memfail, stale, memtrace_llama; SIGIL roles:"
+      echo "           memtrace, memfail, stale)"
       exit 0 ;;
     *)
       echo "Unknown: $1" >&2; exit 1 ;;
@@ -75,7 +83,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$ROLE" ]]; then
-  echo "ERROR: --role is required (gpu0 | gpu1 | analyze | phase1_gpu0 | phase1_gpu1 | phase1_analyze)" >&2
+  echo "ERROR: --role is required (gpu0 | gpu1 | analyze | phase1_gpu0 | phase1_gpu1 | phase1_analyze | sigil_gpu0 | sigil_gpu1 | sigil_analyze)" >&2
   exit 1
 fi
 
@@ -83,6 +91,8 @@ if $DETACH && [[ -z "${CMD_EXPERIMENTS_DETACHED:-}" ]]; then
   detach_log_root="$ARTIFACTS"
   if [[ "$ROLE" == phase1_* ]]; then
     detach_log_root="${EVOLUTION_ARTIFACTS}/phase1/logs"
+  elif [[ "$ROLE" == sigil_* ]]; then
+    detach_log_root="${SIGIL_ARTIFACTS}/logs"
   fi
   mkdir -p "$detach_log_root"
   detach_log="${detach_log_root}/run_${ROLE}_$(date +%Y%m%d_%H%M%S).log"
@@ -485,6 +495,108 @@ run_phase1_analysis() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SIGIL-QD Stage 1: live item-gate shadow channel and audited scope ledger
+# ══════════════════════════════════════════════════════════════════════════════
+
+run_sigil_shadow_arena() {
+  local arena="$1"
+  local lane="$2"
+  local seed="$3"
+  local module=""
+  case "$arena" in
+    memtrace) module="experiments.run_arena_memtrace" ;;
+    memfail)  module="experiments.run_arena_memfail" ;;
+    stale)    module="experiments.run_arena_stale" ;;
+    *)
+      echo "ERROR: unsupported SIGIL arena: ${arena}" >&2
+      return 1
+      ;;
+  esac
+
+  local output_dir="${SIGIL_ARTIFACTS}/stage1/${lane}"
+  local suffix=""
+  local smoke_args=()
+  if $SMOKE; then
+    suffix="_smoke"
+    smoke_args=(--limit 20)
+  fi
+  local output="${output_dir}/${arena}_live_item_gate${suffix}.jsonl"
+  local log="${output_dir}/${arena}_live_item_gate${suffix}.log"
+  mkdir -p "$output_dir"
+  if [[ -s "$output" ]]; then
+    echo "[skip] ${output} exists and is non-empty; archive it to rerun"
+    return 0
+  fi
+
+  echo "===== SIGIL Stage 1: ${arena} live item-gate shadow ====="
+  python -m "$module" \
+    --backend-factory experiments.arena_backends:create_vllm_backend \
+    --seed "$seed" \
+    --no-chains \
+    --case-workers "$CMD_CASE_WORKERS" \
+    --live-item-gate \
+    "${smoke_args[@]}" \
+    --output "$output" \
+    2>&1 | tee "$log"
+  echo "[done] SIGIL Stage 1 ${arena} → ${output}"
+}
+
+run_sigil_stage1_analysis() {
+  local suffix=""
+  local audit_dir="${SIGIL_ARTIFACTS}/stage1/audit"
+  local audit_args=(
+    --n-min 30
+    --validity-threshold 0.8
+    --bootstrap-samples 10000
+    --bootstrap-seed 24
+  )
+  if $SMOKE; then
+    suffix="_smoke"
+    audit_dir="${SIGIL_ARTIFACTS}/stage1/audit_smoke"
+    audit_args=(
+      --n-min 1
+      --validity-threshold 0.8
+      --bootstrap-samples 500
+      --bootstrap-seed 24
+    )
+  fi
+  local inputs=(
+    "${SIGIL_ARTIFACTS}/stage1/gpu0/memtrace_live_item_gate${suffix}.jsonl"
+    "${SIGIL_ARTIFACTS}/stage1/gpu0/memfail_live_item_gate${suffix}.jsonl"
+    "${SIGIL_ARTIFACTS}/stage1/gpu1/stale_live_item_gate${suffix}.jsonl"
+  )
+  local input
+  for input in "${inputs[@]}"; do
+    if [[ ! -s "$input" ]]; then
+      echo "ERROR: missing SIGIL Stage 1 artifact: ${input}" >&2
+      echo "Run --role sigil_gpu0 and --role sigil_gpu1, then scp both lanes here." >&2
+      return 1
+    fi
+  done
+
+  mkdir -p "$audit_dir"
+  echo "===== SIGIL Stage 1: repair-validity scope audit ====="
+  python -m experiments.analyze_item_gate_scope \
+    --inputs "${inputs[@]}" \
+    --output-dir "$audit_dir" \
+    "${audit_args[@]}" \
+    2>&1 | tee "${audit_dir}/stage1_audit.log"
+  python - "${audit_dir}/stage1_summary.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text(encoding="utf-8"))
+if payload.get("stage1_gate_passed") is True:
+    print(f"[gate] SIGIL Stage 1 GO; Stage 2 is authorized by {path}")
+else:
+    print(f"[gate] SIGIL Stage 1 NO-GO; Stage 2/3 remain stopped by {path}")
+PY
+  echo "[done] SIGIL Stage 1 audit → ${audit_dir}"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
 # GPU 0 main: MemTrace-B seed 24 → seed 124 → MemFail
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -618,6 +730,55 @@ main_phase1_analyze() {
   echo "===== PHASE 1 ANALYSIS DONE ====="
 }
 
+main_sigil_gpu0() {
+  mkdir -p "${SIGIL_ARTIFACTS}/stage1/gpu0"
+  start_llama_dual_vllm
+  llama_dual_env
+  gate_g0
+  case "$ONLY" in
+    memtrace)
+      run_sigil_shadow_arena "memtrace" "gpu0" 24
+      ;;
+    memfail)
+      run_sigil_shadow_arena "memfail" "gpu0" 24
+      ;;
+    "")
+      run_sigil_shadow_arena "memtrace" "gpu0" 24
+      run_sigil_shadow_arena "memfail" "gpu0" 24
+      ;;
+    *)
+      echo "ERROR: SIGIL GPU 0 --only must be memtrace or memfail" >&2
+      return 1
+      ;;
+  esac
+  stop_llama_dual_vllm
+  echo "===== SIGIL STAGE 1 GPU 0 DONE ====="
+}
+
+main_sigil_gpu1() {
+  mkdir -p "${SIGIL_ARTIFACTS}/stage1/gpu1"
+  start_llama_dual_vllm
+  llama_dual_env
+  gate_g0
+  case "$ONLY" in
+    stale|"")
+      run_sigil_shadow_arena "stale" "gpu1" 24
+      ;;
+    *)
+      echo "ERROR: SIGIL GPU 1 --only must be stale" >&2
+      return 1
+      ;;
+  esac
+  stop_llama_dual_vllm
+  echo "===== SIGIL STAGE 1 GPU 1 DONE ====="
+}
+
+main_sigil_analyze() {
+  run_sigil_stage1_analysis
+  echo ""
+  echo "===== SIGIL STAGE 1 ANALYSIS DONE ====="
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Dispatch
 # ══════════════════════════════════════════════════════════════════════════════
@@ -629,6 +790,9 @@ case "$ROLE" in
   phase1_gpu0)    main_phase1_gpu0 ;;
   phase1_gpu1)    main_phase1_gpu1 ;;
   phase1_analyze) main_phase1_analyze ;;
+  sigil_gpu0)     main_sigil_gpu0 ;;
+  sigil_gpu1)     main_sigil_gpu1 ;;
+  sigil_analyze)  main_sigil_analyze ;;
   *)
     echo "ERROR: invalid --role; see --help" >&2
     exit 1 ;;

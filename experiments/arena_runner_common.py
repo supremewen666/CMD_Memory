@@ -11,7 +11,7 @@ import random
 from statistics import fmean
 from typing import Mapping, Protocol, Sequence
 
-from cmd_audit.core.models import ProbeCase, RetrievedItem
+from cmd_audit.core.models import MemoryItem, ProbeCase, RetrievedItem
 from cmd_audit.data_io.probe_cases import load_probe_cases
 from cmd_audit.eval.gold_free_observer import (
     GoldFreeObservation,
@@ -43,6 +43,16 @@ from cmd_audit.repair.skill_ecology import (
     SkillCandidate,
     SkillExecution,
     TopPSaturationEvent,
+)
+from cmd_audit.repair.structural_router import (
+    DETERMINISTIC_EXTRACTOR_VERSION,
+    ItemGateExtractor,
+    RUNTIME_INPUT_ALLOWLIST_SHA256,
+    ScopePolicy,
+    StructuralIndicationEvent,
+    extract_structural_indications,
+    indication_events,
+    route as route_structural_indications,
 )
 
 
@@ -165,6 +175,10 @@ class ArenaManifest:
     dataset_source_size_bytes: int | None
     selected_case_ids_sha256: str
     selected_cases_sha256: str
+    scope_version: str
+    active_structural_signal_types: tuple[str, ...]
+    structural_extractor_version: str
+    structural_input_allowlist_sha256: str
 
 
 @dataclass(frozen=True)
@@ -181,6 +195,7 @@ class ArenaRunResult:
     anti_pattern_events: tuple[AntiPatternRecord, ...]
     perturbation_events: tuple[PerturbationEvent, ...]
     arm_comparison_events: tuple["ArenaArmComparisonEvent", ...]
+    structural_indication_events: tuple[StructuralIndicationEvent, ...]
 
 
 @dataclass(frozen=True)
@@ -254,6 +269,7 @@ class _EvaluatedArenaCase:
     cmd_answer_calls: int
     cmd_selection_judge_calls: int
     cmd_budget_source: str
+    structural_indication_events: tuple[StructuralIndicationEvent, ...]
 
 
 class ObservationalArenaRunner:
@@ -287,6 +303,8 @@ class ObservationalArenaRunner:
         case_workers: int = 1,
         enable_best_of_n_control: bool = False,
         dataset_source_path: str | Path | None = None,
+        scope_policy: ScopePolicy | None = None,
+        item_gate_extractor: ItemGateExtractor | None = None,
     ) -> None:
         if not cases:
             raise ValueError("arena requires at least one case")
@@ -386,6 +404,8 @@ class ObservationalArenaRunner:
         self.perturb_stable_windows = int(perturb_stable_windows)
         self.case_workers = int(case_workers)
         self.enable_best_of_n_control = bool(enable_best_of_n_control)
+        self.scope_policy = scope_policy or ScopePolicy()
+        self.item_gate_extractor = item_gate_extractor
         self.dataset_fingerprint = build_arena_dataset_fingerprint(
             self.cases,
             source_path=dataset_source_path,
@@ -419,6 +439,7 @@ class ObservationalArenaRunner:
         removed_skill_id: str | None = None
         perturbation_probe: PerturbationProbe | None = None
         arm_comparison_events: list[ArenaArmComparisonEvent] = []
+        structural_events: list[StructuralIndicationEvent] = []
         confirmation_events: list[DepositionConfirmationEvent] = []
         anti_pattern_events: list[AntiPatternRecord] = []
         deposition_confirmation_calls = 0
@@ -455,6 +476,7 @@ class ObservationalArenaRunner:
             result = evaluated.result
             dual_by_skill = dict(evaluated.dual_by_skill)
             chain_executions = evaluated.chain_executions
+            structural_events.extend(evaluated.structural_indication_events)
             evidence_by_case[case.case_id] = (case, dual_by_skill)
             for deposition in chain_observer.depositions:
                 live_row = dual_by_skill.get(deposition.composite_skill_id)
@@ -557,6 +579,15 @@ class ObservationalArenaRunner:
                     for skill_id, row in dual_by_skill.items()
                 },
                 runtime_abstained=not result.repair_effective,
+                runtime_selected_skill_id=(
+                    result.selected[0].skill_id
+                    if result.selected
+                    and any(
+                        event.route_selected
+                        for event in evaluated.structural_indication_events
+                    )
+                    else None
+                ),
                 coordinates=case.coordinates,
                 runtime_provenance=RuntimeSelectionProvenance(
                     context_constructed_without_gold=True,
@@ -770,6 +801,28 @@ class ObservationalArenaRunner:
                 selected_cases_sha256=(
                     self.dataset_fingerprint.selected_cases_sha256
                 ),
+                scope_version=self.scope_policy.version,
+                active_structural_signal_types=tuple(
+                    sorted(self.scope_policy.active_signal_types)
+                ),
+                structural_extractor_version="+".join(
+                    filter(
+                        None,
+                        (
+                            DETERMINISTIC_EXTRACTOR_VERSION,
+                            str(
+                                getattr(
+                                    self.item_gate_extractor,
+                                    "extractor_version",
+                                    "",
+                                )
+                            ),
+                        ),
+                    )
+                ),
+                structural_input_allowlist_sha256=(
+                    RUNTIME_INPUT_ALLOWLIST_SHA256
+                ),
             ),
             gold_free_observations=gold_observer.observations,
             saturation_events=ecology_observer.events,
@@ -786,6 +839,7 @@ class ObservationalArenaRunner:
                 else ()
             ),
             arm_comparison_events=tuple(arm_comparison_events),
+            structural_indication_events=tuple(structural_events),
         )
 
     def _confirm_deposition_candidate(
@@ -995,6 +1049,16 @@ class ObservationalArenaRunner:
             )
         if self.candidate_limit is not None:
             candidates = candidates[: self.candidate_limit]
+        # Structural indications are constructed before any candidate is
+        # evaluated.  They cannot observe current-case recovery outcomes.
+        indications = _arena_structural_indications(
+            case,
+            item_gate_extractor=(
+                self.item_gate_extractor
+                if case.runtime_branch == "fix"
+                else None
+            ),
+        )
         dual_by_skill: dict[str, DualScoreExecution] = {}
         count_reader = getattr(self.backend, "cmd_call_counts", None)
         before_counts = (
@@ -1023,6 +1087,57 @@ class ObservationalArenaRunner:
             base_context=case.base_context,
             candidates=candidates,
             evaluator=evaluate,
+        )
+        structural_decision = route_structural_indications(
+            candidates,
+            {
+                skill_id: row.gold_free_gain
+                for skill_id, row in dual_by_skill.items()
+            },
+            indications,
+            self.scope_policy,
+            domain_fingerprint=case.arena_id,
+            frozen_selected_ids=tuple(
+                execution.skill_id for execution in result.selected
+            ),
+        )
+        if structural_decision.signal_type is not None:
+            selected_by_id = {
+                execution.skill_id: execution for execution in result.executions
+            }
+            selected = tuple(
+                selected_by_id[skill_id]
+                for skill_id in structural_decision.selected_ids
+                if skill_id in selected_by_id
+            )
+            selected_ids = {execution.skill_id for execution in selected}
+            cumulative_gain = sum(
+                float(execution.recovery_gain)
+                for execution in selected
+                if execution.has_finite_gain
+            )
+            result = AdditiveSaturationResult(
+                case_id=result.case_id,
+                failure_type=result.failure_type,
+                executions=result.executions,
+                selected=selected,
+                rejected=tuple(
+                    execution
+                    for execution in result.executions
+                    if execution.skill_id not in selected_ids
+                ),
+                cumulative_gain=cumulative_gain,
+                saturation_threshold=result.saturation_threshold,
+                covered=cumulative_gain >= result.saturation_threshold,
+                repair_effective=bool(selected),
+            )
+        structural_events = indication_events(
+            arena_id=case.arena_id,
+            case_id=case.case_id,
+            domain_fingerprint=case.arena_id,
+            scope=self.scope_policy,
+            indications=indications,
+            decision=structural_decision,
         )
         if callable(count_reader) and before_counts is not None:
             after_counts = tuple(count_reader(case))
@@ -1068,6 +1183,7 @@ class ObservationalArenaRunner:
             cmd_answer_calls=cmd_answer_calls,
             cmd_selection_judge_calls=cmd_selection_judge_calls,
             cmd_budget_source=cmd_budget_source,
+            structural_indication_events=structural_events,
         )
 
     def _selection_prior_mean(
@@ -1253,6 +1369,7 @@ def write_arena_artifacts(result: ArenaRunResult, output: str | Path) -> Path:
     rows.extend(row.to_dict() for row in result.anti_pattern_events)
     rows.extend(row.to_dict() for row in result.perturbation_events)
     rows.extend(row.to_dict() for row in result.arm_comparison_events)
+    rows.extend(row.to_dict() for row in result.structural_indication_events)
     with target.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(
@@ -1402,6 +1519,38 @@ def _probe_case_mapping(case: ProbeCase) -> dict[str, object]:
         "current_granularity": case.current_granularity,
         "safety_filter_blocked": case.safety_filter_blocked,
     }
+
+
+def _arena_structural_indications(
+    case: ArenaCase,
+    *,
+    item_gate_extractor: ItemGateExtractor | None = None,
+) -> tuple[StructuralIndication, ...]:
+    raw = case.raw
+    items = tuple(
+        MemoryItem.from_mapping(dict(item))
+        for item in raw.get("extracted_memory", ())
+    )
+    by_id = {item.memory_id: item for item in items}
+    baselines = tuple(raw.get("baseline_outputs") or ())
+    baseline = next(
+        (
+            value
+            for value in baselines
+            if value.get("baseline_name") == "vector_memory"
+        ),
+        baselines[0] if baselines else {},
+    )
+    recalled = tuple(
+        by_id[str(memory_id)]
+        for memory_id in baseline.get("retrieved_memory_ids", ())
+        if str(memory_id) in by_id
+    )
+    return extract_structural_indications(
+        str(raw.get("query", "")),
+        recalled,
+        item_gate_extractor=item_gate_extractor,
+    )
 
 
 def _top_p_saturation_event(

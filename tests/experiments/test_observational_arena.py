@@ -10,6 +10,12 @@ from cmd_audit.counterfactual.actions import PipelineAction
 from cmd_audit.counterfactual.operators import OperatorSpec
 from cmd_audit.eval.gold_free_observer import ProbeCoordinates
 from cmd_audit.repair.skill_ecology import SkillCandidate
+from cmd_audit.repair.structural_router import (
+    DIVERGENCE_SIGNAL,
+    RECENCY_SIGNAL,
+    ScopePolicy,
+    StructuralIndication,
+)
 from experiments.arena_runner_common import (
     ArenaCase,
     BestOfNControlExecution,
@@ -243,7 +249,13 @@ def test_fill_cases_are_explicit_routed_abstentions() -> None:
         }
     )
 
-    result = ObservationalArenaRunner((fill,), backend=backend).run()
+    result = ObservationalArenaRunner(
+        (fill,),
+        backend=backend,
+        item_gate_extractor=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("fill must not run the live item gate")
+        ),
+    ).run()
 
     assert backend.inputs == []
     assert result.manifest.fill_case_count == 1
@@ -251,6 +263,92 @@ def test_fill_cases_are_explicit_routed_abstentions() -> None:
     assert result.saturation_events[0].runtime_branch == "fill"
     assert result.saturation_events[0].attempted_skill_ids == ()
     assert not result.saturation_events[0].repair_effective
+
+
+def test_active_structural_scope_routes_and_serializes_shadow_signal() -> None:
+    backend = FakeDualBackend()
+    backend.base_candidates[1] = SkillCandidate(
+        "b",
+        OperatorSpec.single(0, PipelineAction.ITEM_STALE),
+    )
+    case = ArenaCase(
+        **{
+            **_cases(1)[0].__dict__,
+            "raw": {
+                "query": "Where does Alice live?",
+                "extracted_memory": [
+                    {
+                        "memory_id": "old",
+                        "text": "Alice lives in Paris.",
+                        "store": "2025-01-01T00:00:00Z",
+                    },
+                    {
+                        "memory_id": "new",
+                        "text": "Alice lives in Berlin.",
+                        "store": "2025-02-01T00:00:00Z",
+                    }
+                ],
+                "baseline_outputs": [
+                    {
+                        "baseline_name": "vector_memory",
+                        "retrieved_memory_ids": ["old", "new"],
+                    }
+                ],
+            },
+        }
+    )
+
+    def live_item_gate(query, items):
+        assert query == "Where does Alice live?"
+        assert tuple(item.memory_id for item in items) == ("old", "new")
+        return (
+            StructuralIndication(
+                DIVERGENCE_SIGNAL,
+                "item_wrong",
+                0.7,
+                ("old",),
+                runtime_surface="tier2_item_gate",
+                extractor_version="live-item-gate-test",
+                model_identity="fixture-selection-judge",
+                prompt_sha256="a" * 64,
+            ),
+        )
+
+    live_item_gate.extractor_version = "live-item-gate-test"
+    result = ObservationalArenaRunner(
+        (case,),
+        backend=backend,
+        enable_chains=False,
+        scope_policy=ScopePolicy.active(
+            {RECENCY_SIGNAL},
+            version="scope-test-temporal",
+        ),
+        item_gate_extractor=live_item_gate,
+    ).run()
+
+    assert result.saturation_events[0].selected_skill_ids == ("b",)
+    assert result.gold_free_observations[0].selected_skill_id == "b"
+    temporal_event = next(
+        row
+        for row in result.structural_indication_events
+        if row.signal_type == RECENCY_SIGNAL
+    )
+    assert temporal_event.scope_active
+    assert temporal_event.route_selected
+    assert temporal_event.frozen_selected_skill_ids == ("a", "b")
+    assert temporal_event.created_before_outcome
+    assert result.manifest.scope_version == "scope-test-temporal"
+    assert (
+        result.manifest.structural_extractor_version
+        == "sigil-structural-v1+live-item-gate-test"
+    )
+    live_event = next(
+        row
+        for row in result.structural_indication_events
+        if row.signal_type == DIVERGENCE_SIGNAL
+    )
+    assert not live_event.scope_active
+    assert live_event.model_identity == "fixture-selection-judge"
 
 
 def test_stateless_arena_runs_cases_concurrently_and_reduces_in_order() -> None:

@@ -14,6 +14,11 @@ from .arena_runner_common import (
     build_arena_dataset_fingerprint,
     write_arena_artifacts,
 )
+from cmd_audit.repair.structural_router import (
+    ScopePolicy,
+    build_live_item_gate_extractor,
+)
+from cmd_audit.repair.scope_ledger import ScopeLedger
 
 
 ArenaLoader = Callable[..., tuple[ArenaCase, ...]]
@@ -58,6 +63,33 @@ def run_arena_cli(
             "Run an unstructured best-of-N arm with N equal to CMD's distinct "
             "non-baseline contexts after cache reuse."
         ),
+    )
+    parser.add_argument(
+        "--scope-ledger",
+        default="",
+        help=(
+            "Load active domain×signal scopes from an audited SIGIL ledger. "
+            "This is the production activation path."
+        ),
+    )
+    parser.add_argument(
+        "--live-item-gate",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Run the Tier-2 item gate in shadow mode before outcomes. "
+            "It can route only when an audited scope ledger activates its signal."
+        ),
+    )
+    parser.add_argument(
+        "--item-gate-divergence-threshold",
+        type=float,
+        default=0.5,
+    )
+    parser.add_argument(
+        "--item-gate-timestamp-tolerance-days",
+        type=int,
+        default=7,
     )
     parser.add_argument(
         "--backend-factory",
@@ -121,13 +153,36 @@ def run_arena_cli(
     parser.add_argument("--perturb-stability-threshold", type=float, default=0.05)
     parser.add_argument("--perturb-stable-windows", type=int, default=2)
     args = parser.parse_args()
-
     cases = loader(args.cases, seed=args.seed, limit=args.limit)
     _print_stream_validation(arena_id, cases, dataset_source_path=args.cases)
     if args.validate_only:
         print("[RESULT] validation_only=1")
         return 0
     backend = _load_backend(args.backend_factory, cases=cases, args=args)
+    scope_policy = (
+        ScopeLedger.read(args.scope_ledger).to_scope_policy()
+        if args.scope_ledger
+        else ScopePolicy()
+    )
+    item_gate_extractor = None
+    if args.live_item_gate:
+        item_gate_client = getattr(backend, "selection_judge_client", None)
+        item_gate_model_identity = str(
+            getattr(backend, "selection_judge_identity", "")
+        )
+        if item_gate_client is None or not item_gate_model_identity:
+            raise ValueError(
+                "--live-item-gate requires a backend exposing a "
+                "gold-free selection_judge_client and identity"
+            )
+        item_gate_extractor = build_live_item_gate_extractor(
+            item_gate_client,
+            model_identity=item_gate_model_identity,
+            divergence_threshold=args.item_gate_divergence_threshold,
+            timestamp_tolerance_days=(
+                args.item_gate_timestamp_tolerance_days
+            ),
+        )
     runner = ObservationalArenaRunner(
         cases,
         backend=backend,
@@ -154,12 +209,15 @@ def run_arena_cli(
         case_workers=args.case_workers,
         enable_best_of_n_control=args.best_of_n_control,
         dataset_source_path=args.cases,
+        scope_policy=scope_policy,
+        item_gate_extractor=item_gate_extractor,
     )
     result = runner.run()
     output = write_arena_artifacts(result, args.output)
     print(f"[RESULT] arena_id={arena_id}")
     print(f"[RESULT] cases={len(cases)}")
     print(f"[RESULT] case_workers={result.manifest.case_workers}")
+    print(f"[RESULT] live_item_gate={int(args.live_item_gate)}")
     print(
         "[RESULT] branch_distribution="
         f"fill:{result.manifest.fill_case_count},fix:{result.manifest.fix_case_count}"
