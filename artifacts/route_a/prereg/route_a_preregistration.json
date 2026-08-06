@@ -1,0 +1,67 @@
+{
+  "protocol": "route-a-state-fitness-open-synthesis-v1",
+  "status": "frozen_before_e0",
+  "frozen_at_utc": "2026-08-06T03:18:12Z",
+  "source_commit": {
+    "git_sha": "cd514ff26259fbf39c9b4bfe7e0025ed6016051b",
+    "dirty_worktree_at_commit": false
+  },
+  "files": [
+    {
+      "path": "docs/evolution/BUILD_SPEC_ROUTE_A_STATE_FITNESS_AND_SYNTHESIS.md",
+      "sha256": "fcf4109de72af25482a3f66a51be9e5b7016410763d7beec2f5514bb158efd23",
+      "role": "normative_route_a_preregistration"
+    },
+    {
+      "path": "docs/evolution/BUILD_SPEC_DESCRIPTOR_FITNESS_POLICY_V2.md",
+      "sha256": "7455c834e228426076119b724a8b179faad6b4410ae40a04dda4f879a1f3a019",
+      "role": "v2_entry_and_v0_protocol"
+    },
+    {
+      "path": "docs/evolution/V0_DESCRIPTOR_POLICY_RESULT.md",
+      "sha256": "7426fe0163a8c510c6b3e1df35e8a4a8bdb1714fdb9530b58a9eeb3ec4382b5b",
+      "role": "binding_v0_no_go_result"
+    },
+    {
+      "path": "docs/evolution/BUILD_SPEC_AUDITED_NICHE_EVOLUTION.md",
+      "sha256": "ad87511246bff6facce571b0a64836811cbcc04c848e45ab0c00bb3c6ca739cf",
+      "role": "superseded_v1_historical_spec"
+    },
+    {
+      "path": "cmd_audit/eval/descriptor_policy_value.py",
+      "sha256": "ca369f01f893fcf2d2605720ccc4f3d22012953fc8982974634b33ac3206295f",
+      "role": "v0_analysis_library"
+    },
+    {
+      "path": "experiments/analyze_descriptor_policy_value.py",
+      "sha256": "73bfb4fb4550dad52e6522026c086341dae94bb5cb2fe5a594401b76e9baad5e",
+      "role": "v0_analysis_entrypoint"
+    },
+    {
+      "path": "tests/experiments/test_descriptor_policy_value.py",
+      "sha256": "95f153fd28365e78dda69d768cf2371f7afcc428beab19c0606f4aab516fede1",
+      "role": "v0_analysis_tests"
+    }
+  ],
+  "registered_confirmatory_rule": {
+    "primary_endpoint": "family_paired_state_success_difference",
+    "success_gate": "one_sided_family_blocked_lb95_gt_0_and_all_hard_gates_pass",
+    "mde": 0.1,
+    "mde_role": "sample_size_design_and_effect_wording_only",
+    "power": 0.9,
+    "one_sided_alpha": 0.05
+  },
+  "registered_presearch_envelope": [
+    "legacy_closed_grammar",
+    "initial_population",
+    "exhaustive_typed_ir_depth_le_2"
+  ],
+  "registered_bridge_primary": "answer_gain_conditioned_on_state_success_transition_0_to_1",
+  "registered_intent_constructibility_minimum_by_domain": 1.0,
+  "registered_neutral_probe_count": 64,
+  "notes": [
+    "This manifest records the immutable source commit and file hashes without self-reference.",
+    "The manifest is committed separately from the source commit it attests.",
+    "E0 results had not been inspected when this freeze manifest was created."
+  ]
+}
