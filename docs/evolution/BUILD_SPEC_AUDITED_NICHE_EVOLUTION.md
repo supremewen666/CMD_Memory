@@ -1,6 +1,7 @@
-# BUILD SPEC — Audited Niche Evolution for CMD
+# BUILD SPEC — Audited Niche Evolution for CMD (V1, superseded)
 
-- **Status:** Draft for implementation and preregistration
+- **Status:** Superseded after the completed Stage 1 action-validity audit
+- **Replacement:** [`BUILD_SPEC_DESCRIPTOR_FITNESS_POLICY_V2.md`](BUILD_SPEC_DESCRIPTOR_FITNESS_POLICY_V2.md)
 - **Scope:** Repair-skill ecology, independently audited structural signals,
   niche-local evolution, audited transfer/composition, and downstream repair
   integration
@@ -9,6 +10,12 @@
 - **Supersedes:** Any positive evolution interpretation derived from
   `safety_filter_blocked`, `passed_safety_filter`, `perturbation_label`,
   recurrence-family metadata, or another field produced by the fault injector
+
+> Historical note: V1 incorrectly required a structural descriptor to validate
+> a preassigned repair action before niche-local learning could begin. The live
+> Stage 1 result showed that a signal can diagnose a runtime condition while
+> remaining unable to identify the best repair action. V2 separates descriptor,
+> fitness, and activation policy and is normative for all subsequent work.
 
 ## 0. Executive decision
 
