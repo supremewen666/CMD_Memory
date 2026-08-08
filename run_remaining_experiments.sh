@@ -89,7 +89,7 @@ while [[ $# -gt 0 ]]; do
       echo "           memtrace_seed224, memfail, stale, memtrace_llama,"
       echo "           memtrace_crossjudge, memtrace_stuffing; SIGIL roles:"
       echo "           memtrace, memfail, stale; route_a: e0, bridge, power,"
-      echo "           e0b, e3, e4, e5)"
+      echo "           validate, e0b, e3, e4, e5)"
       exit 0 ;;
     *)
       echo "Unknown: $1" >&2; exit 1 ;;
@@ -501,6 +501,13 @@ run_route_a_power() {
     python -m experiments.compute_tier3_power
 }
 
+run_route_a_validate() {
+  # §5.4 是 tier-3 冻结的前置条件，而 tier-3 冻结又是 e0b 那道门的一个合取项，
+  # 所以它必须挂在 e0 门上而不是 e0b 门上 —— 挂在后者会让审计等待它自己的产出。
+  route_a_step e0 "§5.4 tier-3 dataset validity audit" \
+    python -m experiments.validate_tier3_dataset
+}
+
 run_route_a_e0b() {
   route_a_step e0b "E0b pre-search envelope" \
     python -m experiments.run_shallow_ir_enumeration
@@ -529,6 +536,7 @@ main_route_a() {
     e0)     run_route_a_e0 ;;
     bridge) run_route_a_bridge ;;
     power)  run_route_a_power ;;
+    validate) run_route_a_validate ;;
     e0b)    run_route_a_e0b ;;
     e3)     run_route_a_e3 ;;
     e4)     run_route_a_e4 ;;
@@ -539,13 +547,14 @@ main_route_a() {
       run_route_a_e0     || true
       run_route_a_bridge || true
       run_route_a_power  || true
+      run_route_a_validate || true
       run_route_a_e0b    || true
       run_route_a_e3     || true
       run_route_a_e4     || true
       run_route_a_e5     || true
       ;;
     *)
-      echo "ERROR: Route A --only must be one of e0|bridge|power|e0b|e3|e4|e5" >&2
+      echo "ERROR: Route A --only must be one of e0|bridge|power|validate|e0b|e3|e4|e5" >&2
       return 1 ;;
   esac
   echo ""
