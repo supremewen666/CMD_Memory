@@ -28,31 +28,48 @@ these numbers would be tuning a frozen evaluator against dev outcomes. A
 successor protocol registers a new sensor; the frozen one keeps its behavior and
 its recorded result.
 
-**The signal is temporal, not lexical.** A first attempt here extracted semantic
-slots (location, commute, workplace, ...). Checked against the data that is
-overfitting: the 400 unique stale/current text pairs span at least eight
-dimensions -- residence, commute mode, workplace, temperature, humidity, morning
-haze, ambient noise -- and a hand-written vocabulary covering them would score
-here and nowhere else. What generalizes is already in the state: `store` carries
-an ISO timestamp on 1200/1200 cases, with the stale item always earlier. It is
-domain-blind -- it does not care whether the slot is a city or a humidity
-reading.
+**WITHDRAWN as a staleness sensor.** See
+`docs/evolution/BUILD_SPEC_ROUTE_A_SUCCESSOR_SLOT_SENSOR.md`. This module fires
+on 1200/1200 `stale_item` cases and names the exact gold pair every time, and
+that number is void: in this dataset `store` stands in bijection with
+`memory_id` -- `m_stale` carries the single constant `2026-01-01T00:00:00Z` on
+all 1200 cases, `m_haystack` the literal `"haystack"` -- so reading `store` and
+reading the item ID carry identical information. It is the shortcut the tests
+below forbid, entering through a different field.
 
-This also corrects a comment in the frozen module. `_temporally_dominated` says
-"A `RuntimeMemoryItem` carries no timestamp, so recall rank is the only ordering
-signal available." The timestamp is there; it is parked in `store`, the field
-that otherwise records provenance (`m_haystack` holds the literal `"haystack"`).
-`TEMPORAL_DOMINATES` fell back to rank because the value was in a
-semantically mismatched field, not because it was absent.
+The decisive measurement: re-derive each timestamp from the item's *text*
+instead of its construction identity, keeping them ISO, parseable, and pairwise
+distinct. Exact-gold-pair goes 1200 -> 0; haystack false positives go 0 -> 1199.
+All discriminative power was in the bijection. The filler was excluded because
+its field says `"haystack"`, not because it lacks temporal evidence. On the two
+shipped datasets that use `store` for provenance as intended (`episodic` on every
+item) the sensor fires 0/240 and 0/600.
+
+The module and its tests are kept: the code is not the error, the diagnosis of
+`CONTRADICTS` below is unaffected, and `ConstructionMarkerTest` pins the
+withdrawal so the 100% cannot be re-cited on its own. What is retracted is the
+claim that any of this measures staleness.
+
+The temporal reading also does not, after all, correct the frozen module's
+comment. `_temporally_dominated` says "A `RuntimeMemoryItem` carries no
+timestamp, so recall rank is the only ordering signal available." A
+timestamp-shaped value does sit in `store` on one dataset, but it is a
+construction marker there and absent everywhere else, so the frozen comment is
+closer to right than this module first claimed. It is not edited either way --
+it is inside the E-1 freeze.
 
 **What this sensor may not read.** Two shortcuts exist in this dataset and both
-are refused: 66.7% of texts are prefixed `M_old:` / `M_new:`, and `memory_id`
-takes only three values (`m_stale`, `m_current`, `m_haystack`). Those are
-construction markers. A predicate reading either would score 1.0 here and 0.0 in
-deployment -- writing the answer into the instrument. The prefix is stripped
-before comparison and the item ID is never inspected.
+are refused *by construction*: 66.7% of texts are prefixed `M_old:` / `M_new:`,
+and `memory_id` takes only three values (`m_stale`, `m_current`, `m_haystack`).
+The prefix is stripped before comparison and the item ID is never inspected. The
+lesson of the withdrawal is that enumerating known shortcuts is not enough -- a
+third one was present in a field nobody had listed, and only the decoupling
+counterfactual found it.
 
-Zero LLM calls: every signal is a timestamp parse or a token-set operation.
+Zero LLM calls: every signal is a timestamp parse or a token-set operation. That
+property is why the temporal shortcut was attractive, and its collapse is the
+real finding: a same-slot detector has to read the values being asserted on both
+sides, which costs a model call.
 """
 
 from __future__ import annotations

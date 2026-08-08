@@ -249,8 +249,119 @@ class DivergentPairTest(unittest.TestCase):
         self.assertEqual(matched, {"q1", "q2"})
 
 
+class ConstructionMarkerTest(unittest.TestCase):
+    """Why this sensor is withdrawn, pinned so the number cannot be re-cited.
+
+    See `docs/evolution/BUILD_SPEC_ROUTE_A_SUCCESSOR_SLOT_SENSOR.md` §3. The
+    100% coverage below is real but it is not a measurement of staleness: in
+    `stale_item`, `store` stands in bijection with `memory_id` (`m_stale` is the
+    constant `2026-01-01T00:00:00Z` on all 1200 cases), so reading `store` and
+    reading the item ID carry identical information. The tests in
+    `DivergentPairTest` establish that the sensor does not read `memory_id`;
+    these establish that it did not need to.
+    """
+
+    def test_decoupling_store_from_the_item_id_destroys_the_signal(self) -> None:
+        """The decisive counterfactual.
+
+        Timestamps stay ISO, parseable, and pairwise distinct -- only derived
+        from each item's *text* instead of its construction identity. If the
+        sensor were reading temporal evidence this would barely move; if it were
+        reading the bijection, the verdict inverts. It inverts: the gold pair
+        goes to zero and the haystack is implicated almost everywhere.
+        """
+        import hashlib
+        import json
+        import pathlib
+
+        path = pathlib.Path("data/probe_cases/stale_item_cases.json")
+        if not path.is_file():
+            self.skipTest(f"{path} not present")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        cases = payload if isinstance(payload, list) else payload.get("cases", payload)
+
+        def content_store(case_id: str, text: str) -> str:
+            digest = hashlib.sha256(f"{case_id}|{text}".encode("utf-8")).hexdigest()
+            return f"2026-01-{int(digest[:6], 16) % 28 + 1:02d}T00:00:00Z"
+
+        exact = 0
+        with_haystack = 0
+        for case in cases:
+            items = tuple(
+                _item(
+                    row["memory_id"],
+                    row.get("text", ""),
+                    rank,
+                    store=content_store(
+                        str(case.get("case_id", "")), row.get("text", "")
+                    ),
+                )
+                for rank, row in enumerate(case.get("extracted_memory", []))
+            )
+            matched = divergent_slot_pairs(items)
+            if matched == {"m_stale", "m_current"}:
+                exact += 1
+            if "m_haystack" in matched:
+                with_haystack += 1
+
+        self.assertEqual(
+            exact,
+            0,
+            "named the gold pair without the store/memory_id bijection; if this "
+            "ever passes, re-read the withdrawal -- the sensor would be reading "
+            "something other than the construction marker",
+        )
+        self.assertGreater(
+            with_haystack,
+            len(cases) // 2,
+            f"implicated the haystack in {with_haystack}/{len(cases)} cases; the "
+            "haystack was excluded only because its store holds the literal "
+            "'haystack', not because it lacks temporal evidence",
+        )
+
+    def test_the_signal_is_absent_where_store_carries_provenance(self) -> None:
+        """`store` is nominally a provenance field, and on the datasets that use
+        it that way the sensor is silent. Two of the shipped sets put `episodic`
+        in every item, 0% parseable, 0 firings -- so the 100% below is a property
+        of one dataset's construction, not of the relation."""
+        import json
+        import pathlib
+
+        for name in ("real_multihop_cases", "real_recurrent_cases"):
+            path = pathlib.Path(f"data/probe_cases/{name}.json")
+            if not path.is_file():
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            cases = payload if isinstance(payload, list) else payload.get("cases", payload)
+            fired = 0
+            for case in cases:
+                items = tuple(
+                    _item(
+                        row.get("memory_id", ""),
+                        row.get("text", ""),
+                        rank,
+                        store=row.get("store"),
+                    )
+                    for rank, row in enumerate(case.get("extracted_memory", []))
+                )
+                if divergent_slot_pairs(items):
+                    fired += 1
+            with self.subTest(dataset=name):
+                self.assertEqual(
+                    fired,
+                    0,
+                    f"{name}: fired on {fired}/{len(cases)} despite `store` "
+                    "carrying provenance rather than a timestamp",
+                )
+
+
 class CoverageOnRealDataTest(unittest.TestCase):
-    """The number that justifies the module: does it move 0/23760?"""
+    """The 100% that looked like it justified the module.
+
+    Kept, and kept passing, because the number is real and reproducible -- but
+    read it with `ConstructionMarkerTest` above, which shows what produces it.
+    A reader who sees only this class would draw the withdrawn conclusion.
+    """
 
     def test_the_sensor_fires_on_the_majority_of_stale_cases(self) -> None:
         """`CONTRADICTS` fires on 0 of 3600 real item pairs. A replacement that
