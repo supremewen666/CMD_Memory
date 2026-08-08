@@ -1,0 +1,272 @@
+{
+  "action_count": 3,
+  "action_translation": {
+    "granularity_error": {
+      "ir_predicate": {
+        "action": {
+          "kind": "replace"
+        },
+        "node": "if",
+        "predicate": {
+          "kind": "and",
+          "operands": [
+            {
+              "kind": "query_relevant"
+            },
+            {
+              "kind": "similarity_above",
+              "threshold": 0.25
+            }
+          ]
+        }
+      },
+      "rationale": "COARSE_RECALL x EXPAND_GRANULARITY. The legacy operator expands a coarse summary into its raw events. \u00a78.2 forbids a literal in the AST, so `replace` cannot write the expanded text; it retires the coarse item to `historical` and leaves the detail to whatever else is in state. The selector is the state-surface reading of 'coarse': query-relevant and overlapping another recalled item, which is what a summary covering several events looks like without a `source_event_ids` count in the predicate vocabulary.",
+      "selector": "coarse_recall",
+      "transform": "expand_granularity"
+    },
+    "injection_error": {
+      "ir_predicate": {
+        "action": {
+          "kind": "demote"
+        },
+        "node": "if",
+        "predicate": {
+          "kind": "temporal_dominates"
+        }
+      },
+      "rationale": "INJECTION_BUFFER x RE_EMIT_ORDERED. Re-emitting the buffer in order changes which of two same-slot items the model reads first. On state, ordering is expressed by disposition rather than by position, so demoting the later-ranked member of each same-slot pair is the transform that survives the surface change. It touches no pool item, matching the legacy operator's recall-only scope.",
+      "selector": "injection_buffer",
+      "transform": "re_emit_ordered"
+    },
+    "retrieval_error": {
+      "ir_predicate": {
+        "action": {
+          "kind": "retrieve_fill"
+        },
+        "node": "if",
+        "predicate": {
+          "kind": "evidence_missing"
+        }
+      },
+      "rationale": "MISSED_CANDIDATES x ADD_FROM_STORE. The legacy operator pulls pool items that are absent from recall; `retrieve_fill` is the only action that reads the unretrieved pool, and `evidence_missing` is the whole-case guard that fires exactly when recall does not cover the query -- the state-surface form of 'the retriever missed'.",
+      "selector": "missed_candidates",
+      "transform": "add_from_store"
+    }
+  },
+  "actions": [
+    "retrieval_error",
+    "injection_error",
+    "granularity_error"
+  ],
+  "behaviorally_unique_count": 22,
+  "canonical_unique_count": 22,
+  "closed_grammar_version": "route-a-closed-grammar-v1",
+  "code_revision": "93ca8c3004a816d2bb5609e24efd74f9ef883ba7fd04524d6723b3bc970ad799",
+  "distinct_canonical_ast_count": 22,
+  "excluded_actions": [
+    {
+      "action": "safety_error",
+      "reason": "historical eligibility path is label-equivalent (\u00a76.1)"
+    },
+    {
+      "action": "item_stale",
+      "reason": "keyed by literal memory IDs (\u00a76.1)"
+    },
+    {
+      "action": "item_conflict",
+      "reason": "keyed by literal memory IDs (\u00a76.1)"
+    },
+    {
+      "action": "item_poisoned",
+      "reason": "keyed by literal memory IDs (\u00a76.1)"
+    },
+    {
+      "action": "item_wrong",
+      "reason": "keyed by literal memory IDs (\u00a76.1)"
+    },
+    {
+      "action": "item_compression_distorted",
+      "reason": "keyed by literal memory IDs (\u00a76.1)"
+    }
+  ],
+  "generation_point": 0,
+  "hand_seed_population": {
+    "distinction_note": "These are gold-free programs. The `hand_seed` arm in build_dev_state_intents.py reads HiddenStateIntent and is an oracle upper bound, not a baseline; using it in \u00a76.3 would measure oracle access rather than grammar reach.",
+    "hand_seed_population_version": "route-a-hand-seeds-v1",
+    "reads_hidden_intent": false,
+    "seed_count": 8,
+    "seeds": [
+      {
+        "canonical_ast_hash": "f0b54dc9b7fd0e52a4f6fa97f1e26d55a5cdca53f889db3a87452a6370e9f616",
+        "name": "abstain-preserve",
+        "program": {
+          "body": [],
+          "node": "sequence"
+        },
+        "rationale": "\u00a79.1's registered null program. Touches nothing, so it is the reference for 'the repair did not help' and the arm that shows a positive endpoint is not an artifact of acting at all."
+      },
+      {
+        "canonical_ast_hash": "4f9f3168259864934bfe5869f30eff49b6d528e8a664c86f82548bd3e20168fa",
+        "name": "fill-missing-evidence",
+        "program": {
+          "action": {
+            "kind": "retrieve_fill"
+          },
+          "node": "if",
+          "predicate": {
+            "kind": "evidence_missing"
+          }
+        },
+        "rationale": "The most obvious heuristic: when recall does not cover the query, pull candidates from the pool. Coincides with the legacy retrieval_error translation, which is a finding about how little the closed grammar adds rather than a reason to perturb the seed."
+      },
+      {
+        "canonical_ast_hash": "f98d5a5313369be8aa44da7d429772a431e206e404e225a0798c69d9c3f1fe72",
+        "name": "suppress-contradictions",
+        "program": {
+          "action": {
+            "kind": "suppress"
+          },
+          "node": "if",
+          "predicate": {
+            "kind": "contradicts"
+          }
+        },
+        "rationale": "Drop both sides of a same-slot contradiction rather than guess which is current. Costs recall to buy consistency, so it is the seed that tests whether the endpoint rewards caution."
+      },
+      {
+        "canonical_ast_hash": "cfa27febc44a500bcc3dce63f04ca1136c2ab5518a1aa09802a29e2d4d1c86b9",
+        "name": "demote-superseded",
+        "program": {
+          "action": {
+            "kind": "demote"
+          },
+          "node": "if",
+          "predicate": {
+            "kind": "temporal_dominates"
+          }
+        },
+        "rationale": "Keep both sides of a same-slot pair but push the later-ranked one down. The conservative counterpart to suppress-contradictions: it never withholds text, so it cannot lose a protected item."
+      },
+      {
+        "canonical_ast_hash": "88165e4e8c33b157110a9472384dee1918ab2c37a92cbde128a75618e1e2b7c6",
+        "name": "deconflict-unreliable-source",
+        "program": {
+          "action": {
+            "kind": "demote"
+          },
+          "node": "if",
+          "predicate": {
+            "kind": "and",
+            "operands": [
+              {
+                "kind": "contradicts"
+              },
+              {
+                "kind": "source_more_reliable"
+              }
+            ]
+          }
+        },
+        "rationale": "Break a contradiction by provenance instead of by recency: demote only the contradicting item that a more reliable sibling outranks. The one seed that uses store reliability, so its score separates provenance-driven repair from ordering-driven repair."
+      },
+      {
+        "canonical_ast_hash": "f959e41312a64a0e9662ee6a904feea1223b70f695d4bf73b1da03badf15899f",
+        "name": "fill-then-deconflict",
+        "program": {
+          "body": [
+            {
+              "action": {
+                "kind": "retrieve_fill"
+              },
+              "node": "if",
+              "predicate": {
+                "kind": "evidence_missing"
+              }
+            },
+            {
+              "action": {
+                "kind": "suppress"
+              },
+              "node": "if",
+              "predicate": {
+                "kind": "contradicts"
+              }
+            }
+          ],
+          "node": "sequence"
+        },
+        "rationale": "Composition matters: filling first can introduce the contradiction that the second rule then resolves, which a single rule cannot reach. Tests whether sequencing buys anything on this endpoint."
+      },
+      {
+        "canonical_ast_hash": "f9004aefd5eb141d82583d5a252128d6752185609e9875d329accfb0ae9f69dd",
+        "name": "deconflict-then-fill",
+        "program": {
+          "body": [
+            {
+              "action": {
+                "kind": "suppress"
+              },
+              "node": "if",
+              "predicate": {
+                "kind": "contradicts"
+              }
+            },
+            {
+              "action": {
+                "kind": "retrieve_fill"
+              },
+              "node": "if",
+              "predicate": {
+                "kind": "evidence_missing"
+              }
+            }
+          ],
+          "node": "sequence"
+        },
+        "rationale": "The reverse order. Paired with fill-then-deconflict so an order effect is observable rather than assumed; if both score the same, the endpoint is order-insensitive here and that is worth knowing."
+      },
+      {
+        "canonical_ast_hash": "9f1ff778959471b88596d17bcd319496fb0bf0493c020d706e04c6ee86075657",
+        "name": "verify-relevant-then-fill",
+        "program": {
+          "body": [
+            {
+              "action": {
+                "kind": "verify"
+              },
+              "node": "if",
+              "predicate": {
+                "kind": "query_relevant"
+              }
+            },
+            {
+              "action": {
+                "kind": "retrieve_fill"
+              },
+              "node": "if",
+              "predicate": {
+                "kind": "evidence_missing"
+              }
+            }
+          ],
+          "node": "sequence"
+        },
+        "rationale": "Spends logical cost without changing state, then fills. Included so the cost tie-break in \u00a710.1 has a candidate that is behaviorally close to fill-missing-evidence but strictly more expensive."
+      }
+    ]
+  },
+  "hand_seed_population_version": "route-a-hand-seeds-v1",
+  "ir_grammar_version": "route-a-ir-v1",
+  "literal_item_hints_permitted": false,
+  "llm_calls": 0,
+  "max_sequence_length": 3,
+  "probe_suite_sha256": "0bd49b79bec4e724423c47dd2f07921430d1ecfa0551845603e2e34c888b0003",
+  "probe_suite_version": "route-a-neutral-probes-v1",
+  "protocol_version": "route-a-state-fitness-open-synthesis-v1",
+  "raw_generated_count": 40,
+  "runtime_uses_gold": false,
+  "seed": 20260808,
+  "state_fitness_version": "state-fitness-v1",
+  "state_intent_schema_version": "state-intent-v1",
+  "translation_note": "Legacy `apply_pipeline_action` edits a rendered context string; the E0 endpoint is measured on RepairState. Each action's frozen selector/transform is therefore re-expressed as typed IR on the state surface. The rewrite is behavioral, not mechanical: see each rationale, and note that `replace` cannot write expanded text because \u00a78.2 forbids AST literals."
+}
