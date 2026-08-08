@@ -1005,6 +1005,8 @@ def _abstention_curve_by_failure(
     inflate the coverage the threshold appears to preserve.
     """
     groups: dict[tuple[str, str], list[CaseRankingInput]] = {}
+    fields: dict[tuple[str, str], list[int]] = {}
+    margins: dict[tuple[str, str], list[float]] = {}
     for row in observations:
         if bool(row.get("runtime_abstained")):
             continue
@@ -1012,15 +1014,30 @@ def _abstention_curve_by_failure(
         shadow = _score_mapping(row.get("shadow_gold_scores"))
         if not gold_free or set(gold_free) != set(shadow):
             continue
-        groups.setdefault(
-            (str(row.get("arena_id")), str(row.get("failure_type"))),
-            [],
-        ).append(
+        # A no-op candidate sits at exactly zero on every case, so leaving it in
+        # makes it the runner-up and reports a margin measured against a
+        # candidate that could not have acted. The threshold has to be compared
+        # against the gap among operators that can actually move the score.
+        applicable = {
+            skill_id: gain
+            for skill_id, gain in gold_free.items()
+            if gain is not None and abs(gain) > INAPPLICABLE_GAIN_EPSILON
+        }
+        key = (str(row.get("arena_id")), str(row.get("failure_type")))
+        fields.setdefault(key, []).append(len(applicable))
+        if len(applicable) >= 2:
+            ordered = sorted(applicable.values(), reverse=True)
+            margins.setdefault(key, []).append(ordered[0] - ordered[1])
+        if len(applicable) < 2:
+            continue
+        groups.setdefault(key, []).append(
             case_ranking_from_mappings(
                 case_id=str(row.get("case_id")),
                 failure_type=str(row.get("failure_type")),
-                gold_free_scores=gold_free,
-                shadow_gold_scores=shadow,
+                gold_free_scores=applicable,
+                shadow_gold_scores={
+                    skill_id: shadow[skill_id] for skill_id in applicable
+                },
             )
         )
 
@@ -1030,6 +1047,9 @@ def _abstention_curve_by_failure(
             cases,
             abstention_thresholds=ABSTENTION_THRESHOLDS,
         )
+        key = (arena_id, failure_type)
+        field_sizes = fields.get(key, [])
+        case_margins = margins.get(key, [])
         for point in report.abstention_curve:
             output.append(
                 {
@@ -1053,6 +1073,16 @@ def _abstention_curve_by_failure(
                     "baseline_agreement": (
                         report.overall_agreement
                         if report.overall_agreement is not None
+                        else ""
+                    ),
+                    "mean_effective_field": (
+                        round(sum(field_sizes) / len(field_sizes))
+                        if field_sizes
+                        else 0
+                    ),
+                    "mean_applicable_margin": (
+                        sum(case_margins) / len(case_margins)
+                        if case_margins
                         else ""
                     ),
                 }

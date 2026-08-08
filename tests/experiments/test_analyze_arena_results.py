@@ -645,6 +645,41 @@ def test_abstention_curve_trades_coverage_for_selective_agreement():
     assert float(table[0.01]["selective_agreement"]) == pytest.approx(1.0)
 
 
+def test_abstention_curve_margin_ignores_inapplicable_candidates():
+    """A no-op candidate must not set the margin the threshold is compared to.
+
+    Two applicable operators sit 0.02 apart, and a third is a no-op at exactly
+    zero. Ranking all three puts the runner-up at 0.0 and reports a margin of
+    0.05, which clears tau=0.01; ranking only the two that can act reports the
+    real 0.02 gap. Both clear this tau, so the assertion is on the margin the
+    curve used, not on which side of the threshold it fell.
+    """
+    rows = [
+        _observation(
+            failure_type="granularity_error",
+            gold_free_scores=[
+                ["skill-a", 0.05],
+                ["skill-b", 0.03],
+                ["skill-noop", 0.0],
+            ],
+            shadow_gold_scores=[
+                ["skill-a", 1.0],
+                ["skill-b", 1.0],
+                ["skill-noop", 1.0],
+            ],
+        ),
+    ]
+
+    row = next(
+        row
+        for row in analyze_arena_results._abstention_curve_by_failure(rows)
+        if float(row["threshold"]) == 0.0
+    )
+
+    assert float(row["mean_applicable_margin"]) == pytest.approx(0.02)
+    assert int(row["mean_effective_field"]) == 2
+
+
 def test_abstention_curve_only_scores_cases_the_runtime_acted_on():
     """A case the runtime already skipped cannot be credited to the threshold.
 
@@ -693,6 +728,10 @@ def test_abstention_curve_reports_the_regret_the_threshold_avoids():
 #: of the assertion. Any positive value works; it only has to be non-zero.
 _FIXTURE_REGRET = 0.1
 
+#: Baseline gain for the runner-up candidate, so it counts as applicable. Small
+#: enough that the requested margin still lands in the intended threshold band.
+_FIXTURE_RUNNER_UP_GAIN = 1e-6
+
 
 def _curve_observation(
     *,
@@ -714,13 +753,20 @@ def _curve_observation(
     regret would tie on the shadow axis and the tie-break would hand it back to
     the chosen skill, turning it into an agreement.
     """
+    # Both candidates must be applicable, so the runner-up carries a small
+    # non-zero gain rather than exactly zero: a zero-gain operator is a no-op
+    # whose precondition never fired, and the curve excludes it from the margin.
+    runner_up = _FIXTURE_RUNNER_UP_GAIN
     if agrees:
         if regret not in (None, 0.0):
             raise ValueError("an agreeing case cannot carry positive regret")
         return _observation(
             failure_type="granularity_error",
             runtime_abstained=runtime_abstained,
-            gold_free_scores=[["skill-a", margin], ["skill-b", 0.0]],
+            gold_free_scores=[
+                ["skill-a", runner_up + margin],
+                ["skill-b", runner_up],
+            ],
             shadow_gold_scores=[["skill-a", 1.0], ["skill-b", 1.0]],
         )
     resolved = _FIXTURE_REGRET if regret is None else regret
@@ -729,7 +775,10 @@ def _curve_observation(
     return _observation(
         failure_type="granularity_error",
         runtime_abstained=runtime_abstained,
-        gold_free_scores=[["skill-a", margin], ["skill-b", 0.0]],
+        gold_free_scores=[
+            ["skill-a", runner_up + margin],
+            ["skill-b", runner_up],
+        ],
         shadow_gold_scores=[["skill-a", 1.0 - resolved], ["skill-b", 1.0]],
     )
 
