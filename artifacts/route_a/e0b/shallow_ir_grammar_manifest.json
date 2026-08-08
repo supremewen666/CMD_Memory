@@ -1,0 +1,29 @@
+{
+  "acting_action_count": 7,
+  "code_revision": "6bda31e3c3fbd22718332078c4ad9841a5d296e2b7c11a954271524cd67aaf62",
+  "depth2_space_size_at_registered_action_bound": 48673087,
+  "enumerated_program_count": 64303,
+  "ir_grammar_version": "route-a-ir-v1",
+  "leaf_instantiation_count": 12,
+  "llm_calls": 0,
+  "max_depth": 2,
+  "omitted_program_count": 48608784,
+  "probe_suite_sha256": "0bd49b79bec4e724423c47dd2f07921430d1ecfa0551845603e2e34c888b0003",
+  "probe_suite_version": "route-a-neutral-probes-v1",
+  "protocol_version": "route-a-state-fitness-open-synthesis-v1",
+  "resource_bounds": {
+    "max_actions_per_case": 4,
+    "max_depth": 3,
+    "max_logical_cost": 16,
+    "max_nodes": 32,
+    "max_retrieved_additions": 4,
+    "max_token_delta": 512
+  },
+  "runtime_uses_gold": false,
+  "seed": null,
+  "sequence_limit": 2,
+  "shallow_envelope_version": "route-a-shallow-ir-v1",
+  "shallow_predicate_count": 8190,
+  "truncation_is_lossy": true,
+  "truncation_reason": "program_depth treats a Sequence of simple rules as depth 2, so the literal depth<=2 space includes every ordered rule sequence up to max_actions_per_case=4 (48673087 programs), roughly 23 hours of behavior fingerprinting. sequence_limit=2 is registered before E3 as a cost truncation. It is a real coverage reduction: measured on the frozen probe suite, the 84 single-rule programs occupy 84 distinct behavior classes and extending them to length 2 yields 3761 further classes from 6972 candidates, so longer sequences do reach behavior shorter ones cannot. omitted_program_count states the size of what this envelope does not rule out."
+}

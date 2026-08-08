@@ -1,0 +1,17 @@
+{
+  "behavior_class_count": 5466,
+  "code_revision": "6bda31e3c3fbd22718332078c4ad9841a5d296e2b7c11a954271524cd67aaf62",
+  "collapsed_count": 58837,
+  "enumerated_count": 64303,
+  "envelope_sha256": "3a1fa32f3423a59718144e84f52567eabd941439946fd5d611d30d7f42cf5876",
+  "fingerprint_seconds": 230.332,
+  "ir_grammar_version": "route-a-ir-v1",
+  "llm_calls": 0,
+  "probe_suite_sha256": "0bd49b79bec4e724423c47dd2f07921430d1ecfa0551845603e2e34c888b0003",
+  "probe_suite_version": "route-a-neutral-probes-v1",
+  "protocol_version": "route-a-state-fitness-open-synthesis-v1",
+  "runtime_uses_gold": false,
+  "seed": null,
+  "sequence_limit": 2,
+  "shallow_envelope_version": "route-a-shallow-ir-v1"
+}
