@@ -58,6 +58,11 @@ from cmd_audit.counterfactual.actions import (
     PIPELINE_ACTION_OPERATOR_DSL,
     PipelineAction,
 )
+from cmd_audit.counterfactual.operators import (
+    LITERAL_ITEM_HINTS_PERMITTED_IN_ROUTE_A,
+    OperatorSpec,
+    assert_route_a_convertible,
+)
 from cmd_audit.counterfactual.program_ir import (
     Action,
     ActionKind,
@@ -79,6 +84,7 @@ __all__ = [
     "EXCLUDED_ACTIONS",
     "ClosedGrammarSpec",
     "closed_grammar_manifest",
+    "closed_spec_from_operator",
     "count_closed_grammar",
     "enumerate_closed_specs",
     "translate_action",
@@ -290,6 +296,38 @@ class ClosedGrammarSpec:
         }
 
 
+def closed_spec_from_operator(operator: OperatorSpec) -> ClosedGrammarSpec:
+    """The one supported legacy-to-Route-A conversion (§12.3).
+
+    A legacy `OperatorSpec` and a `ClosedGrammarSpec` are not the same shape:
+    the former keys actions by generation point and carries an item-hint
+    parameter channel, the latter is an ordered stage list pinned to point 0.
+    Converting by hand at each call site would let one caller keep the hints and
+    another drop them, so the conversion lives here and refuses everything §6.1
+    excludes -- off-point steps, over-length sequences, non-grammar actions (via
+    `ClosedGrammarSpec.__post_init__`) and legacy-only hints (via
+    `assert_route_a_convertible`).
+
+    The result hashes identically to the enumerated spec of the same shape, so a
+    converted operator competes under the content hash E0's matrix already used
+    rather than under a second one.
+    """
+    assert_route_a_convertible(operator)
+    off_point = sorted(
+        {
+            step.generation_point
+            for step in operator.steps
+            if step.generation_point != CLOSED_GENERATION_POINT
+        }
+    )
+    if off_point:
+        raise ValueError(
+            "§6.1 fixes the closed grammar's generation point at "
+            f"{CLOSED_GENERATION_POINT}; this spec acts at {off_point}"
+        )
+    return ClosedGrammarSpec(actions=tuple(step.action for step in operator.steps))
+
+
 def count_closed_grammar(max_length: int = CLOSED_MAX_SEQUENCE_LENGTH) -> int:
     """Raw generated count: every ordered sequence of length 0..max_length.
 
@@ -380,7 +418,7 @@ def closed_grammar_manifest(
             {"action": action.value, "reason": reason}
             for action, reason in EXCLUDED_ACTIONS
         ],
-        "literal_item_hints_permitted": False,
+        "literal_item_hints_permitted": LITERAL_ITEM_HINTS_PERMITTED_IN_ROUTE_A,
         "raw_generated_count": count_closed_grammar(max_length),
         "canonical_unique_count": len(specs),
         "distinct_canonical_ast_count": len(ast_hashes),

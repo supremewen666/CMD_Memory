@@ -71,7 +71,7 @@ while [[ $# -gt 0 ]]; do
     --detach)
       DETACH=true; shift ;;
     --help|-h)
-      echo "Usage: $0 --role gpu0|gpu1|analyze|phase1_gpu0|phase1_gpu1|phase1_analyze|sigil_gpu0|sigil_gpu1|sigil_analyze [--smoke] [--only NAME] [--detach]"
+      echo "Usage: $0 --role gpu0|gpu1|analyze|phase1_gpu0|phase1_gpu1|phase1_analyze|sigil_gpu0|sigil_gpu1|sigil_analyze|route_a [--smoke] [--only NAME] [--detach]"
       echo ""
       echo "  GPU 0 (~3.5h): MemTrace-B seeds 24+124 → MemFail"
       echo "  GPU 1 (~3.5h): MemTrace-B seed 224 → STALE → replicate seed 24"
@@ -82,12 +82,14 @@ while [[ $# -gt 0 ]]; do
       echo "  sigil_gpu0:     Stage 1 live item-gate shadow on MemTrace + MemFail"
       echo "  sigil_gpu1:     Stage 1 live item-gate shadow on STALE"
       echo "  sigil_analyze:  repair-validity audit + scope ledger (zero calls)"
+      echo "  route_a:        Route A §15 chain; every stage gated, E0 STOP refuses downstream"
       echo "  --detach:       run in a new session; logs to the role-specific artifacts directory"
       echo ""
       echo "  --only:  skip straight to one named phase (memtrace_seed24, memtrace_seed124,"
       echo "           memtrace_seed224, memfail, stale, memtrace_llama,"
       echo "           memtrace_crossjudge, memtrace_stuffing; SIGIL roles:"
-      echo "           memtrace, memfail, stale)"
+      echo "           memtrace, memfail, stale; route_a: e0, bridge, power,"
+      echo "           e0b, e3, e4, e5)"
       exit 0 ;;
     *)
       echo "Unknown: $1" >&2; exit 1 ;;
@@ -95,7 +97,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$ROLE" ]]; then
-  echo "ERROR: --role is required (gpu0 | gpu1 | analyze | phase1_gpu0 | phase1_gpu1 | phase1_analyze | sigil_gpu0 | sigil_gpu1 | sigil_analyze)" >&2
+  echo "ERROR: --role is required (gpu0 | gpu1 | analyze | phase1_gpu0 | phase1_gpu1 | phase1_analyze | sigil_gpu0 | sigil_gpu1 | sigil_analyze | route_a)" >&2
   exit 1
 fi
 
@@ -105,6 +107,8 @@ if $DETACH && [[ -z "${CMD_EXPERIMENTS_DETACHED:-}" ]]; then
     detach_log_root="${EVOLUTION_ARTIFACTS}/phase1/logs"
   elif [[ "$ROLE" == sigil_* ]]; then
     detach_log_root="${SIGIL_ARTIFACTS}/logs"
+  elif [[ "$ROLE" == route_a ]]; then
+    detach_log_root="${CMD_ROOT}/artifacts/route_a/logs"
   fi
   mkdir -p "$detach_log_root"
   detach_log="${detach_log_root}/run_${ROLE}_$(date +%Y%m%d_%H%M%S).log"
@@ -431,6 +435,121 @@ from experiments.experiment_runner_common import assert_g_eval_available
 assert_g_eval_available(LLMClient(LLMClientConfig.for_role("judge")), role="preflight-judge")
 print("[gate] G0 judge logprob gate: OK")
 PY
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Route A (BUILD SPEC §15 chain, §12.3 gating)
+#
+# 每条 Route A 命令都必须先过 §15 的门。门是累积的：E0 STOP 会一路拒到 E5，
+# 即使 E0b 自身的工件齐备也一样 —— E3 是花掉 §16 的 3x150 提案预算的阶段。
+# 判决逻辑在 experiments/check_route_a_gates.py（可测、零 LLM 调用），
+# 这里只负责调用它并在拒绝时停下。
+#
+# E-1 套件的通过与否不由门自己发现（它不 shell out 到 pytest），由
+# route_a_gate 先跑一遍再作为 --tests-pass 传进去。
+# ══════════════════════════════════════════════════════════════════════════════
+
+ROUTE_A_E_MINUS_1_TESTS=(
+  tests/counterfactual/
+  tests/experiments/test_tier3_power.py
+  tests/experiments/test_route_a_gates.py
+)
+
+route_a_e_minus_1_tests() {
+  echo "[route-a] E-1 suite"
+  python -m pytest "${ROUTE_A_E_MINUS_1_TESTS[@]}" -q
+}
+
+# route_a_gate <stage> — 通过则返回 0，拒绝则打印整条链并返回 1
+route_a_gate() {
+  local stage="$1"
+  local tests_flag=()
+  if route_a_e_minus_1_tests; then
+    tests_flag=(--tests-pass)
+  else
+    echo "[route-a] E-1 suite failed; every stage is refused" >&2
+  fi
+  python -m experiments.check_route_a_gates --stage "$stage" "${tests_flag[@]}"
+}
+
+# route_a_step <stage> <label> <命令...> — 过门才执行
+route_a_step() {
+  local stage="$1"; shift
+  local label="$1"; shift
+  if ! route_a_gate "$stage"; then
+    echo "[route-a] SKIP ${label}: §15 gate refused stage ${stage}"
+    return 1
+  fi
+  echo "===== Route A: ${label} ====="
+  "$@"
+}
+
+run_route_a_e0() {
+  route_a_step e0 "E0 closed-grammar enumeration" \
+    python -m experiments.run_closed_grammar_enumeration
+}
+
+run_route_a_bridge() {
+  route_a_step bridge "E1.5 state-answer bridge" \
+    python -m experiments.run_state_answer_bridge
+}
+
+run_route_a_power() {
+  # §4 用 D_dev 方差定 n_tier3，必须在任何工件存在之前跑，所以它挂在 E0 那道门上
+  # 而不是 tier-3 冻结那道门上 —— 反过来会让 n 依赖它将要检验的东西。
+  route_a_step e0 "§4 mechanical tier-3 sample size" \
+    python -m experiments.compute_tier3_power
+}
+
+run_route_a_e0b() {
+  route_a_step e0b "E0b pre-search envelope" \
+    python -m experiments.run_shallow_ir_enumeration
+}
+
+run_route_a_e3() {
+  route_a_step e3 "E3 open operator synthesis" \
+    python -m experiments.run_open_operator_synthesis
+}
+
+run_route_a_e4() {
+  route_a_step e4 "E4 artifact selection and freeze" \
+    python -m experiments.select_route_a_artifact
+}
+
+run_route_a_e5() {
+  # §16: 恰好一次确证读取，且失败后不救。门里 MAX_PRIOR_E5_RUNS = 0 是唯一
+  # 能挡住第二次读的东西 —— 确证命令自己不记得跑过。
+  route_a_step e5 "E5 one-shot confirmation" \
+    python -m experiments.run_route_a_confirmation
+}
+
+main_route_a() {
+  mkdir -p artifacts/route_a
+  case "$ONLY" in
+    e0)     run_route_a_e0 ;;
+    bridge) run_route_a_bridge ;;
+    power)  run_route_a_power ;;
+    e0b)    run_route_a_e0b ;;
+    e3)     run_route_a_e3 ;;
+    e4)     run_route_a_e4 ;;
+    e5)     run_route_a_e5 ;;
+    "")
+      # 整链顺跑。每步自己过门，所以第一道拒绝之后后面全部 SKIP，
+      # 而不是靠 set -e 中断 —— 被门拒绝是预期结果，不是脚本错误。
+      run_route_a_e0     || true
+      run_route_a_bridge || true
+      run_route_a_power  || true
+      run_route_a_e0b    || true
+      run_route_a_e3     || true
+      run_route_a_e4     || true
+      run_route_a_e5     || true
+      ;;
+    *)
+      echo "ERROR: Route A --only must be one of e0|bridge|power|e0b|e3|e4|e5" >&2
+      return 1 ;;
+  esac
+  echo ""
+  echo "===== ROUTE A DONE ====="
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -901,6 +1020,7 @@ case "$ROLE" in
   sigil_gpu0)     main_sigil_gpu0 ;;
   sigil_gpu1)     main_sigil_gpu1 ;;
   sigil_analyze)  main_sigil_analyze ;;
+  route_a)        main_route_a ;;
   *)
     echo "ERROR: invalid --role; see --help" >&2
     exit 1 ;;
