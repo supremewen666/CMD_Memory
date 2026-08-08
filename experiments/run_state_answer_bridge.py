@@ -61,7 +61,9 @@ from cmd_audit.eval.route_a_statistics import (  # noqa: E402
     sign_flip_p_value,
 )
 
-OUTPUT = Path("artifacts/route_a/bridge/state_answer_bridge.json")
+#: §13's artifact contract names this file, and `check_route_a_gates` reads §15's
+#: bridge rung from it. The name is the contract's, not this command's.
+OUTPUT = Path("artifacts/route_a/bridge/bridge_decision.json")
 
 #: §7.3 primary. Named so §7.2's "judge scores never become the bridge target"
 #: is a diff rather than a comment.

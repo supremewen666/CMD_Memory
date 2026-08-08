@@ -37,14 +37,28 @@ from pathlib import Path
 
 ROUTE_A = Path("artifacts/route_a")
 
-E0_COUNT = ROUTE_A / "e0" / "closed_spec_count.json"
-E0_CROSSFIT = ROUTE_A / "e0" / "closed_crossfit_results.json"
-BRIDGE = ROUTE_A / "bridge" / "state_answer_bridge.json"
-TIER3_BUILD = ROUTE_A / "tier3" / "tier3_build_manifest.json"
-E0B_ENVELOPE = ROUTE_A / "e0b" / "presearch_envelope_manifest.json"
-E3_DIR = ROUTE_A / "e3"
-E4_FREEZE = ROUTE_A / "e4" / "artifact_freeze_manifest.json"
-E5_DIR = ROUTE_A / "e5"
+#: §13's artifact contract, root-relative. These are the paths the gate globs and
+#: the paths the commands write, so they are named once rather than spelled at
+#: each end. A gate reading a path no command writes globs an empty directory
+#: forever: every stage is refused for a reason naming a missing artifact, which
+#: is indistinguishable from a genuine refusal and would survive any test that
+#: only asserts "refused".
+E0_COUNT_ARTIFACT = "e0/closed_spec_count.json"
+E0_CROSSFIT_ARTIFACT = "e0/closed_crossfit_results.json"
+BRIDGE_ARTIFACT = "bridge/bridge_decision.json"
+TIER3_BUILD_ARTIFACT = "tier3/tier3_build_manifest.json"
+PRESEARCH_ENVELOPE_ARTIFACT = "e0b/presearch_envelope_manifest.json"
+FREEZE_ARTIFACT = "selection/artifact_freeze_manifest.json"
+
+#: §13 nests each seed's winner under `synthesis/seed_<seed>/`. The glob matches
+#: the winner file, not the directory: a seed that ran and aborted leaves a
+#: proposal ledger behind, and counting directories would let it satisfy §10.1's
+#: "exactly three seed winners enter D_select".
+E3_WINNER_GLOB = "synthesis/seed_*/winner.json"
+
+#: §11.2 writes the confirmation's mechanical decision here. Its presence is how
+#: a prior read becomes visible to §16's "confirmation reads = exactly 1".
+FINAL_DECISION_ARTIFACT = "tier3/final_decision.json"
 
 #: §16 fixes E3 at three seeds.
 REQUIRED_E3_SEEDS = 3
@@ -231,19 +245,19 @@ def read_chain_state(root: Path = ROUTE_A, *, tests_pass: bool) -> ChainState:
     `tests_pass` is passed in rather than discovered: this command must not
     shell out to pytest, and the caller (the runner script) has just run it.
     """
-    e0 = _load(root / "e0" / "closed_spec_count.json") or {}
-    crossfit = _load(root / "e0" / "closed_crossfit_results.json") or {}
+    e0 = _load(root / E0_COUNT_ARTIFACT) or {}
+    crossfit = _load(root / E0_CROSSFIT_ARTIFACT) or {}
     decision = str(
         e0.get("gate_decision") or crossfit.get("gate", {}).get("decision") or "MISSING"
     )
 
-    bridge = _load(root / "bridge" / "state_answer_bridge.json") or {}
-    tier3 = _load(root / "tier3" / "tier3_build_manifest.json") or {}
-    envelope = _load(root / "e0b" / "presearch_envelope_manifest.json") or {}
-    freeze = _load(root / "e4" / "artifact_freeze_manifest.json") or {}
+    bridge = _load(root / BRIDGE_ARTIFACT) or {}
+    tier3 = _load(root / TIER3_BUILD_ARTIFACT) or {}
+    envelope = _load(root / PRESEARCH_ENVELOPE_ARTIFACT) or {}
+    freeze = _load(root / FREEZE_ARTIFACT) or {}
 
-    e3_winners = sorted((root / "e3").glob("seed_*/seed_winner.json"))
-    e5_runs = sorted((root / "e5").glob("confirmation_*.json"))
+    e3_winners = sorted(root.glob(E3_WINNER_GLOB))
+    e5_runs = [path for path in (root / FINAL_DECISION_ARTIFACT,) if path.is_file()]
 
     return ChainState(
         e_minus_1_tests_pass=tests_pass,

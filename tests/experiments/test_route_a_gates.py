@@ -11,13 +11,23 @@ its envelope frozen -- and E3 is the stage that spends 3x150 proposals. A gate
 that only checked its own predecessor artifact would permit it.
 """
 
+import json
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
 from experiments.check_route_a_gates import (
+    BRIDGE_ARTIFACT,
+    FINAL_DECISION_ARTIFACT,
+    FREEZE_ARTIFACT,
+    PRESEARCH_ENVELOPE_ARTIFACT,
     STAGES,
+    TIER3_BUILD_ARTIFACT,
     ChainState,
     evaluate_chain,
     gate_for_stage,
+    read_chain_state,
 )
 
 
@@ -156,6 +166,145 @@ class StageLookupTest(unittest.TestCase):
         """A typo'd `--stage` must not exit 0 and let an ungated command run."""
         with self.assertRaises(KeyError):
             gate_for_stage(evaluate_chain(_state()), "e9")
+
+
+class ChainStateFromDiskTest(unittest.TestCase):
+    """`read_chain_state` against §13's artifact contract.
+
+    The paths are the load-bearing part and nothing else pins them. A gate that
+    globs a path §13 does not define reads an empty directory forever: the state
+    it builds is all-negative, so every stage is refused for a reason that names
+    a missing artifact rather than the real one, and no test would notice because
+    refusing is also the correct answer today. The failure mode is a gate that
+    can never permit E3 even once E0 returns GO -- and its symptom is
+    indistinguishable from the E0 STOP that is currently refusing.
+
+    So each precondition is written at the §13 path and read back. A rename on
+    either side breaks these.
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root)
+
+    def _write(self, relative: str, payload: dict) -> None:
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_an_empty_root_reports_every_precondition_unmet(self) -> None:
+        state = read_chain_state(self.root, tests_pass=True)
+        self.assertEqual(state.e0_gate_decision, "MISSING")
+        self.assertFalse(state.bridge_decision_recorded)
+        self.assertFalse(state.tier3_frozen)
+        self.assertFalse(state.presearch_envelope_frozen)
+        self.assertEqual(state.e3_seed_winner_count, 0)
+        self.assertFalse(state.artifact_freeze_manifest_valid)
+        self.assertEqual(state.e5_runs_recorded, 0)
+
+    def test_tests_pass_is_supplied_by_the_caller_not_discovered(self) -> None:
+        """The command must not shell out to pytest, so this is an input."""
+        self.assertFalse(read_chain_state(self.root, tests_pass=False).e_minus_1_tests_pass)
+        self.assertTrue(read_chain_state(self.root, tests_pass=True).e_minus_1_tests_pass)
+
+    def test_the_e0_decision_is_read_from_the_spec_count_artifact(self) -> None:
+        self._write("e0/closed_spec_count.json", {"gate_decision": "GO"})
+        self.assertEqual(read_chain_state(self.root, tests_pass=True).e0_gate_decision, "GO")
+
+    def test_the_e0_decision_falls_back_to_the_crossfit_artifact(self) -> None:
+        """E0 records its decision in two places; either one is authoritative."""
+        self._write("e0/closed_crossfit_results.json", {"gate": {"decision": "STOP"}})
+        self.assertEqual(read_chain_state(self.root, tests_pass=True).e0_gate_decision, "STOP")
+
+    def test_the_bridge_decision_is_read_from_the_contract_path(self) -> None:
+        self._write(BRIDGE_ARTIFACT, {"decision": "PASS"})
+        self.assertTrue(read_chain_state(self.root, tests_pass=True).bridge_decision_recorded)
+
+    def test_a_bridge_artifact_without_a_decision_does_not_count(self) -> None:
+        """An insufficient-support run writes no decision. §7.4 says that is not
+        a bridge failure, but it is also not a recorded decision, and §15's rung
+        asks for one."""
+        self._write(BRIDGE_ARTIFACT, {"support": "insufficient"})
+        self.assertFalse(read_chain_state(self.root, tests_pass=True).bridge_decision_recorded)
+
+    def test_the_tier3_commitment_is_read_from_the_build_manifest(self) -> None:
+        self._write(TIER3_BUILD_ARTIFACT, {"status": "frozen"})
+        self.assertTrue(read_chain_state(self.root, tests_pass=True).tier3_frozen)
+
+    def test_an_unfrozen_tier3_manifest_does_not_count(self) -> None:
+        self._write(TIER3_BUILD_ARTIFACT, {"status": "draft"})
+        self.assertFalse(read_chain_state(self.root, tests_pass=True).tier3_frozen)
+
+    def test_the_presearch_envelope_status_is_read_from_the_e0b_manifest(self) -> None:
+        self._write(
+            PRESEARCH_ENVELOPE_ARTIFACT,
+            {"status": "frozen", "union_behavior_class_count": 12},
+        )
+        state = read_chain_state(self.root, tests_pass=True)
+        self.assertTrue(state.presearch_envelope_frozen)
+        self.assertTrue(state.e0b_complete)
+
+    def test_a_pending_envelope_is_neither_frozen_nor_complete(self) -> None:
+        """E0b writes `pending_closed_grammar` with a null union when E0's
+        fingerprints are absent. A union it did not compute must not read as a
+        frozen baseline that E5 will later compare against."""
+        self._write(
+            PRESEARCH_ENVELOPE_ARTIFACT,
+            {"status": "pending_closed_grammar", "union_behavior_class_count": None},
+        )
+        state = read_chain_state(self.root, tests_pass=True)
+        self.assertFalse(state.presearch_envelope_frozen)
+        self.assertFalse(state.e0b_complete)
+
+    def test_seed_winners_are_counted_at_the_contract_path(self) -> None:
+        """§13 puts each seed's winner at `synthesis/seed_<seed>/winner.json`."""
+        for seed in (11, 22, 33):
+            self._write(f"synthesis/seed_{seed}/winner.json", {"seed": seed})
+        self.assertEqual(read_chain_state(self.root, tests_pass=True).e3_seed_winner_count, 3)
+
+    def test_a_proposal_ledger_without_a_winner_is_not_counted(self) -> None:
+        """A seed that ran and produced no winner has not produced one. Counting
+        the directory instead of the winner would let an aborted seed satisfy
+        §10.1's "exactly three seed winners enter D_select"."""
+        for seed in (11, 22):
+            self._write(f"synthesis/seed_{seed}/winner.json", {"seed": seed})
+        ledger = self.root / "synthesis/seed_33/proposal_ledger.jsonl"
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text("{}\n", encoding="utf-8")
+        self.assertEqual(read_chain_state(self.root, tests_pass=True).e3_seed_winner_count, 2)
+
+    def test_the_freeze_manifest_is_read_from_the_selection_directory(self) -> None:
+        self._write(FREEZE_ARTIFACT, {"status": "frozen"})
+        self.assertTrue(read_chain_state(self.root, tests_pass=True).artifact_freeze_manifest_valid)
+
+    def test_confirmation_reads_are_counted_from_the_tier3_decision(self) -> None:
+        """§16 allows exactly one, so a prior one has to be visible. §13 puts the
+        confirmation's own output at `tier3/final_decision.json`."""
+        self._write(FINAL_DECISION_ARTIFACT, {"decision": "NOT_CONFIRMED"})
+        self.assertEqual(read_chain_state(self.root, tests_pass=True).e5_runs_recorded, 1)
+
+    def test_a_disk_state_at_every_contract_path_permits_e5(self) -> None:
+        """The paths as a set. Each test above pins one; if any of them read a
+        path the writers do not use, the chain can never reach the last rung, and
+        this is the test that would catch it.
+        """
+        self._write("e0/closed_spec_count.json", {"gate_decision": "GO"})
+        self._write(BRIDGE_ARTIFACT, {"decision": "PASS"})
+        self._write(TIER3_BUILD_ARTIFACT, {"status": "frozen"})
+        self._write(
+            PRESEARCH_ENVELOPE_ARTIFACT,
+            {"status": "frozen", "union_behavior_class_count": 12},
+        )
+        for seed in (11, 22, 33):
+            self._write(f"synthesis/seed_{seed}/winner.json", {"seed": seed})
+        self._write(FREEZE_ARTIFACT, {"status": "frozen"})
+
+        gates = evaluate_chain(read_chain_state(self.root, tests_pass=True))
+        for stage in STAGES:
+            self.assertTrue(
+                gate_for_stage(gates, stage).permits,
+                f"{stage}: {gate_for_stage(gates, stage).reason}",
+            )
 
 
 if __name__ == "__main__":
