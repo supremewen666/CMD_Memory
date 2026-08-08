@@ -357,7 +357,9 @@ def _coexisting_case_mappings(
             "text": fact,
             "source_memory_id": f"m_pref{pref_index}",
             "source_event_id": f"e_pref{pref_index}",
-            "required_phrases": _required_phrases(preferences[pref_index - 1]),
+            "required_phrases": _preference_phrases(
+                preferences[pref_index - 1], fact, gold_answer
+            ),
         }
         for pref_index, fact in enumerate(facts, start=1)
     ]
@@ -968,6 +970,26 @@ def _answer_grounded_phrases(
         return _required_phrases(item_text)
     scored.sort()
     return [clause for _overlap, _index, clause in scored[:limit]]
+
+
+def _preference_phrases(
+    preference: str,
+    fact: str,
+    gold_answer: str,
+) -> list[str]:
+    """Phrases for one coexisting preference, grounded in its own stored item.
+
+    MemFail's ``preferences`` column is a topic label, not a span of the fact
+    sentence. It usually appears verbatim in the fact, and keeping it is what
+    makes the requirement a tight single-preference check. But for 12 of the
+    CSV's 340 statements the label is a paraphrase the fact never spells out —
+    "documentary" annotates a fact reading "Documentaries" — leaving a
+    requirement no stored item satisfies. Those fall back to the fact's own
+    wording.
+    """
+    if preference.strip() and preference.strip().casefold() in fact.casefold():
+        return _required_phrases(preference)
+    return _answer_grounded_phrases(fact, gold_answer)
 
 
 def _slug_category(row_id: str) -> str:

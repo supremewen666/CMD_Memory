@@ -1,0 +1,701 @@
+{
+  "domains": [
+    {
+      "data_sha256": "df655c77b3626f9a2cb5b6c4783e2db06c1bba6d12e9ee2192206cd1b2b44eda",
+      "domain": "memtrace_kp",
+      "eligible": true,
+      "families": 182,
+      "intent_constructibility_rate": 1.0,
+      "intents_constructed": 2047,
+      "invalid_cases": [],
+      "invalid_reason_codes": {},
+      "null_cases": 1035,
+      "one_to_one_joins": 2047,
+      "perturbations_per_case": {
+        "0": 1035,
+        "1": 1012
+      },
+      "probe_arms": {
+        "hand_seed_demote": 1.0,
+        "hand_seed_suppress": 1.0,
+        "no_op": 0.5056179775280899,
+        "suppress_gold": 0.0
+      },
+      "total_runtime_cases": 2047
+    },
+    {
+      "data_sha256": "1068e8185530aabd0e799eb633b81cf3bc197543d6c1e2e01ddf12613f914612",
+      "domain": "stale_item",
+      "eligible": true,
+      "families": 400,
+      "intent_constructibility_rate": 1.0,
+      "intents_constructed": 1200,
+      "invalid_cases": [],
+      "invalid_reason_codes": {},
+      "null_cases": 0,
+      "one_to_one_joins": 1200,
+      "perturbations_per_case": {
+        "1": 1200
+      },
+      "probe_arms": {
+        "hand_seed_demote": 1.0,
+        "hand_seed_suppress": 1.0,
+        "no_op": 0.0,
+        "suppress_gold": 0.0
+      },
+      "total_runtime_cases": 1200
+    },
+    {
+      "data_sha256": "65f0d873be65ebaac796d4b1a62669d2db88a31e1d5b69666858e6e5dd62ab50",
+      "domain": "memfail",
+      "eligible": false,
+      "families": 466,
+      "intent_constructibility_rate": 0.7789017341040463,
+      "intents_constructed": 539,
+      "invalid_cases": [
+        {
+          "case_id": "memfail-coexisting-tv-show-genres-q0",
+          "reason_code": "gold_phrases_absent"
+        },
+        {
+          "case_id": "memfail-coexisting-cycling-types-q0",
+          "reason_code": "gold_phrases_absent"
+        },
+        {
+          "case_id": "memfail-coexisting-evening-routine-habits-q0",
+          "reason_code": "gold_phrases_absent"
+        },
+        {
+          "case_id": "memfail-coexisting-hair-care-styles-q0",
+          "reason_code": "gold_phrases_absent"
+        },
+        {
+          "case_id": "memfail-coexisting-sports-q0",
+          "reason_code": "gold_phrases_absent"
+        },
+        {
+          "case_id": "memfail-coexisting-breakfast-foods-q0",
+          "reason_code": "gold_phrases_absent"
+        },
+        {
+          "case_id": "memfail-coexisting-types-of-volunteering-q0",
+          "reason_code": "gold_phrases_absent"
+        },
+        {
+          "case_id": "memfail-coexisting-self-care-activities-q0",
+          "reason_code": "gold_phrases_absent"
+        },
+        {
+          "case_id": "memfail-coexisting-podcast-topics-q0",
+          "reason_code": "gold_phrases_absent"
+        },
+        {
+          "case_id": "memfail-coexisting-subscription-box-types-q0",
+          "reason_code": "gold_phrases_absent"
+        },
+        {
+          "case_id": "memfail-persona-yuki-tanaka-0000-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-felix-andersen-0001-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-nia-williams-0002-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-nia-williams-0002-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-hana-sato-0003-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-hana-sato-0003-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-elena-rossi-0004-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-tomas-costa-0006-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-tomas-costa-0006-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-caleb-foster-0008-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-marcus-lee-0009-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-marcus-lee-0009-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-yuki-tanaka-0011-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-yuki-tanaka-0011-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-yuki-tanaka-0011-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-anya-volkov-0012-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-mei-zhang-0013-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-mei-zhang-0013-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-zoe-kim-0014-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-zoe-kim-0014-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-zoe-kim-0014-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-mei-zhang-0015-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-mei-zhang-0015-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-leila-haddad-0016-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-maya-patel-0017-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-maya-patel-0017-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-maya-patel-0017-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-sasha-petrov-0018-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-sasha-petrov-0018-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-sasha-petrov-0018-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-noah-brooks-0019-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-noah-brooks-0019-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-nia-williams-0020-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-nia-williams-0020-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-nia-williams-0021-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-owen-murphy-0023-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-theo-laurent-0024-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-theo-laurent-0024-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ethan-rivera-0025-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ethan-rivera-0025-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ethan-rivera-0025-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-felix-andersen-0026-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-nia-williams-0027-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-clara-schmidt-0028-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-caleb-foster-0029-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-noah-brooks-0031-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-yuki-tanaka-0032-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-tomas-costa-0034-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-tomas-costa-0034-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-anya-volkov-0035-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-owen-murphy-0037-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-owen-murphy-0037-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ravi-iyer-0039-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ravi-iyer-0039-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-nia-williams-0040-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-caleb-foster-0041-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-caleb-foster-0041-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-caleb-foster-0041-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-diego-alvarez-0042-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-diego-alvarez-0042-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-diego-alvarez-0042-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-sasha-petrov-0043-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-elena-rossi-0044-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-elena-rossi-0044-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-marcus-lee-0046-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-marcus-lee-0046-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-marcus-lee-0046-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-yuki-tanaka-0047-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-yuki-tanaka-0047-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-zoe-kim-0048-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-priya-shah-0049-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-priya-shah-0049-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-priya-shah-0049-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-mei-zhang-0050-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-mei-zhang-0050-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-leila-haddad-0051-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ava-thompson-0052-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-clara-schmidt-0053-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ravi-iyer-0055-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ravi-iyer-0055-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ravi-iyer-0055-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-caleb-foster-0056-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-tomas-costa-0057-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-tomas-costa-0057-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-hana-sato-0059-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-amara-okafor-0060-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-amara-okafor-0061-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ethan-rivera-0062-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-jonas-weber-0063-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-jonas-weber-0064-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-jonas-weber-0064-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-jonas-weber-0064-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-priya-shah-0065-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-priya-shah-0065-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-priya-shah-0065-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-imani-johnson-0067-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-mei-zhang-0068-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-priya-shah-0069-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-priya-shah-0070-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-priya-shah-0070-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-daniel-park-0071-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-daniel-park-0071-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-diego-alvarez-0073-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-diego-alvarez-0073-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-imani-johnson-0074-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-imani-johnson-0074-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-leila-haddad-0075-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-hana-sato-0076-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-sasha-petrov-0077-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-felix-andersen-0078-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-felix-andersen-0078-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-felix-andersen-0078-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-caleb-foster-0079-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-caleb-foster-0079-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-imani-johnson-0082-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-anya-volkov-0083-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-anya-volkov-0083-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-leila-haddad-0084-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-mei-zhang-0085-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-mei-zhang-0085-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-mei-zhang-0085-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-theo-laurent-0086-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-amara-okafor-0087-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-tomas-costa-0088-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-amara-okafor-0090-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ravi-iyer-0091-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ravi-iyer-0091-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-ravi-iyer-0091-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-noah-brooks-0093-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-noah-brooks-0093-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-felix-andersen-0094-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-felix-andersen-0094-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-tomas-costa-0095-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-tomas-costa-0095-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-maya-patel-0096-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-maya-patel-0096-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-sasha-petrov-0097-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-sasha-petrov-0097-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-jonas-weber-0098-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-jonas-weber-0098-q2",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-theo-laurent-0099-q0",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-theo-laurent-0099-q1",
+          "reason_code": "unknown"
+        },
+        {
+          "case_id": "memfail-persona-theo-laurent-0099-q2",
+          "reason_code": "unknown"
+        }
+      ],
+      "invalid_reason_codes": {
+        "gold_phrases_absent": 10,
+        "unknown": 143
+      },
+      "null_cases": 157,
+      "one_to_one_joins": 539,
+      "perturbations_per_case": {
+        "0": 157,
+        "1": 382
+      },
+      "probe_arms": {
+        "hand_seed_demote": 0.8701298701298701,
+        "hand_seed_suppress": 0.8701298701298701,
+        "no_op": 0.2912801484230056,
+        "suppress_gold": 0.0
+      },
+      "total_runtime_cases": 692
+    }
+  ],
+  "eligible_domains": [
+    "memtrace_kp",
+    "stale_item"
+  ],
+  "ineligible_domains": [
+    "memfail"
+  ],
+  "llm_calls": 0,
+  "protocol_version": "route-a-e-1",
+  "runtime_uses_gold": false,
+  "state_fitness_version": "state-fitness-v1",
+  "state_intent_schema_version": "state-intent-v1",
+  "token_budget": 100000
+}

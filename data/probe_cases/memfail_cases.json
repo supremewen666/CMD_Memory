@@ -12715,7 +12715,7 @@
         "source_memory_id": "m_pref3",
         "source_event_id": "e_pref3",
         "required_phrases": [
-          "documentary"
+          "Documentaries are my choice when I want to learn about real-world topics in depth"
         ],
         "granularity_level": null
       }
@@ -14537,7 +14537,7 @@
         "source_memory_id": "m_pref3",
         "source_event_id": "e_pref3",
         "required_phrases": [
-          "commuting by bike"
+          "I often use my bike for commuting because it's eco-friendly and saves me time in traffic"
         ],
         "granularity_level": null
       }
@@ -15137,7 +15137,7 @@
         "source_memory_id": "m_pref1",
         "source_event_id": "e_pref1",
         "required_phrases": [
-          "reading"
+          "I like to read a book for at least 30 minutes to wind down before bed"
         ],
         "granularity_level": null
       },
@@ -17931,7 +17931,7 @@
         "source_memory_id": "m_pref1",
         "source_event_id": "e_pref1",
         "required_phrases": [
-          "curly natural"
+          "I like to embrace my curls and keep them hydrated for a natural look"
         ],
         "granularity_level": null
       },
@@ -20495,7 +20495,7 @@
         "source_memory_id": "m_pref1",
         "source_event_id": "e_pref1",
         "required_phrases": [
-          "basketball"
+          "I like shooting hoops whenever I get some free time outdoors"
         ],
         "granularity_level": null
       },
@@ -20847,7 +20847,7 @@
         "source_memory_id": "m_pref5",
         "source_event_id": "e_pref5",
         "required_phrases": [
-          "bagels"
+          "I like to enjoy a toasted bagel with cream cheese as a simple morning treat"
         ],
         "granularity_level": null
       }
@@ -21126,7 +21126,7 @@
         "source_memory_id": "m_pref1",
         "source_event_id": "e_pref1",
         "required_phrases": [
-          "animal shelter work"
+          "I dedicate time to helping at animal shelters because I love caring for pets in need"
         ],
         "granularity_level": null
       },
@@ -21156,7 +21156,7 @@
         "source_memory_id": "m_pref4",
         "source_event_id": "e_pref4",
         "required_phrases": [
-          "food bank assistance"
+          "Working at food banks allows me to help ensure families have access to meals"
         ],
         "granularity_level": null
       }
@@ -23470,7 +23470,7 @@
         "source_memory_id": "m_pref2",
         "source_event_id": "e_pref2",
         "required_phrases": [
-          "journaling"
+          "Writing in my journal allows me to reflect and process my thoughts deeply"
         ],
         "granularity_level": null
       },
@@ -25241,7 +25241,7 @@
         "source_memory_id": "m_pref1",
         "source_event_id": "e_pref1",
         "required_phrases": [
-          "technology"
+          "Tech podcasts keep me updated on the latest gadgets and software trends"
         ],
         "granularity_level": null
       },
@@ -25897,7 +25897,7 @@
         "source_memory_id": "m_pref2",
         "source_event_id": "e_pref2",
         "required_phrases": [
-          "book clubs"
+          "Book club subscriptions help me discover new authors and genres regularly"
         ],
         "granularity_level": null
       },
@@ -25917,7 +25917,7 @@
         "source_memory_id": "m_pref4",
         "source_event_id": "e_pref4",
         "required_phrases": [
-          "beauty products"
+          "Beauty product boxes are my way to try out the latest skincare and makeup trends"
         ],
         "granularity_level": null
       },
