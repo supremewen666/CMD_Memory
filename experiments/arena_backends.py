@@ -1,7 +1,7 @@
 """Concrete dual-score backends for observational arena execution."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import logging
@@ -32,6 +32,7 @@ from cmd_audit.scoring.llm import (
 from experiments.arena_runner_common import (
     ArenaCase,
     BestOfNControlExecution,
+    ContextStuffingExecution,
     DualScoreExecution,
 )
 from experiments.experiment_runner_common import (
@@ -60,6 +61,14 @@ _ARENA_ACTION_WHITELIST: frozenset[str] = frozenset(
         "item_conflict",
     }
 )
+
+#: Frozen token policy for the named context-stuffing baseline. Whitespace
+#: tokens rather than model tokens, so the cap is recomputable from the artifact
+#: without depending on which answerer's tokenizer was in use. The cap sits
+#: below the 8192-token serving limit with room for the prompt scaffold and the
+#: generated answer.
+CONTEXT_STUFFING_TOKEN_POLICY = "whitespace_token_cap"
+CONTEXT_STUFFING_TOKEN_BUDGET = 4000
 
 REFERENCE_FREE_RUBRIC_VERSION = "arena-reference-free-v2"
 _REFERENCE_FREE_SYSTEM_PROMPT = """\
@@ -230,6 +239,11 @@ class VLLMDualScoreArenaBackend:
     @property
     def deposited_events(self) -> tuple[ChainDepositionEvent, ...]:
         return tuple(self._deposited)
+
+    #: Declared on the backend so the manifest records the policy actually in
+    #: force rather than a constant the runner hopes matches.
+    context_stuffing_token_policy = CONTEXT_STUFFING_TOKEN_POLICY
+    context_stuffing_token_budget = CONTEXT_STUFFING_TOKEN_BUDGET
 
     @property
     def selection_judge_identity(self) -> str:
@@ -638,6 +652,92 @@ class VLLMDualScoreArenaBackend:
             selection_judge_calls=selection_calls,
         )
 
+    def evaluate_context_stuffing(
+        self,
+        case: ArenaCase,
+        *,
+        origin_context: str,
+        token_budget: int = CONTEXT_STUFFING_TOKEN_BUDGET,
+    ) -> ContextStuffingExecution:
+        """No-search baseline: stuff the whole pool in, answer once.
+
+        Best-of-N already sees the same flat pool, so what this isolates is
+        whether the pool *alone* recovers the answer -- no routing, no
+        operators, no selection over candidates. It therefore spends exactly one
+        answer call and zero selection-judge calls, and reports its own gain
+        against the same unrepaired baseline the other arms use.
+
+        Items are admitted in order under a frozen whitespace-token cap. When
+        the pool does not fit, the arm says so rather than quietly becoming a
+        different baseline on the cases where stuffing overflows.
+        """
+        view = self._runtime_view(case)
+        included, truncated = _fit_items_to_token_budget(
+            view.candidate_items,
+            origin_context,
+            token_budget,
+        )
+        stuffed_context = _unstructured_pool_context(origin_context, included)
+        prompt = "\n\n".join(
+            (
+                "CONTEXT STUFFING BASELINE.",
+                "Do not diagnose a pipeline action or use a repair taxonomy.",
+                "Every retrieved item is present; none has been ranked,"
+                " filtered, or repaired.",
+                "CONTEXT AND FLAT MEMORY POOL:",
+                stuffed_context,
+                "QUERY:",
+                view.query,
+                "ANSWER:",
+            )
+        )
+        policy = ContextStuffingExecution(
+            shadow_gold_gain=None,
+            answer_calls=0,
+            selection_judge_calls=0,
+            token_policy=CONTEXT_STUFFING_TOKEN_POLICY,
+            token_budget=token_budget,
+            items_offered=len(view.candidate_items),
+            items_included=len(included),
+            truncated=truncated,
+        )
+        try:
+            answer = self.answer_client.generate(
+                prompt,
+                system=AGENT_SYSTEM_PROMPT,
+            )
+        except Exception as exc:
+            _logger.warning(
+                "context-stuffing answer failed case=%s: %s",
+                case.case_id,
+                exc,
+            )
+            return replace(
+                policy,
+                answer_calls=1,
+                status=f"answer_failed:{type(exc).__name__}",
+            )
+        baseline_answer = self._answer(case, origin_context, purpose="baseline")
+        try:
+            baseline_shadow = self._shadow_score(case, baseline_answer)
+            stuffed_shadow = self._shadow_score(case, answer)
+        except Exception as exc:
+            _logger.warning(
+                "context-stuffing shadow evaluation failed case=%s: %s",
+                case.case_id,
+                exc,
+            )
+            return replace(
+                policy,
+                answer_calls=1,
+                status=f"shadow_evaluation_failed:{type(exc).__name__}",
+            )
+        return replace(
+            policy,
+            answer_calls=1,
+            shadow_gold_gain=stuffed_shadow - baseline_shadow,
+        )
+
     def _runtime_view(self, case: ArenaCase) -> RuntimeCaseView:
         cached = self._runtime_views.get(case.case_id)
         if cached is not None:
@@ -883,6 +983,27 @@ def _reference_free_prompt(
             answer,
         )
     )
+
+
+def _fit_items_to_token_budget(
+    items: Sequence[MemoryItem],
+    origin_context: str,
+    token_budget: int,
+) -> tuple[list[MemoryItem], bool]:
+    """Admit items in retrieval order until the token cap is reached.
+
+    Whitespace tokens, not model tokens: the cap has to be reproducible from
+    the artifact alone, without a tokenizer that varies by answerer.
+    """
+    spent = len(origin_context.split())
+    included: list[MemoryItem] = []
+    for item in items:
+        cost = len(item.text.split())
+        if spent + cost > token_budget:
+            return included, True
+        spent += cost
+        included.append(item)
+    return included, False
 
 
 def _unstructured_pool_context(

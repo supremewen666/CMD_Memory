@@ -65,6 +65,16 @@ def run_arena_cli(
         ),
     )
     parser.add_argument(
+        "--context-stuffing-control",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Run the named context-stuffing baseline: the whole retrieved pool "
+            "in one prompt under a frozen token cap, one answer call, no "
+            "selection."
+        ),
+    )
+    parser.add_argument(
         "--scope-ledger",
         default="",
         help=(
@@ -208,6 +218,7 @@ def run_arena_cli(
         perturb_stable_windows=args.perturb_stable_windows,
         case_workers=args.case_workers,
         enable_best_of_n_control=args.best_of_n_control,
+        enable_context_stuffing_control=args.context_stuffing_control,
         dataset_source_path=args.cases,
         scope_policy=scope_policy,
         item_gate_extractor=item_gate_extractor,

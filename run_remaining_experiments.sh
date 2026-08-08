@@ -32,6 +32,16 @@ SIGIL_ARTIFACTS="$CMD_ROOT/artifacts/sigil_qd"
 QWVLLM_PORT=8000
 LLAMA_JUDGE_PORT=8000
 LLAMA_ANSWER_PORT=8001
+# Cross-judge lane: a third model serving only the *evaluation* judge, so the
+# answerer and selection judge stay byte-identical to the headline arm and the
+# judge is the single thing that changes. Reusing either existing model would
+# not work — selection is already Llama, so an evaluation judge on Llama trips
+# the same-model guard in _assert_distinct_judge_identities, and Qwen is the
+# headline evaluation judge, which is what we are trying to vary.
+CROSSJUDGE_PORT="${CROSSJUDGE_PORT:-8002}"
+CROSSJUDGE_MODEL="${CROSSJUDGE_MODEL:-mistral-7b-instruct-v0.3}"
+CROSSJUDGE_MODEL_REPO="${CROSSJUDGE_MODEL_REPO:-mistralai/Mistral-7B-Instruct-v0.3}"
+CROSSJUDGE_MODEL_DIRNAME="${CROSSJUDGE_MODEL_DIRNAME:-Mistral-7B-Instruct-v0.3}"
 PID_FILE="/tmp/vllm_shared.pid"
 LOG_FILE="/tmp/vllm_shared.log"
 JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://localhost:${LLAMA_JUDGE_PORT}/v1}"
@@ -41,6 +51,7 @@ CMD_CASE_WORKERS="${CMD_CASE_WORKERS:-32}"
 VLLM_READY_TIMEOUT_SECONDS="${VLLM_READY_TIMEOUT_SECONDS:-300}"
 CMD_PRETRAINED_LMS_ROOT="${CMD_PRETRAINED_LMS_ROOT:-$HOME/pretrained_lms}"
 VLLM_QWEN_GPU_MEMORY_UTILIZATION="${VLLM_QWEN_GPU_MEMORY_UTILIZATION:-0.25}"
+VLLM_CROSSJUDGE_GPU_MEMORY_UTILIZATION="${VLLM_CROSSJUDGE_GPU_MEMORY_UTILIZATION:-0.22}"
 VLLM_LLAMA_GPU_MEMORY_UTILIZATION="${VLLM_LLAMA_GPU_MEMORY_UTILIZATION:-0.50}"
 
 # ── 参数 ────────────────────────────────────────────────────────────────────
@@ -74,7 +85,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --detach:       run in a new session; logs to the role-specific artifacts directory"
       echo ""
       echo "  --only:  skip straight to one named phase (memtrace_seed24, memtrace_seed124,"
-      echo "           memtrace_seed224, memfail, stale, memtrace_llama; SIGIL roles:"
+      echo "           memtrace_seed224, memfail, stale, memtrace_llama,"
+      echo "           memtrace_crossjudge, memtrace_stuffing; SIGIL roles:"
       echo "           memtrace, memfail, stale)"
       exit 0 ;;
     *)
@@ -132,6 +144,30 @@ resolve_qwen_dir() {
   env PYTHONPATH="$CMD_VLLM_OVERLAY" HF_HUB_OFFLINE=1 python - <<'PY'
 from huggingface_hub import snapshot_download
 print(snapshot_download("Qwen/Qwen2.5-7B-Instruct", local_files_only=True))
+PY
+}
+
+resolve_crossjudge_dir() {
+  if [[ -n "${CMD_CROSSJUDGE_MODEL_DIR:-}" ]]; then
+    if [[ ! -d "$CMD_CROSSJUDGE_MODEL_DIR" ]]; then
+      echo "ERROR: CMD_CROSSJUDGE_MODEL_DIR is not a directory: $CMD_CROSSJUDGE_MODEL_DIR" >&2
+      return 1
+    fi
+    printf '%s\n' "$CMD_CROSSJUDGE_MODEL_DIR"
+    return 0
+  fi
+
+  local pretrained_dir="${CMD_PRETRAINED_LMS_ROOT}/${CROSSJUDGE_MODEL_DIRNAME}"
+  if [[ -d "$pretrained_dir" ]]; then
+    printf '%s\n' "$pretrained_dir"
+    return 0
+  fi
+
+  env PYTHONPATH="$CMD_VLLM_OVERLAY" HF_HUB_OFFLINE=1 \
+    CROSSJUDGE_MODEL_REPO="$CROSSJUDGE_MODEL_REPO" python - <<'PY'
+import os
+from huggingface_hub import snapshot_download
+print(snapshot_download(os.environ["CROSSJUDGE_MODEL_REPO"], local_files_only=True))
 PY
 }
 
@@ -290,6 +326,46 @@ start_llama_dual_vllm() {
   fi
 }
 
+start_crossjudge_vllm() {
+  # Third engine, evaluation judge only. Started alongside the dual pair, so
+  # three 8B engines share the GPU; give this one an explicit small share.
+  if curl --noproxy '*' -s "localhost:${CROSSJUDGE_PORT}/v1/models" >/dev/null 2>&1; then
+    echo "[vLLM] cross-judge endpoint already up on ${CROSSJUDGE_PORT}, reusing"
+    return 0
+  fi
+
+  local model_dir
+  model_dir="$(resolve_crossjudge_dir)"
+  echo "[vLLM] cross-judge dir: $model_dir"
+
+  nohup env \
+    PYTHONPATH="$CMD_VLLM_OVERLAY" \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    CUDA_VISIBLE_DEVICES=0 \
+    vllm serve "$model_dir" \
+    --host 127.0.0.1 \
+    --served-model-name "$CROSSJUDGE_MODEL" \
+    --port "$CROSSJUDGE_PORT" \
+    --gpu-memory-utilization "$VLLM_CROSSJUDGE_GPU_MEMORY_UTILIZATION" \
+    --max-model-len 8192 \
+    --max-num-seqs 32 \
+    --enable-prefix-caching \
+    > /tmp/vllm_crossjudge.log 2>&1 &
+  echo "[vLLM] cross-judge pid $!"
+  wait_for_vllm_endpoint "$CROSSJUDGE_PORT" "cross-judge"
+}
+
+stop_crossjudge_vllm() {
+  local pid
+  pid=$(lsof -ti ":$CROSSJUDGE_PORT" 2>/dev/null || true)
+  if [[ -n "$pid" ]]; then
+    echo "[vLLM] stopping cross-judge port $CROSSJUDGE_PORT pid $pid"
+    kill "$pid" || true
+  fi
+  sleep 2
+}
+
 stop_llama_dual_vllm() {
   for port in "$LLAMA_JUDGE_PORT" "$LLAMA_ANSWER_PORT"; do
     local pid
@@ -333,6 +409,17 @@ llama_dual_env() {
   export LLM_TIMEOUT=120
   export NO_PROXY="localhost,127.0.0.1"
   export no_proxy="localhost,127.0.0.1"
+}
+
+crossjudge_env() {
+  # Same answerer and selection judge as llama_dual_env; only the evaluation
+  # (shadow) judge moves. That is what makes the rerun a judge-robustness
+  # check rather than a different experiment: if the headline survives here,
+  # it is not an artifact of the Qwen evaluation judge specifically.
+  llama_dual_env
+  export LLM_JUDGE_BASE_URL="http://localhost:${CROSSJUDGE_PORT}/v1"
+  export LLM_JUDGE_MODEL="$CROSSJUDGE_MODEL"
+  export LLM_JUDGE_API_KEY="${CROSSJUDGE_API_KEY:-dummy}"
 }
 
 gate_g0() {
@@ -423,6 +510,10 @@ run_analysis() {
       "${ARTIFACTS}/memfail_observations.jsonl" \
       "${ARTIFACTS}/stale_observations.jsonl" \
       "${ARTIFACTS}/memtrace_llama.jsonl" \
+      $([[ -s "${ARTIFACTS}/memtrace_crossjudge.jsonl" ]] \
+        && printf '%s' "${ARTIFACTS}/memtrace_crossjudge.jsonl") \
+      $([[ -s "${ARTIFACTS}/memtrace_stuffing.jsonl" ]] \
+        && printf '%s' "${ARTIFACTS}/memtrace_stuffing.jsonl") \
     --output-dir "${ARTIFACTS}/analysis"
   echo "[done] Analysis → ${ARTIFACTS}/analysis/"
 }
@@ -667,6 +758,22 @@ main_gpu1() {
       stop_llama_dual_vllm
       return 0
       ;;
+    memtrace_crossjudge)
+      # Seed 24 so the rows pair case-for-case against the seed-24 headline.
+      start_crossjudge_vllm
+      crossjudge_env
+      gate_g0
+      run_memtrace "crossjudge" --seed 24
+      stop_crossjudge_vllm
+      stop_llama_dual_vllm
+      return 0
+      ;;
+    memtrace_stuffing)
+      # Seed 24 again, so stuffing pairs against the same headline cases.
+      run_memtrace "stuffing" --seed 24 --context-stuffing-control
+      stop_llama_dual_vllm
+      return 0
+      ;;
     "")
       if $SMOKE; then
         run_memtrace "smoke" --seed 224
@@ -680,7 +787,8 @@ main_gpu1() {
       ;;
     *)
       echo "ERROR: unknown --only target: $ONLY" >&2
-      echo "  valid: memtrace_seed224, stale, memtrace_llama" >&2
+      echo "  valid: memtrace_seed224, stale, memtrace_llama, memtrace_crossjudge," >&2
+      echo "         memtrace_stuffing" >&2
       exit 1
       ;;
   esac

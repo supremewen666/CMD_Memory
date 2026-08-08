@@ -107,6 +107,25 @@ class BestOfNControlExecution:
     abstained: bool = False
 
 
+@dataclass(frozen=True)
+class ContextStuffingExecution:
+    """Outcome of the named no-search baseline.
+
+    Carries its token policy so the arm is reproducible: a pool silently cut to
+    fit would otherwise be a different baseline on every case.
+    """
+
+    shadow_gold_gain: float | None
+    answer_calls: int
+    selection_judge_calls: int
+    token_policy: str
+    token_budget: int
+    items_offered: int
+    items_included: int
+    truncated: bool
+    status: str = "ok"
+
+
 class DualScoreArenaBackend(Protocol):
     """Backend contract that keeps runtime and shadow scoring explicit."""
 
@@ -163,6 +182,9 @@ class ArenaManifest:
     fill_policy: str
     case_workers: int
     best_of_n_control_enabled: bool
+    context_stuffing_control_enabled: bool
+    context_stuffing_token_policy: str
+    context_stuffing_token_budget: int
     selection_judge_identity: str
     evaluation_judge_identity: str
     cmd_budget_accounting: str
@@ -198,6 +220,25 @@ class ArenaRunResult:
     structural_indication_events: tuple[StructuralIndicationEvent, ...]
 
 
+def _context_stuffing_fields(
+    execution: "ContextStuffingExecution | None",
+) -> dict[str, object]:
+    """Comparison-event fields for the stuffing arm, or the not-run defaults."""
+    if execution is None:
+        return {}
+    return {
+        "context_stuffing_shadow_gold_gain": execution.shadow_gold_gain,
+        "context_stuffing_answer_calls": execution.answer_calls,
+        "context_stuffing_selection_judge_calls": (
+            execution.selection_judge_calls
+        ),
+        "context_stuffing_items_offered": execution.items_offered,
+        "context_stuffing_items_included": execution.items_included,
+        "context_stuffing_truncated": execution.truncated,
+        "context_stuffing_status": execution.status,
+    }
+
+
 @dataclass(frozen=True)
 class ArenaArmComparisonEvent:
     arena_id: str
@@ -220,6 +261,15 @@ class ArenaArmComparisonEvent:
     budget_aligned: bool
     cmd_budget_source: str
     status: str
+    # Context-stuffing arm. Defaulted so runs with the arm disabled -- and
+    # artifacts written before it existed -- stay readable.
+    context_stuffing_shadow_gold_gain: float | None = None
+    context_stuffing_answer_calls: int = 0
+    context_stuffing_selection_judge_calls: int = 0
+    context_stuffing_items_offered: int = 0
+    context_stuffing_items_included: int = 0
+    context_stuffing_truncated: bool = False
+    context_stuffing_status: str = "not_run"
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
@@ -266,6 +316,7 @@ class _EvaluatedArenaCase:
     dual_by_skill: Mapping[str, DualScoreExecution]
     chain_executions: tuple[ChainExecution, ...]
     best_of_n: BestOfNControlExecution | None
+    context_stuffing: ContextStuffingExecution | None
     cmd_answer_calls: int
     cmd_selection_judge_calls: int
     cmd_budget_source: str
@@ -302,6 +353,7 @@ class ObservationalArenaRunner:
         perturb_stable_windows: int = 2,
         case_workers: int = 1,
         enable_best_of_n_control: bool = False,
+        enable_context_stuffing_control: bool = False,
         dataset_source_path: str | Path | None = None,
         scope_policy: ScopePolicy | None = None,
         item_gate_extractor: ItemGateExtractor | None = None,
@@ -367,6 +419,13 @@ class ObservationalArenaRunner:
             raise ValueError(
                 "best-of-N control requires backend.evaluate_best_of_n"
             )
+        if enable_context_stuffing_control and not callable(
+            getattr(backend, "evaluate_context_stuffing", None)
+        ):
+            raise ValueError(
+                "context-stuffing control requires "
+                "backend.evaluate_context_stuffing"
+            )
         self.cases = tuple(cases)
         self.backend = backend
         self.saturation_threshold = float(saturation_threshold)
@@ -404,6 +463,9 @@ class ObservationalArenaRunner:
         self.perturb_stable_windows = int(perturb_stable_windows)
         self.case_workers = int(case_workers)
         self.enable_best_of_n_control = bool(enable_best_of_n_control)
+        self.enable_context_stuffing_control = bool(
+            enable_context_stuffing_control
+        )
         self.scope_policy = scope_policy or ScopePolicy()
         self.item_gate_extractor = item_gate_extractor
         self.dataset_fingerprint = build_arena_dataset_fingerprint(
@@ -561,6 +623,7 @@ class ObservationalArenaRunner:
                         ),
                         cmd_budget_source=evaluated.cmd_budget_source,
                         status=control.status,
+                        **_context_stuffing_fields(evaluated.context_stuffing),
                     )
                 )
             candidate_catalog.update(
@@ -767,6 +830,15 @@ class ObservationalArenaRunner:
                 fill_policy="explicit_routed_no_diagnosis_excluded_from_cmd_selection",
                 case_workers=self.case_workers,
                 best_of_n_control_enabled=self.enable_best_of_n_control,
+                context_stuffing_control_enabled=(
+                    self.enable_context_stuffing_control
+                ),
+                context_stuffing_token_policy=str(
+                    getattr(self.backend, "context_stuffing_token_policy", "")
+                ),
+                context_stuffing_token_budget=int(
+                    getattr(self.backend, "context_stuffing_token_budget", 0)
+                ),
                 selection_judge_identity=str(
                     getattr(self.backend, "selection_judge_identity", "")
                 ),
@@ -1173,6 +1245,18 @@ class ObservationalArenaRunner:
             if self.enable_best_of_n_control and cmd_answer_calls > 0
             else None
         )
+        # Deliberately not gated on cmd_answer_calls: stuffing spends a fixed
+        # single call by definition, so it is not budget-matched to CMD the way
+        # best-of-N is, and a CMD arm that made no calls still needs the
+        # baseline measured on that case.
+        context_stuffing = (
+            self.backend.evaluate_context_stuffing(
+                case,
+                origin_context=case.base_context,
+            )
+            if self.enable_context_stuffing_control
+            else None
+        )
         return _EvaluatedArenaCase(
             case=case,
             candidates=candidates,
@@ -1180,6 +1264,7 @@ class ObservationalArenaRunner:
             dual_by_skill=dual_by_skill,
             chain_executions=chain_executions,
             best_of_n=best_of_n,
+            context_stuffing=context_stuffing,
             cmd_answer_calls=cmd_answer_calls,
             cmd_selection_judge_calls=cmd_selection_judge_calls,
             cmd_budget_source=cmd_budget_source,

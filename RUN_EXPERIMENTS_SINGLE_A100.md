@@ -294,7 +294,8 @@ case stream
     └─ ChainObserver      C: co-activation, chain benefit spectrum, directionality
 
   → write_arena_artifacts  →  JSONL (每行一个 record, allow_nan=False)
-  → analyze_arena_results  →  CSVs (纯描述性, hypothesis_tests_run=false)
+  → analyze_arena_results  →  CSVs (描述性; 配对检验已计算,
+                                 hypothesis_test_role=descriptive_not_confirmatory)
 ```
 
 ---

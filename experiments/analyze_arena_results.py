@@ -13,6 +13,18 @@ from cmd_audit.core.math_utils import (
     is_finite_number as _finite,
     mean_finite as _mean,
 )
+from cmd_audit.eval.gold_free_identifiability import (
+    CaseRankingInput,
+    analyze_gold_free_agreement,
+    case_ranking_from_mappings,
+)
+from cmd_audit.eval.paired_stats import (
+    BOOTSTRAP_ITERATIONS,
+    bootstrap_paired_diff,
+    mcnemar_exact_p,
+    sign_test_p,
+    wilson_interval,
+)
 from experiments.arena_runner_common import (
     ARENA_DATASET_FINGERPRINT_VERSION,
     arena_case_ids_sha256,
@@ -24,6 +36,10 @@ DEFAULT_INPUTS = (
     "artifacts/arena/memfail_observations.jsonl",
     "artifacts/arena/stale_observations.jsonl",
 )
+
+# Fixed so a rerun of the analyzer reproduces the same intervals from the same
+# artifacts. Analysis-only; unrelated to any arena run seed.
+BOOTSTRAP_SEED = 20260807
 
 
 def main() -> int:
@@ -89,6 +105,49 @@ def main() -> int:
             _arm_comparison_by_budget(arm_comparisons),
         )
     )
+    case_families = _case_families(observations)
+    significance = _arm_significance_summary(
+        arm_comparisons,
+        families=case_families,
+    )
+    paths.append(
+        _write_csv(
+            output / "cmd_vs_best_of_n_significance.csv",
+            significance,
+        )
+    )
+    calibration = _self_assessment_calibration(observations)
+    paths.append(
+        _write_csv(
+            output / "self_assessment_calibration.csv",
+            calibration,
+        )
+    )
+    null_protection = _null_protection_calibration(observations)
+    paths.append(
+        _write_csv(
+            output / "null_protection_calibration.csv",
+            null_protection,
+        )
+    )
+    abstention_curve = _abstention_curve_by_failure(observations)
+    paths.append(
+        _write_csv(
+            output / "abstention_curve_by_failure.csv",
+            abstention_curve,
+        )
+    )
+    stuffing_significance = _arm_significance_summary(
+        arm_comparisons,
+        families=case_families,
+        control_field=CONTEXT_STUFFING_GAIN_FIELD,
+    )
+    paths.append(
+        _write_csv(
+            output / "cmd_vs_context_stuffing_significance.csv",
+            stuffing_significance,
+        )
+    )
     niche_rows, overlap_rows, succession_rows = _ecology_tables(snapshots)
     paths.append(_write_csv(output / "niche_profiles.csv", niche_rows))
     paths.append(_write_csv(output / "niche_overlap.csv", overlap_rows))
@@ -133,8 +192,21 @@ def main() -> int:
     )
 
     summary = {
+        # The design stays observational: arms were not randomized over a
+        # pre-registered case stream, so a small p-value here bounds sampling
+        # noise, not confounding. Which tier the evidence sits in is a property
+        # of the design, not of whether tests were computed, so the two are
+        # recorded separately rather than collapsed into one flag.
         "analysis_kind": "descriptive_observational",
-        "hypothesis_tests_run": False,
+        "hypothesis_tests_run": True,
+        "hypothesis_test_role": "descriptive_not_confirmatory",
+        "hypothesis_test_family": "paired_sign_test_and_family_blocked_bootstrap",
+        "bootstrap_seed": BOOTSTRAP_SEED,
+        "bootstrap_iterations": BOOTSTRAP_ITERATIONS,
+        # Recorded so the curve is readable as a fixed sweep. Any tau adopted
+        # into the runtime still has to be chosen on one seed and confirmed on
+        # the others; this grid is descriptive only.
+        "abstention_thresholds": list(ABSTENTION_THRESHOLDS),
         "arena_count": len(manifests),
         "case_observations": len(observations),
         "saturation_events": len(saturation),
@@ -160,7 +232,30 @@ def main() -> int:
     print(f"[RESULT] saturation_events={len(saturation)}")
     print(f"[RESULT] arm_comparison_events={len(arm_comparisons)}")
     print(f"[RESULT] chain_attempts={len(attempts)}")
-    print("[RESULT] hypothesis_tests_run=0")
+    print(
+        "[RESULT] hypothesis_tests_run="
+        f"{len(significance) + len(stuffing_significance)}"
+        " role=descriptive_not_confirmatory"
+    )
+    print(
+        "[RESULT] context_stuffing_pairs="
+        f"{sum(int(row['n_paired']) for row in stuffing_significance)}"
+    )
+    no_fault = [row for row in null_protection if row["case_kind"] == "no_fault"]
+    no_fault_cases = sum(int(row["n"]) for row in no_fault)
+    false_positives = sum(
+        float(row["null_false_positive_rate"]) * int(row["n"])
+        for row in no_fault
+    )
+    print(f"[RESULT] no_fault_cases={no_fault_cases}")
+    print(
+        "[RESULT] null_false_positive_rate="
+        + (
+            f"{false_positives / no_fault_cases:.6f}"
+            if no_fault_cases
+            else "nan"
+        )
+    )
     print(f"[RESULT] output_manifest={manifest_path}")
     return 0
 
@@ -625,41 +720,427 @@ def _arm_comparison_by_budget(
     ]
 
 
+def _cmd_abstained(row: Mapping[str, object]) -> bool:
+    return bool(row.get("cmd_abstained")) or (
+        "cmd_abstained" not in row and row.get("cmd_selected_skill_id") is None
+    )
+
+
+def _control_abstained(row: Mapping[str, object]) -> bool:
+    return bool(row.get("best_of_n_abstained")) or str(
+        row.get("status", "")
+    ) == "abstained_nonpositive_gain"
+
+
+def _control_failed(row: Mapping[str, object]) -> bool:
+    return (
+        not _control_abstained(row)
+        and (
+            str(row.get("status", "ok")) != "ok"
+            or not _finite(row.get("best_of_n_shadow_gold_gain"))
+        )
+    )
+
+
+BEST_OF_N_GAIN_FIELD = "best_of_n_shadow_gold_gain"
+CONTEXT_STUFFING_GAIN_FIELD = "context_stuffing_shadow_gold_gain"
+
+
+def _paired_rows(
+    group: Sequence[Mapping[str, object]],
+    control_field: str = BEST_OF_N_GAIN_FIELD,
+) -> list[Mapping[str, object]]:
+    """Rows where both arms produced a measured, budget-aligned outcome.
+
+    The significance table and the descriptive summary must agree on which
+    pairs exist, so both read this one filter rather than each keeping a copy
+    that could drift.
+
+    Best-of-N is budget-matched to CMD and can abstain, so it carries the
+    alignment and abstention checks. Context stuffing spends a fixed single
+    call and never abstains, so for it a pair exists exactly when the arm
+    produced a finite gain -- which is also what keeps rows from runs with the
+    arm switched off out of the test.
+    """
+    if control_field == BEST_OF_N_GAIN_FIELD:
+        return [
+            row
+            for row in group
+            if bool(row.get("budget_aligned"))
+            and not _cmd_abstained(row)
+            and not _control_abstained(row)
+            and not _control_failed(row)
+            and _finite(row.get("cmd_shadow_gold_gain"))
+            and _finite(row.get(control_field))
+        ]
+    return [
+        row
+        for row in group
+        if not _cmd_abstained(row)
+        and _finite(row.get("cmd_shadow_gold_gain"))
+        and _finite(row.get(control_field))
+    ]
+
+
+#: Below this, a positive gold-free margin is a near-tie rather than genuine
+#: confidence, and a confidence-versus-agreement gap says little.
+NEGLIGIBLE_MARGIN = 1e-3
+
+
+def _self_assessment_calibration(
+    observations: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Self-confidence versus shadow agreement, per arena and failure type.
+
+    The reported safety mismatch (`1.0` against `0.27`) is two different rates
+    read as one: the runtime is confident on every case because the gold-free
+    argmax has a positive margin, while the shadow judge prefers a different
+    operator on most of them. Reporting only the gap invites reading it as a
+    broken safety self-score, so the row also names the operator that won
+    instead and how often the "confident" margin was negligible.
+    """
+    groups: dict[tuple[str, str], list[Mapping[str, object]]] = {}
+    for row in observations:
+        groups.setdefault(
+            (str(row.get("arena_id")), str(row.get("failure_type"))),
+            [],
+        ).append(row)
+
+    output: list[dict[str, object]] = []
+    for (arena_id, failure_type), group in sorted(groups.items()):
+        total = len(group)
+        confident = [
+            row
+            for row in group
+            if _finite(row.get("gold_free_margin"))
+            and float(row["gold_free_margin"]) > 0
+        ]
+        agreed = [
+            row
+            for row in group
+            if _finite(row.get("shadow_gold_margin"))
+            and float(row["shadow_gold_margin"]) > 0
+        ]
+        tiny = [
+            row
+            for row in confident
+            if float(row["gold_free_margin"]) < NEGLIGIBLE_MARGIN
+        ]
+        disagreements: dict[str, int] = {}
+        for row in group:
+            selected = row.get("selected_skill_id")
+            oracle = row.get("oracle_skill_id")
+            if oracle is None or oracle == selected:
+                continue
+            disagreements[str(oracle)] = disagreements.get(str(oracle), 0) + 1
+        top_alternative, top_count = ("", 0)
+        if disagreements:
+            top_alternative, top_count = max(
+                sorted(disagreements.items()),
+                key=lambda item: item[1],
+            )
+        self_rate = len(confident) / total
+        shadow_rate = len(agreed) / total
+        low, high = wilson_interval(len(agreed), total)
+        output.append(
+            {
+                "arena_id": arena_id,
+                "failure_type": failure_type,
+                "n": total,
+                "self_confident_rate": self_rate,
+                "shadow_agreement_rate": shadow_rate,
+                "calibration_gap": self_rate - shadow_rate,
+                "shadow_agreement_ci_low": low,
+                "shadow_agreement_ci_high": high,
+                "top1_agreement_rate": _rate_of(group, "top1_agreement"),
+                "tiny_margin_share": (
+                    len(tiny) / len(confident) if confident else 0.0
+                ),
+                "negligible_margin_threshold": NEGLIGIBLE_MARGIN,
+                "top_alternative_skill_id": top_alternative,
+                "top_alternative_share": top_count / total,
+            }
+        )
+    return output
+
+
+def _rate_of(group: Sequence[Mapping[str, object]], field: str) -> float:
+    return (
+        sum(1 for row in group if bool(row.get(field))) / len(group)
+        if group
+        else 0.0
+    )
+
+
+#: Margin thresholds swept for the abstention curve. Fixed here rather than
+#: taken from the data: choosing tau by looking at the same artifacts the curve
+#: reports on would be selecting a threshold and scoring it on one sample.
+ABSTENTION_THRESHOLDS = (0.0, 1e-4, 1e-3, 1e-2, 0.05, 0.1, 0.2)
+
+
+def _abstention_curve_by_failure(
+    observations: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Coverage against selective agreement as the margin threshold rises.
+
+    Route A for the granularity finding: the gold-free margin on that layer is
+    mostly a near-tie, so the question is whether declining to act on the
+    low-margin cases buys agreement on the rest. Each row is one
+    (arena, failure_type, tau) point, reusing the same ranking and curve code
+    the identifiability report uses so the two cannot disagree.
+
+    Only cases the runtime actually acted on are units here. A case it already
+    abstained on cannot be credited to the threshold, and counting it would
+    inflate the coverage the threshold appears to preserve.
+    """
+    groups: dict[tuple[str, str], list[CaseRankingInput]] = {}
+    for row in observations:
+        if bool(row.get("runtime_abstained")):
+            continue
+        gold_free = _score_mapping(row.get("gold_free_scores"))
+        shadow = _score_mapping(row.get("shadow_gold_scores"))
+        if not gold_free or set(gold_free) != set(shadow):
+            continue
+        groups.setdefault(
+            (str(row.get("arena_id")), str(row.get("failure_type"))),
+            [],
+        ).append(
+            case_ranking_from_mappings(
+                case_id=str(row.get("case_id")),
+                failure_type=str(row.get("failure_type")),
+                gold_free_scores=gold_free,
+                shadow_gold_scores=shadow,
+            )
+        )
+
+    output: list[dict[str, object]] = []
+    for (arena_id, failure_type), cases in sorted(groups.items()):
+        _, report = analyze_gold_free_agreement(
+            cases,
+            abstention_thresholds=ABSTENTION_THRESHOLDS,
+        )
+        for point in report.abstention_curve:
+            output.append(
+                {
+                    "arena_id": arena_id,
+                    "failure_type": failure_type,
+                    "threshold": point.threshold,
+                    "eligible_cases": point.eligible_cases,
+                    "retained_cases": point.retained_cases,
+                    "coverage": point.coverage,
+                    "agreements": point.agreements,
+                    "selective_agreement": (
+                        point.selective_agreement
+                        if point.selective_agreement is not None
+                        else ""
+                    ),
+                    "mean_retained_regret": (
+                        point.mean_supervised_regret
+                        if point.mean_supervised_regret is not None
+                        else ""
+                    ),
+                    "baseline_agreement": (
+                        report.overall_agreement
+                        if report.overall_agreement is not None
+                        else ""
+                    ),
+                }
+            )
+    return output
+
+
+def _score_mapping(value: object) -> dict[str, float | None]:
+    """Candidate score pairs from an artifact row, as a mapping."""
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return {}
+    result: dict[str, float | None] = {}
+    for entry in value:
+        if not isinstance(entry, Sequence) or len(entry) != 2:
+            continue
+        skill_id, gain = entry
+        result[str(skill_id)] = (
+            float(gain) if _finite(gain) else None
+        )
+    return result
+
+
+def _null_protection_calibration(
+    observations: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Abstention against what abstaining bought, per arena and failure type.
+
+    Abstention means the opposite thing on the two kinds of case, so a single
+    pooled rate is unreadable: on a `null` case there is no fault and holding
+    back is the correct action, while on a faulted case it is a missed repair.
+    Each row therefore declares its `case_kind` and is never averaged across
+    the two.
+
+    A false-positive count is also not yet a cost. Repairing a no-fault case is
+    only harmful if it lost ground, so the harmful share is reported from
+    `shadow_regret` alongside the raw false-positive rate -- the gap between the
+    two is the share of interventions that were needless but benign.
+    """
+    groups: dict[tuple[str, str], list[Mapping[str, object]]] = {}
+    for row in observations:
+        groups.setdefault(
+            (str(row.get("arena_id")), str(row.get("failure_type"))),
+            [],
+        ).append(row)
+
+    output: list[dict[str, object]] = []
+    for (arena_id, failure_type), group in sorted(groups.items()):
+        total = len(group)
+        acted = [row for row in group if not bool(row.get("runtime_abstained"))]
+        abstained = total - len(acted)
+        regrets = [
+            float(row["shadow_regret"])
+            for row in group
+            if _finite(row.get("shadow_regret"))
+        ]
+        harmful = [
+            row
+            for row in acted
+            if _finite(row.get("shadow_regret"))
+            and float(row["shadow_regret"]) > 0
+        ]
+        low, high = wilson_interval(abstained, total)
+        output.append(
+            {
+                "arena_id": arena_id,
+                "failure_type": failure_type,
+                # Named rather than inferred downstream: on `null` a high
+                # abstention rate is the protection working, and on every other
+                # stratum the same number is missed repairs.
+                "case_kind": "no_fault" if failure_type == "null" else "faulted",
+                "n": total,
+                "abstention_rate": abstained / total if total else 0.0,
+                "abstention_ci_low": low,
+                "abstention_ci_high": high,
+                "null_false_positive_rate": _rate_of(
+                    group, "null_false_positive"
+                ),
+                "harmful_intervention_rate": (
+                    len(harmful) / total if total else 0.0
+                ),
+                "harmful_share_of_acted": (
+                    len(harmful) / len(acted) if acted else 0.0
+                ),
+                "mean_shadow_regret": (
+                    sum(regrets) / len(regrets) if regrets else 0.0
+                ),
+            }
+        )
+    return output
+
+
+def _case_families(
+    observations: Sequence[Mapping[str, object]],
+) -> dict[str, str]:
+    """Case-to-family map, taken from the observation stream.
+
+    The arm comparison events carry no ``family_id``, so the blocking unit has
+    to come from the gold-free observations for the same cases.
+    """
+    return {
+        str(row["case_id"]): str(row["family_id"])
+        for row in observations
+        if row.get("case_id") and row.get("family_id")
+    }
+
+
+def _arm_significance_summary(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    families: Mapping[str, str] | None = None,
+    control_field: str = BEST_OF_N_GAIN_FIELD,
+) -> list[dict[str, object]]:
+    """Paired significance per arena x failure_type over the same pairs.
+
+    A descriptive win count cannot say whether an arm is actually ahead, so
+    each stratum also reports an exact sign test over discordant pairs and a
+    bootstrap interval on the mean paired difference. When a case-to-family map
+    is supplied the bootstrap resamples families, because sibling cases share
+    an injected fault and resampling them independently understates the spread.
+    """
+    groups: dict[tuple[str, str], list[Mapping[str, object]]] = {}
+    for row in rows:
+        if str(row.get("runtime_branch", "")) != "fix":
+            continue
+        groups.setdefault(
+            (str(row.get("arena_id")), str(row.get("failure_type"))),
+            [],
+        ).append(row)
+    return [
+        _significance_group_row(
+            arena_id, failure_type, group, families, control_field
+        )
+        for (arena_id, failure_type), group in sorted(groups.items())
+    ]
+
+
+_CONTROL_ARM_NAMES = {
+    BEST_OF_N_GAIN_FIELD: "best_of_n",
+    CONTEXT_STUFFING_GAIN_FIELD: "context_stuffing",
+}
+
+
+def _significance_group_row(
+    arena_id: str,
+    failure_type: str,
+    group: Sequence[Mapping[str, object]],
+    families: Mapping[str, str] | None,
+    control_field: str = BEST_OF_N_GAIN_FIELD,
+) -> dict[str, object]:
+    paired = _paired_rows(group, control_field)
+    deltas = [
+        float(row["cmd_shadow_gold_gain"]) - float(row[control_field])
+        for row in paired
+    ]
+    cmd_wins = sum(1 for delta in deltas if delta > 0)
+    control_wins = sum(1 for delta in deltas if delta < 0)
+
+    block_ids: list[str] | None = None
+    if families is not None:
+        resolved = [families.get(str(row.get("case_id"))) for row in paired]
+        # Blocking is only sound when every pair has a family; a partial map
+        # would silently mix blocked and unblocked units in one interval.
+        if resolved and all(family is not None for family in resolved):
+            block_ids = [str(family) for family in resolved]
+
+    diff, ci_low, ci_high = bootstrap_paired_diff(
+        deltas, seed=BOOTSTRAP_SEED, families=block_ids
+    )
+    return {
+        "arena_id": arena_id,
+        "failure_type": failure_type,
+        "control_arm": _CONTROL_ARM_NAMES.get(control_field, control_field),
+        "n_paired": len(paired),
+        "cmd_wins": cmd_wins,
+        "control_wins": control_wins,
+        "ties": len(deltas) - cmd_wins - control_wins,
+        "mean_paired_diff": diff,
+        "diff_ci_low": ci_low,
+        "diff_ci_high": ci_high,
+        "ci_excludes_zero": bool(ci_low > 0 or ci_high < 0),
+        "sign_test_p": sign_test_p(deltas),
+        "mcnemar_exact_p": mcnemar_exact_p(cmd_wins, control_wins),
+        "significant_at_05": bool(sign_test_p(deltas) < 0.05),
+        "bootstrap_unit": "family" if block_ids else "case",
+        "n_families": len(set(block_ids)) if block_ids else None,
+        "bootstrap_seed": BOOTSTRAP_SEED,
+        "bootstrap_iterations": BOOTSTRAP_ITERATIONS,
+    }
+
+
 def _comparison_group_row(
     arena_id: str,
     failure_type: str,
     group: Sequence[Mapping[str, object]],
 ) -> dict[str, object]:
-    def cmd_abstained(row: Mapping[str, object]) -> bool:
-        return bool(row.get("cmd_abstained")) or (
-            "cmd_abstained" not in row
-            and row.get("cmd_selected_skill_id") is None
-        )
-
-    def control_abstained(row: Mapping[str, object]) -> bool:
-        return bool(row.get("best_of_n_abstained")) or str(
-            row.get("status", "")
-        ) == "abstained_nonpositive_gain"
-
-    def control_failed(row: Mapping[str, object]) -> bool:
-        return (
-            not control_abstained(row)
-            and (
-                str(row.get("status", "ok")) != "ok"
-                or not _finite(row.get("best_of_n_shadow_gold_gain"))
-            )
-        )
-
-    paired = [
-        row
-        for row in group
-        if bool(row.get("budget_aligned"))
-        and not cmd_abstained(row)
-        and not control_abstained(row)
-        and not control_failed(row)
-        and _finite(row.get("cmd_shadow_gold_gain"))
-        and _finite(row.get("best_of_n_shadow_gold_gain"))
-    ]
+    cmd_abstained = _cmd_abstained
+    control_abstained = _control_abstained
+    control_failed = _control_failed
+    paired = _paired_rows(group)
     cmd_wins = sum(
         float(row["cmd_shadow_gold_gain"])
         > float(row["best_of_n_shadow_gold_gain"])

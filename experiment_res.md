@@ -33,8 +33,12 @@ confirmatory endpoint.
 - Authorization evidence: the stored Phase 0 selector evaluation over four
   MemTrace runs.
 - Context-only evidence: the six-arena unified analysis is explicitly
-  `descriptive_observational`; its manifest states
-  `hypothesis_tests_run=false`. It is not used to confirm a treatment effect.
+  `descriptive_observational`, and its manifest records
+  `hypothesis_test_role=descriptive_not_confirmatory`. Paired tests are now
+  computed, so the evidence tier rests on that role field and on the
+  observational design — arms were not randomized over a pre-registered case
+  stream — rather than on the absence of p-values. It is not used to confirm a
+  treatment effect.
 - CMD has no gradient-training loop. “Evolution” is online state/selector
   updating, so no loss curve, epoch count, or train/validation gap is invented.
 - The repository contains no `iterations/judge_v*.md`; therefore the
@@ -258,3 +262,17 @@ the frozen two-arena protocol, with a harmful endpoint direction on STALE.**
 [RESULT] repository_subtests_recorded=9
 [RESULT] repository_failures_recorded=0
 ```
+
+The block above is the recorded transcript of the run that produced
+`artifacts/arena/analysis_full/`, and its numbers are left as recorded. Both
+`observational_hypothesis_tests_run=0` and that directory's
+`hypothesis_tests_run=false` were true of the analyzer at that time: it computed
+no paired tests. The analyzer now computes them, so a rerun over the same six
+arenas reports 60 strata and writes four tables that directory does not contain
+(`cmd_vs_best_of_n_significance.csv`,
+`cmd_vs_context_stuffing_significance.csv`,
+`self_assessment_calibration.csv`, `abstention_curve_by_failure.csv`). The
+evidence tier is unchanged — `analysis_kind` is still
+`descriptive_observational`, and the new manifests record
+`hypothesis_test_role=descriptive_not_confirmatory` — so these tests bound
+sampling noise and still do not confirm a treatment effect.
