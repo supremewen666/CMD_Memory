@@ -1,0 +1,152 @@
+{
+  "closed_grammar_version": "route-a-closed-grammar-v1",
+  "code_revision": "93ca8c3004a816d2bb5609e24efd74f9ef883ba7fd04524d6723b3bc970ad799",
+  "domain_report": {
+    "memfail": {
+      "cases_total": 692,
+      "d_dev_cases": 434,
+      "data_sha256": "f30bcd2c47b6ec2d28502654d7d2936843ed4c052827835ec4a05d8b65161864",
+      "intent_constructibility_rate": 1.0,
+      "split_tiers": {
+        "D_dev": 434,
+        "D_search": 126,
+        "D_select": 132
+      }
+    },
+    "memtrace_kp": {
+      "cases_total": 2047,
+      "d_dev_cases": 1116,
+      "data_sha256": "df655c77b3626f9a2cb5b6c4783e2db06c1bba6d12e9ee2192206cd1b2b44eda",
+      "intent_constructibility_rate": 1.0,
+      "split_tiers": {
+        "D_dev": 1116,
+        "D_search": 401,
+        "D_select": 530
+      }
+    },
+    "stale_item": {
+      "cases_total": 1200,
+      "d_dev_cases": 792,
+      "data_sha256": "1068e8185530aabd0e799eb633b81cf3bc197543d6c1e2e01ddf12613f914612",
+      "intent_constructibility_rate": 1.0,
+      "split_tiers": {
+        "D_dev": 792,
+        "D_search": 219,
+        "D_select": 189
+      }
+    }
+  },
+  "domains": [
+    "memtrace_kp",
+    "stale_item",
+    "memfail"
+  ],
+  "excluded_data": [
+    "D_search",
+    "D_select",
+    "D_confirm",
+    "the selected synthesized artifact",
+    "observed artifact effect size"
+  ],
+  "formula": "n_raw = ceil((((z_alpha + z_power) * sigma_design) / mde) ** 2); n_tier3 = max(minimum_families, ceil(n_raw / usable_family_rate))",
+  "frozen_parameters": {
+    "good_spec_percentile": 90,
+    "mde": 0.1,
+    "minimum_families": 30,
+    "one_sided_alpha": 0.05,
+    "power": 0.9,
+    "usable_family_rate": 0.9,
+    "z_alpha": 1.644854,
+    "z_power": 1.281552
+  },
+  "ir_grammar_version": "route-a-ir-v1",
+  "llm_calls": 0,
+  "n_raw": 5,
+  "n_tier3": 30,
+  "payload_sha256": "9f0a352a9ae9040ddb38c33069b35f616b3fa334b4bb495ce2f8505c9f05f45f",
+  "per_domain_design_sd": [
+    {
+      "case_count": 1116,
+      "design_sd": 0.07438113219732559,
+      "domain": "memtrace_kp",
+      "eligible_spec_count": 4,
+      "eligible_specs": [
+        "injection_error -> retrieval_error",
+        "injection_error -> retrieval_error -> injection_error",
+        "retrieval_error -> injection_error",
+        "retrieval_error -> injection_error -> retrieval_error"
+      ],
+      "good_spec_cut": 0.6765232974910395,
+      "hard_pass_spec_count": 22,
+      "max_sd_pair": [
+        "injection_error -> retrieval_error",
+        "injection_error -> retrieval_error -> injection_error"
+      ],
+      "pair_count": 6
+    },
+    {
+      "case_count": 792,
+      "design_sd": 0.0,
+      "domain": "stale_item",
+      "eligible_spec_count": 22,
+      "eligible_specs": [
+        "granularity_error",
+        "granularity_error -> injection_error",
+        "granularity_error -> injection_error -> granularity_error",
+        "granularity_error -> injection_error -> retrieval_error",
+        "granularity_error -> retrieval_error",
+        "granularity_error -> retrieval_error -> granularity_error",
+        "granularity_error -> retrieval_error -> injection_error",
+        "identity",
+        "injection_error",
+        "injection_error -> granularity_error",
+        "injection_error -> granularity_error -> injection_error",
+        "injection_error -> granularity_error -> retrieval_error",
+        "injection_error -> retrieval_error",
+        "injection_error -> retrieval_error -> granularity_error",
+        "injection_error -> retrieval_error -> injection_error",
+        "retrieval_error",
+        "retrieval_error -> granularity_error",
+        "retrieval_error -> granularity_error -> injection_error",
+        "retrieval_error -> granularity_error -> retrieval_error",
+        "retrieval_error -> injection_error",
+        "retrieval_error -> injection_error -> granularity_error",
+        "retrieval_error -> injection_error -> retrieval_error"
+      ],
+      "good_spec_cut": 0.0,
+      "hard_pass_spec_count": 22,
+      "max_sd_pair": [
+        "granularity_error",
+        "granularity_error -> injection_error"
+      ],
+      "pair_count": 231
+    },
+    {
+      "case_count": 434,
+      "design_sd": 0.0,
+      "domain": "memfail",
+      "eligible_spec_count": 5,
+      "eligible_specs": [
+        "granularity_error -> injection_error -> retrieval_error",
+        "granularity_error -> retrieval_error",
+        "injection_error -> granularity_error -> retrieval_error",
+        "injection_error -> retrieval_error",
+        "retrieval_error"
+      ],
+      "good_spec_cut": 0.5821256038647343,
+      "hard_pass_spec_count": 22,
+      "max_sd_pair": [
+        "granularity_error -> injection_error -> retrieval_error",
+        "granularity_error -> retrieval_error"
+      ],
+      "pair_count": 10
+    }
+  ],
+  "protocol_version": "route-a-state-fitness-open-synthesis-v1",
+  "runtime_uses_gold": false,
+  "sigma_design": 0.07438113219732559,
+  "sigma_design_source_domain": "memtrace_kp",
+  "sizing_note": "sigma_design is the maximum family SD over eligible good-spec pairs, not over all specs: a no-op or gate-failing spec has near-zero paired variance and would understate n. \u00a74.3 forbids lowering power, raising the MDE, or reusing burned data to make n_tier3 fit.",
+  "state_fitness_version": "state-fitness-v1",
+  "state_intent_schema_version": "state-intent-v1"
+}
