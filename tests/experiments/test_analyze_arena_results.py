@@ -553,6 +553,70 @@ def test_self_assessment_calibration_names_what_the_oracle_preferred_instead():
     assert float(table["tiny_margin_share"]) == pytest.approx(0.0)
 
 
+def test_inapplicable_operators_are_separated_from_losing_ones():
+    """An operator whose precondition never holds is not a weak candidate.
+
+    Hand-built: on this layer skill-b returns exactly zero on both cases -- its
+    precondition never fires -- while skill-a moves the score on both. So skill-b
+    is inapplicable at rate 1.0 and skill-a at 0.0, and only skill-a is a real
+    competitor for the argmax.
+    """
+    rows = [
+        _observation(
+            failure_type="granularity_error",
+            gold_free_scores=[["skill-a", 0.02], ["skill-b", 0.0]],
+        ),
+        _observation(
+            failure_type="granularity_error",
+            gold_free_scores=[["skill-a", -0.03], ["skill-b", 0.0]],
+        ),
+    ]
+
+    table = {
+        row["skill_id"]: row
+        for row in analyze_arena_results._operator_applicability(rows)
+    }
+
+    assert float(table["skill-b"]["inapplicable_rate"]) == pytest.approx(1.0)
+    assert table["skill-b"]["never_applicable"] is True
+    assert float(table["skill-a"]["inapplicable_rate"]) == pytest.approx(0.0)
+    assert table["skill-a"]["never_applicable"] is False
+
+
+def test_applicability_counts_the_candidates_actually_in_contention():
+    """The ranked field is smaller than the candidate list, and by how much matters.
+
+    Both cases offer 3 candidates but only 2 can move the score, so the layer's
+    effective field is 2 -- which is what decides whether an argmax over the
+    other 1 is a choice or a coin flip.
+    """
+    rows = [
+        _observation(
+            failure_type="granularity_error",
+            gold_free_scores=[
+                ["skill-a", 0.02],
+                ["skill-b", 0.0],
+                ["skill-c", -0.01],
+            ],
+        ),
+        _observation(
+            failure_type="granularity_error",
+            gold_free_scores=[
+                ["skill-a", 0.05],
+                ["skill-b", 0.0],
+                ["skill-c", -0.04],
+            ],
+        ),
+    ]
+
+    summary = analyze_arena_results._layer_effective_field(rows)[0]
+
+    assert summary["failure_type"] == "granularity_error"
+    assert int(summary["candidates_offered"]) == 3
+    assert int(summary["never_applicable_operators"]) == 1
+    assert int(summary["effective_field"]) == 2
+
+
 def test_abstention_curve_trades_coverage_for_selective_agreement():
     """Raising the margin threshold should drop cases and lift agreement.
 

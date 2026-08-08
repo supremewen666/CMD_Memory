@@ -137,6 +137,20 @@ def main() -> int:
             abstention_curve,
         )
     )
+    applicability = _operator_applicability(observations)
+    paths.append(
+        _write_csv(
+            output / "operator_applicability.csv",
+            applicability,
+        )
+    )
+    effective_field = _layer_effective_field(observations)
+    paths.append(
+        _write_csv(
+            output / "layer_effective_field.csv",
+            effective_field,
+        )
+    )
     stuffing_significance = _arm_significance_summary(
         arm_comparisons,
         families=case_families,
@@ -240,6 +254,13 @@ def main() -> int:
     print(
         "[RESULT] context_stuffing_pairs="
         f"{sum(int(row['n_paired']) for row in stuffing_significance)}"
+    )
+    degenerate = [
+        row for row in effective_field if int(row["never_applicable_operators"])
+    ]
+    print(
+        "[RESULT] layers_with_inapplicable_operators="
+        f"{len(degenerate)}/{len(effective_field)}"
     )
     no_fault = [row for row in null_protection if row["case_kind"] == "no_fault"]
     no_fault_cases = sum(int(row["n"]) for row in no_fault)
@@ -870,6 +891,96 @@ def _rate_of(group: Sequence[Mapping[str, object]], field: str) -> float:
         if group
         else 0.0
     )
+
+
+#: A gold-free gain this close to zero means the operator returned the context
+#: unchanged. The repair actions are guarded -- ``_repair_granularity_context``
+#: returns early when nothing in recall is coarse, and so on -- so an exactly
+#: zero gain is a precondition that did not fire, not a repair that broke even.
+INAPPLICABLE_GAIN_EPSILON = 1e-9
+
+
+def _operator_applicability(
+    observations: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """How often each operator was even applicable, per arena and failure type.
+
+    Separates two things the argmax cannot tell apart: an operator that competed
+    and lost, and an operator whose precondition never held on this layer so it
+    returned the context untouched. Both look like a low score, but only the
+    first is evidence about the operator's quality -- ranking the second is
+    ranking a no-op, and when it wins the tie-break the system acts on a repair
+    that did nothing.
+    """
+    groups: dict[tuple[str, str, str], list[float]] = {}
+    for row in observations:
+        for skill_id, gain in _score_mapping(
+            row.get("gold_free_scores")
+        ).items():
+            if gain is None:
+                continue
+            groups.setdefault(
+                (str(row.get("arena_id")), str(row.get("failure_type")), skill_id),
+                [],
+            ).append(gain)
+
+    output: list[dict[str, object]] = []
+    for (arena_id, failure_type, skill_id), gains in sorted(groups.items()):
+        inapplicable = sum(
+            1 for gain in gains if abs(gain) <= INAPPLICABLE_GAIN_EPSILON
+        )
+        output.append(
+            {
+                "arena_id": arena_id,
+                "failure_type": failure_type,
+                "skill_id": skill_id,
+                "n": len(gains),
+                "inapplicable_count": inapplicable,
+                "inapplicable_rate": inapplicable / len(gains),
+                # A layer-wide no-op is a structural fact about the operator's
+                # guard, not a run-to-run outcome, so it is called out.
+                "never_applicable": inapplicable == len(gains),
+                "mean_gain": sum(gains) / len(gains),
+                "epsilon": INAPPLICABLE_GAIN_EPSILON,
+            }
+        )
+    return output
+
+
+def _layer_effective_field(
+    observations: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Candidates offered against candidates that could move the score.
+
+    The argmax ranks every legal operator, but on each layer several of them are
+    guarded off and return zero everywhere. The effective field is what remains,
+    and it is the honest denominator for any claim that selection chose among N
+    repairs.
+    """
+    applicability = _operator_applicability(observations)
+    groups: dict[tuple[str, str], list[dict[str, object]]] = {}
+    for row in applicability:
+        groups.setdefault(
+            (str(row["arena_id"]), str(row["failure_type"])),
+            [],
+        ).append(row)
+
+    output: list[dict[str, object]] = []
+    for (arena_id, failure_type), rows in sorted(groups.items()):
+        never = [row for row in rows if row["never_applicable"]]
+        output.append(
+            {
+                "arena_id": arena_id,
+                "failure_type": failure_type,
+                "candidates_offered": len(rows),
+                "never_applicable_operators": len(never),
+                "effective_field": len(rows) - len(never),
+                "never_applicable_skill_ids": ";".join(
+                    sorted(str(row["skill_id"]) for row in never)
+                ),
+            }
+        )
+    return output
 
 
 #: Margin thresholds swept for the abstention curve. Fixed here rather than
