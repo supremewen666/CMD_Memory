@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
 from typing import Any, Mapping
 
@@ -50,7 +51,7 @@ def _mapping(value: object, name: str) -> Mapping[str, object]:
     return value
 
 
-def _runtime_case(value: object) -> RuntimeRepairCase:
+def runtime_case_from_mapping(value: object) -> RuntimeRepairCase:
     mapping = _mapping(value, "runtime_case")
     expected = {
         "case_id",
@@ -106,6 +107,104 @@ def _runtime_case(value: object) -> RuntimeRepairCase:
     )
 
 
+@dataclass(frozen=True)
+class FrozenLiveInput:
+    """Fully parsed, zero-model-call view of one prepared GPU input row."""
+
+    case_id: str
+    family_id: str
+    probe_set: str
+    context: PolicyContext
+    graph: FrozenRelationGraph
+    runtime_case: RuntimeRepairCase
+    intents: tuple[RepairIntent, ...]
+    legacy_intent_id: str
+    chain_pairs: tuple[tuple[str, str], ...]
+    probe_case: ProbeCase
+
+
+def validate_live_input(source: Mapping[str, object]) -> FrozenLiveInput:
+    """Fail closed before a prepared row can initialize an answerer or judge."""
+    if (
+        set(source) != _SOURCE_KEYS
+        or source.get("schema_version") != LIVE_INPUT_SCHEMA_VERSION
+    ):
+        raise ValueError("live V4 source mapping is not closed or versioned")
+    case_id = source["case_id"]
+    family_id = source["family_id"]
+    probe_set = source["probe_set"]
+    if not isinstance(case_id, str) or not case_id:
+        raise ValueError("live V4 case_id must be a non-empty string")
+    if not isinstance(family_id, str) or not family_id:
+        raise ValueError("live V4 family_id must be a non-empty string")
+    if probe_set not in {"represented", "unseen"}:
+        raise ValueError("live V4 probe_set must be represented or unseen")
+    graph = FrozenRelationGraph.from_mapping(source["graph"])
+    runtime = runtime_case_from_mapping(source["runtime_case"])
+    context = PolicyContext.from_mapping(_mapping(source["context"], "context"))
+    probe = ProbeCase.from_mapping(dict(_mapping(source["probe_case"], "probe_case")))
+    raw_intents = source["intents"]
+    if not isinstance(raw_intents, list) or not raw_intents:
+        raise ValueError("live V4 intents must be a non-empty list")
+    intents = tuple(
+        RepairIntent.from_mapping(_mapping(row, "repair intent")) for row in raw_intents
+    )
+    intent_ids = {intent.intent_id for intent in intents}
+    if len(intent_ids) != len(intents):
+        raise ValueError("live V4 intent IDs must be unique")
+    if {
+        graph.case_id,
+        runtime.case_id,
+        context.case_id,
+        probe.case_id,
+    } != {case_id}:
+        raise ValueError("live materialization case identities disagree")
+    graph.assert_matches(
+        case=runtime,
+        item_ids=tuple(item.item_id for item in runtime.items if item.retrieved),
+        expected_graph_sha256=graph.graph_sha256,
+        expected_protocol_manifest_sha256=graph.protocol_manifest_sha256,
+    )
+    for intent in intents:
+        compile_intent(intent, graph=graph)
+    legacy_intent_id = source["legacy_intent_id"]
+    if legacy_intent_id not in intent_ids:
+        raise ValueError("legacy_intent_id must identify one frozen intent")
+    raw_pairs = source["chain_pairs"]
+    if not isinstance(raw_pairs, list):
+        raise ValueError("chain_pairs must be a list")
+    pairs: list[tuple[str, str]] = []
+    for raw_pair in raw_pairs:
+        if (
+            not isinstance(raw_pair, list)
+            or len(raw_pair) != 2
+            or not all(isinstance(value, str) for value in raw_pair)
+        ):
+            raise ValueError("chain pair must be [first_intent_id, second_intent_id]")
+        first_id, second_id = raw_pair
+        if (
+            first_id == second_id
+            or first_id not in intent_ids
+            or second_id not in intent_ids
+        ):
+            raise ValueError("chain pair must reference two distinct frozen intents")
+        pairs.append((first_id, second_id))
+    if len(set(pairs)) != len(pairs):
+        raise ValueError("chain pairs must be unique")
+    return FrozenLiveInput(
+        case_id=case_id,
+        family_id=family_id,
+        probe_set=probe_set,
+        context=context,
+        graph=graph,
+        runtime_case=runtime,
+        intents=intents,
+        legacy_intent_id=legacy_intent_id,
+        chain_pairs=tuple(pairs),
+        probe_case=probe,
+    )
+
+
 def _changed_item_ids(state: object) -> set[str]:
     changed: set[str] = set()
     for event in state.trace:
@@ -152,39 +251,19 @@ class V4LiveMaterializer:
         ):
             raise ValueError("live materializer penalties must be finite")
 
-    def materialize(
-        self, source: Mapping[str, object], lane: str
-    ) -> dict[str, object]:
-        if set(source) != _SOURCE_KEYS or source.get("schema_version") != LIVE_INPUT_SCHEMA_VERSION:
-            raise ValueError("live V4 source mapping is not closed or versioned")
+    def materialize(self, source: Mapping[str, object], lane: str) -> dict[str, object]:
         if lane not in {"gpu0", "gpu1"}:
             raise ValueError("live V4 materialization lane must be gpu0 or gpu1")
-        case_id = source["case_id"]
-        graph = FrozenRelationGraph.from_mapping(source["graph"])
-        runtime = _runtime_case(source["runtime_case"])
-        context = PolicyContext.from_mapping(_mapping(source["context"], "context"))
-        probe = ProbeCase.from_mapping(dict(_mapping(source["probe_case"], "probe_case")))
-        raw_intents = source["intents"]
-        if not isinstance(raw_intents, list):
-            raise ValueError("live V4 intents must be a list")
-        intents = tuple(
-            RepairIntent.from_mapping(_mapping(row, "repair intent"))
-            for row in raw_intents
-        )
-        if not isinstance(case_id, str) or {
-            graph.case_id,
-            runtime.case_id,
-            context.case_id,
-            probe.case_id,
-        } != {case_id}:
-            raise ValueError("live materialization case identities disagree")
-        graph.assert_matches(
-            case=runtime,
-            item_ids=tuple(item.item_id for item in runtime.items if item.retrieved),
-            expected_graph_sha256=graph.graph_sha256,
-            expected_protocol_manifest_sha256=graph.protocol_manifest_sha256,
-        )
-        programs = {intent.intent_id: compile_intent(intent, graph=graph) for intent in intents}
+        frozen = validate_live_input(source)
+        case_id = frozen.case_id
+        graph = frozen.graph
+        runtime = frozen.runtime_case
+        context = frozen.context
+        probe = frozen.probe_case
+        intents = frozen.intents
+        programs = {
+            intent.intent_id: compile_intent(intent, graph=graph) for intent in intents
+        }
         initial = initial_state_from_runtime_case(runtime)
         outcomes: list[V4CandidateOutcome] = []
         states: dict[str, object] = {}
@@ -198,7 +277,9 @@ class V4LiveMaterializer:
                 expected_protocol_manifest_sha256=graph.protocol_manifest_sha256,
             )
             states[intent.intent_id] = result.state
-            outcomes.append(self._score_state(intent.intent_id, probe, runtime, result.state))
+            outcomes.append(
+                self._score_state(intent.intent_id, probe, runtime, result.state)
+            )
         chain_attempts = self._materialize_chains(
             source,
             probe=probe,
@@ -224,7 +305,9 @@ class V4LiveMaterializer:
         )
         result = final.to_mapping()
         if result["schema_version"] != CASE_SCHEMA_VERSION:
-            raise AssertionError("live materializer emitted an unregistered case schema")
+            raise AssertionError(
+                "live materializer emitted an unregistered case schema"
+            )
         return result
 
     def _score_state(
@@ -238,7 +321,9 @@ class V4LiveMaterializer:
         locality = len(changed) / max(1, len(state.items))
         valid = state.token_count <= runtime.token_budget
         if not valid:
-            return V4CandidateOutcome(intent_id, 0.0, locality, len(changed), False, True)
+            return V4CandidateOutcome(
+                intent_id, 0.0, locality, len(changed), False, True
+            )
         answer = self.answer_client.generate(
             f"Query: {runtime.query}\n\nRetrieved Memory:\n{state.rendered_context}\n\nAnswer the query from memory.",
             system="Use only the supplied retrieved memory. Give a concise answer.",
@@ -277,10 +362,18 @@ class V4LiveMaterializer:
                 or len(raw_pair) != 2
                 or not all(isinstance(value, str) for value in raw_pair)
             ):
-                raise ValueError("chain pair must be [first_intent_id, second_intent_id]")
+                raise ValueError(
+                    "chain pair must be [first_intent_id, second_intent_id]"
+                )
             first_id, second_id = raw_pair
-            if first_id == second_id or first_id not in intent_by_id or second_id not in intent_by_id:
-                raise ValueError("chain pair must reference two distinct frozen intents")
+            if (
+                first_id == second_id
+                or first_id not in intent_by_id
+                or second_id not in intent_by_id
+            ):
+                raise ValueError(
+                    "chain pair must reference two distinct frozen intents"
+                )
             first_state = states[first_id]
             chained = execute_program(
                 programs[second_id],
@@ -305,7 +398,8 @@ class V4LiveMaterializer:
                     first_utility=self._utility(first_outcome),
                     second_utility=self._utility(second_outcome),
                     chain_utility=self._utility(chain_shadow),
-                    materialized_intermediate=first_state.state_hash != initial.state_hash,
+                    materialized_intermediate=first_state.state_hash
+                    != initial.state_hash,
                     changed_item_count=chain_shadow.changed_item_count,
                     locality_cost=chain_shadow.locality_cost,
                     valid=chain_shadow.valid,
@@ -339,7 +433,10 @@ def live_backend(source: Mapping[str, object], lane: str) -> dict[str, object]:
 
 
 __all__ = [
+    "FrozenLiveInput",
     "LIVE_INPUT_SCHEMA_VERSION",
     "V4LiveMaterializer",
     "live_backend",
+    "runtime_case_from_mapping",
+    "validate_live_input",
 ]

@@ -15,6 +15,7 @@ SIGIL_ARTIFACTS="$CMD_ROOT/artifacts/sigil_qd"
 RUNS_ROOT="${CMD_RUNS_ROOT:-$CMD_ROOT/artifacts/run_control}"
 V4_ARTIFACTS="${CMD_V4_ARTIFACTS:-$CMD_ROOT/artifacts/neuro_symbolic_evolution_v4}"
 V4_DATASET_DIR="${CMD_V4_DATASET_DIR:-$CMD_ROOT/data/evolution_v4}"
+V4_SOURCE_CASES_OVERRIDE="${CMD_V4_SOURCE_CASES:-}"
 V4_SOURCE_CASES="${CMD_V4_SOURCE_CASES:-$V4_ARTIFACTS/prepared_cases.jsonl}"
 V4_MATERIALIZER_BACKEND="${CMD_V4_MATERIALIZER_BACKEND:-experiments.v4_live_materialization:live_backend}"
 V4_CANDIDATE_BUDGET="${CMD_V4_CANDIDATE_BUDGET:-4}"
@@ -60,6 +61,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "V4 roles:"
       echo "  v4_prepare:    build if absent, then validate the CPU dataset package"
+      echo "  v4_prepare_inputs: freeze relation cache/graphs/intents on GPU 0"
       echo "  v4_gpu0:       materialize SHA256(case_id)%2 == 0 on GPU 0"
       echo "  v4_gpu1:       materialize SHA256(case_id)%2 == 1 on GPU 1"
       echo "  v4_merge:      verify/merge shards, then canonical six-arm replay (CPU)"
@@ -103,6 +105,10 @@ if [[ -z "$ROLE" ]]; then
   exit 1
 fi
 
+if $SMOKE && [[ -z "$V4_SOURCE_CASES_OVERRIDE" ]]; then
+  V4_SOURCE_CASES="$V4_ARTIFACTS/prepared_cases.smoke.jsonl"
+fi
+
 if [[ -z "$RUN_ID" ]]; then
   RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 fi
@@ -115,7 +121,7 @@ LANE_GPU_ID=""
 LANE_LABEL="cpu"
 LANE_PORT_BASE=8000
 case "$ROLE" in
-  gpu0|phase1_gpu0|sigil_gpu0|v4_gpu0)
+  gpu0|phase1_gpu0|sigil_gpu0|v4_prepare_inputs|v4_gpu0)
     LANE_GPU_ID="${CMD_GPU0_ID:-0}"
     LANE_LABEL="gpu0"
     LANE_PORT_BASE="${CMD_GPU0_PORT_BASE:-8000}"
@@ -1072,16 +1078,99 @@ main_v4_prepare() {
   echo "===== V4 CPU DATASET PASS: ${manifest} ====="
 }
 
+main_v4_prepare_inputs() {
+  local flavor="full"
+  local prepared="${V4_ARTIFACTS}/prepared_cases.jsonl"
+  local preparation_dir="${V4_ARTIFACTS}/preparation/full"
+  local validation="${V4_ARTIFACTS}/prepared_cases.validation.json"
+  local limit_args=()
+  if $SMOKE; then
+    flavor="smoke"
+    prepared="${V4_ARTIFACTS}/prepared_cases.smoke.jsonl"
+    preparation_dir="${V4_ARTIFACTS}/preparation/smoke"
+    validation="${V4_ARTIFACTS}/prepared_cases.smoke.validation.json"
+    limit_args=(--limit "${CMD_V4_SMOKE_CASES:-20}")
+  fi
+  local manifest="${preparation_dir}/preparation_manifest.json"
+  local cache="${V4_ARTIFACTS}/preparation/relation_cache.sqlite"
+  if [[ -f "$prepared" || -f "$manifest" ]]; then
+    if [[ ! -f "$prepared" || ! -f "$manifest" ]]; then
+      echo "ERROR: incomplete immutable V4 preparation artifacts for ${flavor}" >&2
+      return 1
+    fi
+    python -m experiments.validate_v4_prepared_cases \
+      --dataset-dir "$V4_DATASET_DIR" \
+      --prepared "$prepared" \
+      --manifest "$manifest" \
+      --output "$validation"
+    echo "===== V4 ${flavor} GPU INPUT ALREADY VALID: ${prepared} ====="
+    return 0
+  fi
+
+  local started_vllm=false
+  if ! start_llama_dual_vllm; then
+    stop_llama_dual_vllm
+    return 1
+  fi
+  started_vllm=true
+  llama_dual_env
+  local code=0
+  python -m experiments.prepare_v4_live_cases \
+    --dataset-dir "$V4_DATASET_DIR" \
+    --output "$prepared" \
+    --artifacts-dir "$preparation_dir" \
+    --cache "$cache" \
+    --progress "${CMD_RUN_DIR}/progress.jsonl" \
+    --candidate-budget "$V4_CANDIDATE_BUDGET" \
+    --max-uncertain-rate "${CMD_V4_MAX_UNCERTAIN_RATE:-0.05}" \
+    --max-proposer-retries "${CMD_V4_MAX_PROPOSER_RETRIES:-2}" \
+    "${limit_args[@]}" || code=$?
+  if $started_vllm; then
+    stop_llama_dual_vllm
+  fi
+  if [[ $code -ne 0 ]]; then
+    return "$code"
+  fi
+  python -m experiments.validate_v4_prepared_cases \
+    --dataset-dir "$V4_DATASET_DIR" \
+    --prepared "$prepared" \
+    --manifest "$manifest" \
+    --output "$validation"
+  echo "===== V4 ${flavor} GPU INPUT PASS: ${prepared} ====="
+}
+
 main_v4_materialize() {
   local lane="$1"
   local output_dir="${V4_RUN_ROOT}/materialized"
   local output="${output_dir}/${lane}.jsonl"
   local progress="${CMD_RUN_DIR}/progress.jsonl"
+  local preparation_manifest="${CMD_V4_PREPARATION_MANIFEST:-$V4_ARTIFACTS/preparation/full/preparation_manifest.json}"
+  local input_validation="${CMD_RUN_DIR}/prepared_input_validation.json"
   local limit_args=()
+  if $SMOKE && [[ -z "${CMD_V4_PREPARATION_MANIFEST:-}" ]]; then
+    preparation_manifest="$V4_ARTIFACTS/preparation/smoke/preparation_manifest.json"
+  fi
+  if [[ -n "$V4_SOURCE_CASES_OVERRIDE" && -z "${CMD_V4_PREPARATION_MANIFEST:-}" ]]; then
+    echo "ERROR: CMD_V4_SOURCE_CASES override requires CMD_V4_PREPARATION_MANIFEST" >&2
+    return 1
+  fi
   mkdir -p "$output_dir"
   if [[ ! -f "$V4_SOURCE_CASES" ]]; then
     echo "ERROR: V4 source cases not found: ${V4_SOURCE_CASES}" >&2
     echo "Set CMD_V4_SOURCE_CASES to frozen prepared/materialized case JSONL." >&2
+    return 1
+  fi
+  if [[ ! -f "$preparation_manifest" ]]; then
+    echo "ERROR: V4 preparation manifest not found: ${preparation_manifest}" >&2
+    echo "Run --role v4_prepare_inputs before starting either V4 GPU lane." >&2
+    return 1
+  fi
+  if ! python -m experiments.validate_v4_prepared_cases \
+    --dataset-dir "$V4_DATASET_DIR" \
+    --prepared "$V4_SOURCE_CASES" \
+    --manifest "$preparation_manifest" \
+    --output "$input_validation"; then
+    echo "ERROR: V4 prepared-input hash/leakage gate refused ${V4_SOURCE_CASES}" >&2
     return 1
   fi
   $SMOKE && limit_args=(--limit "${CMD_V4_SMOKE_CASES:-20}")
@@ -1206,6 +1295,7 @@ case "$ROLE" in
   sigil_analyze)  main_sigil_analyze ;;
   route_a)        main_route_a ;;
   v4_prepare)     main_v4_prepare ;;
+  v4_prepare_inputs) main_v4_prepare_inputs ;;
   v4_gpu0)        main_v4_gpu0 ;;
   v4_gpu1)        main_v4_gpu1 ;;
   v4_merge)       main_v4_merge ;;

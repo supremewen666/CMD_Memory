@@ -76,6 +76,14 @@
     granularity, and safety cases must remain separate niches rather than being
     mislabeled as supersession. Only its 100 item-conflict cases currently have
     one explicit competing-item state target.
+- V4 graph-eligibility audit:
+  - 3,100/3,939 cases have at least two retrieved items and therefore at least
+    one measured relation pair; these are eligible for graph-bound V4 intents.
+  - 839/3,939 cases have one retrieved item and no legal relation edge. They are
+    excluded from prepared GPU input, never assigned a synthetic edge or a
+    label-derived no-op.
+  - the deterministic 20-case preparation smoke selects 10 represented and 10
+    unseen cases and passes the zero-model-call prepared validator.
 - action-shape audit:
   - MemTrace-B: 253 item-stale, 253 item-conflict, and 253 granularity cases
     have one explicit state perturbation; 253 retrieval cases need a retrieval
@@ -93,9 +101,10 @@
   - Runtime rows, sealed shadow intents, dependency split, relation requests,
     source manifest, dataset manifest, and validation report are materialized.
   - `artifacts/neuro_symbolic_evolution_v4/prepared_cases.jsonl` is a later GPU
-    materialization input and remains intentionally absent: it still requires
-    frozen text-only relation verdicts and complete intent proposals. The
-    builder refuses to fabricate either from `perturbation_label` or gold.
+    materialization input and remains intentionally absent from the CPU commit:
+    `v4_prepare_inputs` now creates it from live frozen text-only relation
+    verdicts and complete intent proposals. The builder refuses to fabricate
+    either from `perturbation_label` or gold.
 
 ## Split Integrity
 
@@ -183,7 +192,9 @@
 
 - PASS for the three immutable source datasets and the V4 CPU dataset package.
 - NEEDS_REVISION for GPU-ready `prepared_cases.jsonl` until the frozen relation
-  instrument and intent proposer artifacts are supplied.
+  instrument and intent proposer role completes successfully on the experiment
+  GPU. The production command and zero-call validator now exist, but no live
+  verdict/proposal artifact is fabricated or checked into the CPU dataset.
 
 ## Next Step
 
@@ -191,5 +202,12 @@
   `python -m experiments.validate_v4_evolution_dataset --dataset-dir data/evolution_v4 --output data/evolution_v4/validation_report.json`.
 - Run the frozen text-only relation instrument over
   `data/evolution_v4/relation_requests.jsonl.gz`, bind the resulting cache and
-  complete proposer intents into `prepared_cases.jsonl`, and only then launch
-  the two-GPU V4 materialization roles. Gold/labels may never fill that gap.
+  complete proposer intents into `prepared_cases.jsonl` with:
+  `./run_remaining_experiments.sh --role v4_prepare_inputs --run-id <ID> --detach`.
+  `v4_gpu0` and `v4_gpu1` invoke `experiments.validate_v4_prepared_cases`
+  themselves before starting model endpoints; an absent/mismatched preparation
+  manifest therefore cannot enter GPU execution. Gold/labels may never fill that gap.
+  The validator requires exact source/runtime/shadow replay, instrument/cache/
+  graph/intent hashes, closed schemas, compiler acceptance, and no evaluation
+  family or shadow keys on runtime/proposer surfaces. Cases with fewer than two
+  retrieved items are recorded as ineligible rather than receiving fake edges.

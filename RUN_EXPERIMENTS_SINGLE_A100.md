@@ -34,6 +34,7 @@ repository，不是一个可复现实验。双卡产出的 shard 只包含 post-
 
 | lane | 默认物理 GPU | Judge | Answerer | 工作 |
 |---|---:|---:|---:|---|
+| `v4_prepare_inputs` | `0` | `8000` | `8001` | relation cache、graph 与完整 intent 冻结 |
 | `v4_gpu0` | `0` | `8000` | `8001` | hash bucket 0 的 typed execution/scoring |
 | `v4_gpu1` | `1` | `8100` | `8101` | hash bucket 1 的 typed execution/scoring |
 | `v4_merge` | CPU | — | — | 严格合并和六臂 replay |
@@ -86,8 +87,30 @@ runtime-only relation requests。验证器会重算三套 source hash、逐 case
 
 这个 CPU 包故意标为 `relation_instrument_pending`。`relation_requests.jsonl.gz` 只能交给
 冻结 text-only instrument；不能用 shadow 中的 `perturbation_label` 直接制造 positive
-edge。instrument cache 和完整 proposer intents 都绑定后，才可生成下一节的
-`prepared_cases.jsonl`。
+edge。使用新增 role 完成 GPU 输入冻结：
+
+```bash
+# 先用平衡抽取的 represented/unseen case 做准备链 smoke
+./run_remaining_experiments.sh \
+  --role v4_prepare_inputs --run-id v4-input-smoke-001 --smoke --detach
+
+./run_remaining_experiments.sh \
+  --role monitor --run-id v4-input-smoke-001
+
+# smoke 通过后生成正式全集；relation SQLite cache 会复用已有 verdict
+./run_remaining_experiments.sh \
+  --role v4_prepare_inputs --run-id v4-input-full-001 --detach
+```
+
+该 role 在 GPU0 上依次使用 Qwen relation instrument 和 Llama complete-intent
+proposer，输出 SQLite cache、instrument manifest、graph/intent ledger、prepared
+manifest 与零模型调用 validation report。默认 relation `uncertain` 上限为 5%；超过
+即拒绝整次准备。可用 `CMD_V4_MAX_UNCERTAIN_RATE` 覆盖，但正式协议必须在观察结果前
+冻结该值。
+
+3,939 个 source cases 中，3,100 个至少有一对 retrieved items，可形成 graph-bound
+intent；其余 839 个只有一个 retrieved item，明确记录为
+`excluded_no_relation_pair`。系统不会为它们伪造关系边或 no-op intent。
 
 ## 4. 冻结 GPU 输入契约
 
@@ -97,7 +120,8 @@ edge。instrument cache 和完整 proposer intents 都绑定后，才可生成�
 artifacts/neuro_symbolic_evolution_v4/prepared_cases.jsonl
 ```
 
-可用 `CMD_V4_SOURCE_CASES` 覆盖。每行必须使用
+可用 `CMD_V4_SOURCE_CASES` 覆盖；自定义输入时必须同时设置其对应的
+`CMD_V4_PREPARATION_MANIFEST`，否则 GPU role 会在启动 endpoint 前拒绝运行。每行必须使用
 `cmd-v4-live-materialization-input-v1`，且只包含以下闭合字段：
 
 ```text
@@ -121,8 +145,30 @@ probe_case              # 仅 live shadow evaluator 可读
 export CMD_V4_MATERIALIZER_BACKEND=experiments.v4_materialization:passthrough_backend
 ```
 
-输入缺失、schema 非闭合、graph/runtime hash 不一致、intent 不能编译或 endpoint
-未配置时，lane 会 fail closed，不会把失败伪装成负样本。
+每个 `v4_gpu0/v4_gpu1` role 都会在启动 endpoint 前，以零模型调用重新执行整包
+prepared-case validator。输入缺失、manifest 不匹配、hash/leakage 门禁失败、schema
+非闭合、graph/runtime hash 不一致、intent 不能编译或 endpoint 未配置时，lane 会
+fail closed，不会把失败伪装成负样本。
+
+准备链工件位于：
+
+```text
+artifacts/neuro_symbolic_evolution_v4/
+├── prepared_cases.jsonl
+├── prepared_cases.validation.json
+├── prepared_cases.smoke.jsonl
+├── prepared_cases.smoke.validation.json
+└── preparation/
+    ├── relation_cache.sqlite
+    ├── smoke/
+    │   ├── instrument_manifest.json
+    │   ├── relation_cache_records.jsonl
+    │   ├── graphs.jsonl
+    │   ├── intent_proposals.jsonl
+    │   └── preparation_manifest.json
+    └── full/
+        └── ...同一组冻结工件
+```
 
 ## 5. 一次正式运行
 
@@ -132,7 +178,6 @@ export CMD_V4_MATERIALIZER_BACKEND=experiments.v4_materialization:passthrough_ba
 ```bash
 cd /path/to/CMD_Counterfactual_Memory_Debugger
 
-export CMD_V4_SOURCE_CASES="$PWD/artifacts/neuro_symbolic_evolution_v4/prepared_cases.jsonl"
 export CMD_V4_CANDIDATE_BUDGET=4
 RUN_ID=v4-confirm-001
 
@@ -199,6 +244,7 @@ artifacts/run_control/<RUN_ID>/<ROLE>/
 GPU 冒烟只取输入前 `CMD_V4_SMOKE_CASES` 行再按 hash lane 分片，默认 20：
 
 ```bash
+# 若尚未生成 smoke prepared 输入，先运行 §3 的 v4_prepare_inputs --smoke
 RUN_ID=v4-smoke-001
 ./run_remaining_experiments.sh --role v4_gpu0 --run-id "$RUN_ID" --smoke --detach
 ./run_remaining_experiments.sh --role v4_gpu1 --run-id "$RUN_ID" --smoke --detach

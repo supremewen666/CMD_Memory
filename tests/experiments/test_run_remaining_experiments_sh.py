@@ -18,6 +18,7 @@ def test_shell_help_exposes_v4_detach_and_explicit_gpu_lanes() -> None:
     )
     output = completed.stdout
     assert "v4_prepare" in output
+    assert "v4_prepare_inputs" in output
     assert "v4_gpu0" in output
     assert "v4_gpu1" in output
     assert "v4_merge" in output
@@ -34,5 +35,24 @@ def test_shell_is_syntax_valid_and_defaults_to_its_checkout() -> None:
     subprocess.run(("bash", "-n", str(SCRIPT)), cwd=ROOT, check=True)
     source = SCRIPT.read_text(encoding="utf-8")
     assert 'CMD_ROOT="${CMD_ROOT:-$SCRIPT_DIR}"' in source
-    assert '$HOME/wsy/CMD_Memory' not in source
+    assert "$HOME/wsy/CMD_Memory" not in source
     assert 'CUDA_VISIBLE_DEVICES="${LANE_GPU_ID' in source
+    assert "python -m experiments.prepare_v4_live_cases" in source
+    assert "python -m experiments.validate_v4_prepared_cases" in source
+    assert "prepared_cases.smoke.jsonl" in source
+
+
+def test_v4_gpu_roles_validate_the_exact_prepared_bundle_before_model_start() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    materialize = source.split("main_v4_materialize() {", 1)[1].split(
+        "main_v4_gpu0() {", 1
+    )[0]
+
+    validation_offset = materialize.index(
+        "python -m experiments.validate_v4_prepared_cases"
+    )
+    model_start_offset = materialize.index("start_llama_dual_vllm")
+    assert validation_offset < model_start_offset
+    assert '--manifest "$preparation_manifest"' in materialize
+    assert '--prepared "$V4_SOURCE_CASES"' in materialize
+    assert "CMD_V4_PREPARATION_MANIFEST" in materialize
