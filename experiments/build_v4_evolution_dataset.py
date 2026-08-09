@@ -13,6 +13,7 @@ from collections import Counter
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
+import gzip
 import hashlib
 from itertools import combinations
 import json
@@ -47,10 +48,10 @@ SPLIT_POLICY_VERSION = "cmd-v4-dependency-split-v1"
 DEFAULT_SEED = 20260809
 DEFAULT_TOKEN_BUDGET = 100_000
 OUTPUT_FILES = (
-    "runtime_cases.jsonl",
-    "shadow_cases.jsonl",
-    "relation_requests.jsonl",
-    "split_manifest.json",
+    "runtime_cases.jsonl.gz",
+    "shadow_cases.jsonl.gz",
+    "relation_requests.jsonl.gz",
+    "split_manifest.json.gz",
     "source_manifest.json",
 )
 
@@ -311,11 +312,24 @@ def _write_json(path: Path, value: object) -> None:
     )
 
 
-def _write_jsonl(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
-    path.write_text(
-        "".join(canonical_bytes(row).decode("utf-8") + "\n" for row in rows),
-        encoding="utf-8",
-    )
+def _write_gzip(path: Path, payload: bytes) -> None:
+    path.write_bytes(gzip.compress(payload, compresslevel=9, mtime=0))
+
+
+def _write_json_gzip(path: Path, value: object) -> None:
+    payload = (
+        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False)
+        + "\n"
+    ).encode("utf-8")
+    _write_gzip(path, payload)
+
+
+def _write_jsonl_gzip(
+    path: Path,
+    rows: Sequence[Mapping[str, object]],
+) -> None:
+    payload = b"".join(canonical_bytes(row) + b"\n" for row in rows)
+    _write_gzip(path, payload)
 
 
 def build_dataset(
@@ -468,10 +482,10 @@ def build_dataset(
         "stream_role_counts": dict(sorted(role_counts.items())),
         "assignments": assignments,
     }
-    _write_jsonl(output_dir / "runtime_cases.jsonl", runtime_rows)
-    _write_jsonl(output_dir / "shadow_cases.jsonl", shadow_rows)
-    _write_jsonl(output_dir / "relation_requests.jsonl", relation_rows)
-    _write_json(output_dir / "split_manifest.json", split_manifest)
+    _write_jsonl_gzip(output_dir / "runtime_cases.jsonl.gz", runtime_rows)
+    _write_jsonl_gzip(output_dir / "shadow_cases.jsonl.gz", shadow_rows)
+    _write_jsonl_gzip(output_dir / "relation_requests.jsonl.gz", relation_rows)
+    _write_json_gzip(output_dir / "split_manifest.json.gz", split_manifest)
     _write_json(output_dir / "source_manifest.json", source_manifest)
 
     file_hashes = {
@@ -531,7 +545,7 @@ def build_dataset(
         "domain_probe_set_counts": domain_probe_set_counts,
         "probe_set_counts": dict(sorted(split_counts.items())),
         "source_manifest_sha256": file_hashes["source_manifest.json"],
-        "split_manifest_sha256": file_hashes["split_manifest.json"],
+        "split_manifest_sha256": file_hashes["split_manifest.json.gz"],
         "file_sha256": file_hashes,
         "next_required_artifact": "frozen_relation_verdicts_and_complete_intent_proposals",
     }

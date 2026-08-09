@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter, defaultdict
+import gzip
 import hashlib
 from itertools import combinations
 import json
@@ -41,15 +42,21 @@ _RUNTIME_FORBIDDEN_KEYS = frozenset(FORBIDDEN_RUNTIME_FIELDS) | {
 
 
 def _load_json(path: Path) -> Mapping[str, object]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    payload = path.read_bytes()
+    if path.suffix == ".gz":
+        payload = gzip.decompress(payload)
+    value = json.loads(payload.decode("utf-8"))
     if not isinstance(value, dict):
         raise ValueError(f"{path.name} must be a JSON object")
     return value
 
 
 def _load_jsonl(path: Path) -> list[Mapping[str, object]]:
+    payload = path.read_bytes()
+    if path.suffix == ".gz":
+        payload = gzip.decompress(payload)
     rows: list[Mapping[str, object]] = []
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for number, line in enumerate(payload.decode("utf-8").splitlines(), 1):
         if not line.strip():
             continue
         value = json.loads(line)
@@ -326,10 +333,10 @@ def validate_bundle(dataset_dir: Path) -> dict[str, object]:
         return _report(dataset_dir, reasons, manifest)
 
     try:
-        runtime_rows = _load_jsonl(dataset_dir / "runtime_cases.jsonl")
-        shadow_rows = _load_jsonl(dataset_dir / "shadow_cases.jsonl")
-        relation_rows = _load_jsonl(dataset_dir / "relation_requests.jsonl")
-        split_manifest = _load_json(dataset_dir / "split_manifest.json")
+        runtime_rows = _load_jsonl(dataset_dir / "runtime_cases.jsonl.gz")
+        shadow_rows = _load_jsonl(dataset_dir / "shadow_cases.jsonl.gz")
+        relation_rows = _load_jsonl(dataset_dir / "relation_requests.jsonl.gz")
+        split_manifest = _load_json(dataset_dir / "split_manifest.json.gz")
         source_manifest = _load_json(dataset_dir / "source_manifest.json")
     except (OSError, ValueError, json.JSONDecodeError) as error:
         reasons.append(f"dataset_input_error:{type(error).__name__}")
@@ -342,7 +349,7 @@ def validate_bundle(dataset_dir: Path) -> dict[str, object]:
     ):
         reasons.append("source_manifest_binding")
     if manifest.get("split_manifest_sha256") != file_sha256(
-        dataset_dir / "split_manifest.json"
+        dataset_dir / "split_manifest.json.gz"
     ):
         reasons.append("split_manifest_binding")
     reasons.extend(_runtime_surface_reasons(runtime_rows))

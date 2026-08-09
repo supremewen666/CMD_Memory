@@ -62,9 +62,9 @@
   - `data/evolution_v4/` contains all 3,939 cases, 1,074 evaluation families,
     912 dependency groups, and 14,164 runtime-only relation requests.
   - dataset manifest SHA-256:
-    `f08bbbbb0632343657d5b542ae1c86d5db88d35100eee5179adf4c6d40168a38`.
+    `9d7c67bf3058407f1cb3fde2fdfad21f2ad83670c9a466c484cad0ca2fedbc84`.
   - validation report decision: `PASS`; report SHA-256:
-    `61302c20e4301964223343504cd803775c30febf8af72b627feaa73efc9597e9`.
+    `d8a9b670c6fb5f411b4a6c181ef4fb161d348b78e77f17fd0ad5075dffc53e2e`.
 - intended ecological roles:
   - MemTrace-B is the primary recurrent evolution stream. Its existing family
     builder groups by user and knowledge point, keeps 32 families unseen, and
@@ -190,6 +190,6 @@
 - Reproduce or validate the CPU package with:
   `python -m experiments.validate_v4_evolution_dataset --dataset-dir data/evolution_v4 --output data/evolution_v4/validation_report.json`.
 - Run the frozen text-only relation instrument over
-  `data/evolution_v4/relation_requests.jsonl`, bind the resulting cache and
+  `data/evolution_v4/relation_requests.jsonl.gz`, bind the resulting cache and
   complete proposer intents into `prepared_cases.jsonl`, and only then launch
   the two-GPU V4 materialization roles. Gold/labels may never fill that gap.

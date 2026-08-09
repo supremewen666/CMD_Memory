@@ -84,7 +84,7 @@ runtime-only relation requests。验证器会重算三套 source hash、逐 case
 五个输出文件 hash、hidden-intent replay、retrieved-pair coverage、family isolation，
 并检查 runtime 中不存在 gold/label/`M_old:`/`M_new:`。
 
-这个 CPU 包故意标为 `relation_instrument_pending`。`relation_requests.jsonl` 只能交给
+这个 CPU 包故意标为 `relation_instrument_pending`。`relation_requests.jsonl.gz` 只能交给
 冻结 text-only instrument；不能用 shadow 中的 `perturbation_label` 直接制造 positive
 edge。instrument cache 和完整 proposer intents 都绑定后，才可生成下一节的
 `prepared_cases.jsonl`。

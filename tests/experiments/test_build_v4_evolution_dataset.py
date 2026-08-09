@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -36,11 +37,12 @@ def _build(output: Path, *, limit: int = 12) -> dict[str, object]:
 
 
 def _jsonl(path: Path) -> list[dict[str, object]]:
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    raw = (
+        gzip.decompress(path.read_bytes()).decode("utf-8")
+        if path.suffix == ".gz"
+        else path.read_text(encoding="utf-8")
+    )
+    return [json.loads(line) for line in raw.splitlines() if line.strip()]
 
 
 def test_cli_builds_a_deterministic_three_domain_bundle_and_validator_accepts_it(
@@ -60,6 +62,13 @@ def test_cli_builds_a_deterministic_three_domain_bundle_and_validator_accepts_it
         "stale_item": 12,
     }
     assert manifest["file_sha256"] == repeated["file_sha256"]
+    assert set(manifest["file_sha256"]) == {
+        "relation_requests.jsonl.gz",
+        "runtime_cases.jsonl.gz",
+        "shadow_cases.jsonl.gz",
+        "source_manifest.json",
+        "split_manifest.json.gz",
+    }
     assert validate_bundle(first)["decision"] == "PASS"
     report = tmp_path / "validation.json"
     assert validate_main(("--dataset-dir", str(first), "--output", str(report))) == 0
@@ -71,9 +80,9 @@ def test_runtime_and_relation_surfaces_are_gold_free_and_template_free(
 ) -> None:
     output = tmp_path / "bundle"
     _build(output)
-    runtime_rows = _jsonl(output / "runtime_cases.jsonl")
-    relation_rows = _jsonl(output / "relation_requests.jsonl")
-    shadow_rows = _jsonl(output / "shadow_cases.jsonl")
+    runtime_rows = _jsonl(output / "runtime_cases.jsonl.gz")
+    relation_rows = _jsonl(output / "relation_requests.jsonl.gz")
+    shadow_rows = _jsonl(output / "shadow_cases.jsonl.gz")
 
     runtime_text = json.dumps(runtime_rows, ensure_ascii=False)
     relation_text = json.dumps(relation_rows, ensure_ascii=False)
@@ -101,17 +110,19 @@ def test_runtime_and_relation_surfaces_are_gold_free_and_template_free(
 def test_validator_refuses_hash_bound_runtime_tampering(tmp_path: Path) -> None:
     output = tmp_path / "bundle"
     _build(output)
-    runtime_path = output / "runtime_cases.jsonl"
+    runtime_path = output / "runtime_cases.jsonl.gz"
     rows = _jsonl(runtime_path)
     rows[0]["gold_answer"] = "leak"
-    runtime_path.write_text(
-        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
-        encoding="utf-8",
+    runtime_path.write_bytes(
+        gzip.compress(
+            "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows).encode(),
+            mtime=0,
+        )
     )
 
     report = validate_bundle(output)
     assert report["decision"] == "REFUSE"
-    assert "file_hash_mismatch:runtime_cases.jsonl" in report["reasons"]
+    assert "file_hash_mismatch:runtime_cases.jsonl.gz" in report["reasons"]
 
 
 def test_source_hashes_bind_the_checked_in_datasets(tmp_path: Path) -> None:
