@@ -1,0 +1,60 @@
+{
+  "build_status": "relation_instrument_pending",
+  "builder_version": "cmd-v4-evolution-dataset-builder-v1",
+  "case_count": 3939,
+  "dataset_sha256": "f08bbbbb0632343657d5b542ae1c86d5db88d35100eee5179adf4c6d40168a38",
+  "dependency_group_count": 912,
+  "domain_case_counts": {
+    "memfail": 692,
+    "memtrace_kp": 2047,
+    "stale_item": 1200
+  },
+  "domain_dependency_group_counts": {
+    "memfail": 492,
+    "memtrace_kp": 20,
+    "stale_item": 400
+  },
+  "domain_family_counts": {
+    "memfail": 492,
+    "memtrace_kp": 182,
+    "stale_item": 400
+  },
+  "domain_probe_set_counts": {
+    "memfail": {
+      "represented": 554,
+      "unseen": 138
+    },
+    "memtrace_kp": {
+      "represented": 1669,
+      "unseen": 378
+    },
+    "stale_item": {
+      "represented": 963,
+      "unseen": 237
+    }
+  },
+  "family_count": 1074,
+  "file_sha256": {
+    "relation_requests.jsonl": "3b6854d7e7c335e83dbbc51b9d37ffa89ac4e6a3aca91def9518d7c790ba54b8",
+    "runtime_cases.jsonl": "29c02a1960b6d19565b5854512490e4c688fd962209256cb38d6b0230f89a555",
+    "shadow_cases.jsonl": "ff900b8f7f88dc44a9370e910abd24e7b029d22cbdbcf8d1acb1586c034b52e6",
+    "source_manifest.json": "b1fd574fa926eb8e5ff22b0a313ffd8fa76b9cd66f3a945d045ef9c8fae190f0",
+    "split_manifest.json": "b1bf9c6cc9a6cf3b7efe37bc5b82c284b2f4a1483a666221a407648ecf73fb34"
+  },
+  "next_required_artifact": "frozen_relation_verdicts_and_complete_intent_proposals",
+  "normalization_version": "cmd-v4-runtime-text-normalization-v1",
+  "probe_set_counts": {
+    "represented": 3186,
+    "unseen": 753
+  },
+  "relation_request_count": 14164,
+  "relation_requests_use_gold": false,
+  "runtime_uses_gold": false,
+  "schema_version": "cmd-v4-evolution-dataset-manifest-v1",
+  "seed": 20260809,
+  "semantic_edges_from_labels": false,
+  "source_manifest_sha256": "b1fd574fa926eb8e5ff22b0a313ffd8fa76b9cd66f3a945d045ef9c8fae190f0",
+  "split_manifest_sha256": "b1bf9c6cc9a6cf3b7efe37bc5b82c284b2f4a1483a666221a407648ecf73fb34",
+  "split_policy_version": "cmd-v4-dependency-split-v1",
+  "token_budget": 100000
+}

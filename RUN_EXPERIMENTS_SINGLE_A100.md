@@ -1,309 +1,286 @@
-# 双卡 A100 观测式实验执行手册（2026-07-31）
+# CMD 双 GPU 实验运行手册
 
-状态：observational arena 框架已完成，467 tests pass。两张 A100 通过不同 SSH 连接，
-并行执行全部实验。
+状态：V4 neuro-symbolic memory evolution 实验控制面已实现。本文对应
+`run_remaining_experiments.sh`，同时保留旧 arena/Phase 1/SIGIL 角色。
 
----
+## 1. 实验不是“两张卡各学一半策略”
 
-## 核心架构：两张卡的分工
+V4 必须保持严格 prequential 顺序，因此双卡只并行最耗时、但彼此独立的
+typed-intent 执行与 shadow scoring；policy update 只在合并后的冻结顺序上执行一次。
 
+```mermaid
+flowchart LR
+  D["data/evolution_v4\n3,939 runtime + sealed shadow rows"]
+  I["frozen relation instrument\ncomplete intent proposer"]
+  S["prepared_cases.jsonl\n完整 intent + frozen graph"]
+  G0["GPU0\nSHA256(case_id) mod 2 = 0\nports 8000/8001"]
+  G1["GPU1\nSHA256(case_id) mod 2 = 1\nports 8100/8101"]
+  M["CPU merge\n去重、覆盖、hash、event order"]
+  R["canonical prequential replay\nB0-B5 select-all then update"]
+  E["report.json\nfamily-block bootstrap gate"]
+  D --> I --> S
+  S --> G0
+  S --> G1
+  G0 --> M
+  G1 --> M
+  M --> R --> E
 ```
-GPU 0 (SSH 1)                          GPU 1 (SSH 2)
-─────────────────────────────────      ─────────────────────────────────
-Qwen judge :8000 + Llama :8001         Qwen judge :8000 + Llama :8001
-MemTrace-B seed 24                     MemTrace-B seed 224
-MemTrace-B seed 124                    STALE
-MemFail                                MemTrace-B replicate seed 24
-─────────────────────────────────      ─────────────────────────────────
-wall-clock: 取决于实际吞吐               wall-clock: 取决于实际吞吐
 
-汇聚：scp GPU1 artifacts/arena/*.jsonl → GPU0
-分析：./run_remaining_experiments.sh --role analyze  (~5min CPU)
-```
+这样做的理由很硬：如果 GPU0/GPU1 各自更新 policy，最后得到的是两个不同历史的
+repository，不是一个可复现实验。双卡产出的 shard 只包含 post-outcome evidence，
+不携带学习状态。
 
-Judge 全程冻结为 Qwen2.5-7B（包括 Llama 复现阶段），保证跨模型可比性。
+## 2. GPU 分工与端口
 
----
+| lane | 默认物理 GPU | Judge | Answerer | 工作 |
+|---|---:|---:|---:|---|
+| `v4_gpu0` | `0` | `8000` | `8001` | hash bucket 0 的 typed execution/scoring |
+| `v4_gpu1` | `1` | `8100` | `8101` | hash bucket 1 的 typed execution/scoring |
+| `v4_merge` | CPU | — | — | 严格合并和六臂 replay |
 
-## 启动前检查（两台都做）
+同一台双卡机器可直接使用默认值。若两台单卡机器都只暴露 local GPU 0，在第二台上
+设置 `CMD_GPU1_ID=0`；端口可以继续使用 8100/8101，也可以覆盖
+`CMD_GPU1_PORT_BASE`。
 
 ```bash
-cd ~/wsy/CMD_Memory
-git status          # 确认在 main，无未提交改动
-python -m pytest tests/ -q   # 预期 467 passed
+# 同一台双卡机器的默认绑定
+CMD_GPU0_ID=0 CMD_GPU0_PORT_BASE=8000
+CMD_GPU1_ID=1 CMD_GPU1_PORT_BASE=8100
+
+# 第二台单卡机器
+export CMD_GPU1_ID=0
+export CMD_GPU1_PORT_BASE=8100
 ```
 
-### 本地模型目录与缓存回退
+每个 lane 会在自己的物理卡上依次启动 frozen Qwen judge 和 Llama answerer，避免
+KV-cache 初始化竞争。`CUDA_VISIBLE_DEVICES`、PID、日志和端口均按 lane 隔离。
 
-脚本优先直接使用 `~/pretrained_lms` 中的本地权重：
+## 3. 统一数据构建与验证
 
-- `~/pretrained_lms/Qwen2.5-7B-Instruct`
-- `~/pretrained_lms/Meta-Llama-3.1-8B-Instruct`
+仓库内已冻结 CPU 数据包 `data/evolution_v4/`。它由 MemTrace、STALE、MemFail
+共同构建，但不把三域硬拼后随机切分：MemTrace 按 user/knowledge-point，STALE 按
+`-dimN` family，MemFail 按 `-qN` family；同一 dependency group 不会跨
+represented/unseen。
 
-因此本机已有这两个目录时，下面的命令无需额外环境变量：
+从原始数据重建：
 
 ```bash
-./run_remaining_experiments.sh --role gpu0 --smoke
+python -m experiments.build_v4_evolution_dataset \
+  --output-dir data/evolution_v4
+
+python -m experiments.validate_v4_evolution_dataset \
+  --dataset-dir data/evolution_v4 \
+  --output data/evolution_v4/validation_report.json
 ```
 
-可用 `CMD_PRETRAINED_LMS_ROOT` 覆盖该父目录；若本地目录不存在，脚本才通过 Hugging Face 的当前离线缓存查找，且不会联网下载。若仍报出 `LocalEntryNotFoundError`，先在 GPU 机器上寻找此前下载的 snapshot：
+也可以只复验仓库内已构建的数据：
 
 ```bash
-find "$HOME/wsy" -type d -path '*/models--Qwen--Qwen2.5-7B-Instruct/snapshots/*' 2>/dev/null
-find "$HOME/wsy" -type d -path '*/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/*' 2>/dev/null
+./run_remaining_experiments.sh --role v4_prepare --run-id v4-data-check
 ```
 
-将找到的两个 snapshot 目录显式传给脚本即可，无需重新下载：
+冻结统计为 3,939 cases、1,074 families、912 dependency groups、14,164
+runtime-only relation requests。验证器会重算三套 source hash、逐 case source hash、
+五个输出文件 hash、hidden-intent replay、retrieved-pair coverage、family isolation，
+并检查 runtime 中不存在 gold/label/`M_old:`/`M_new:`。
 
-```bash
-CMD_QWEN_MODEL_DIR=/path/to/models--Qwen--Qwen2.5-7B-Instruct/snapshots/<revision> \
-CMD_LLAMA_MODEL_DIR=/path/to/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/<revision> \
-./run_remaining_experiments.sh --role gpu0 --smoke
-```
+这个 CPU 包故意标为 `relation_instrument_pending`。`relation_requests.jsonl` 只能交给
+冻结 text-only instrument；不能用 shadow 中的 `perturbation_label` 直接制造 positive
+edge。instrument cache 和完整 proposer intents 都绑定后，才可生成下一节的
+`prepared_cases.jsonl`。
 
----
+## 4. 冻结 GPU 输入契约
 
-## GPU 0（SSH 1）— MemTrace-B ×2 + MemFail
-
-```bash
-cd ~/wsy/CMD_Memory
-
-# 冒烟（50 case，确认连通，~2min）
-./run_remaining_experiments.sh --role gpu0 --smoke
-
-# 正式运行（断开 SSH 仍继续；PID 和 tail 命令会打印到终端）
-./run_remaining_experiments.sh --role gpu0 --detach
-```
-
-产出（`artifacts/arena/`）：
-
-| 文件 | 内容 |
-|------|------|
-| `memtrace_seed24.jsonl` | MemTrace-B, seed 24（Llama answerer + Qwen judge，+ chains + deposit） |
-| `memtrace_seed124.jsonl` | MemTrace-B, seed 124（Llama answerer + Qwen judge，+ chains + deposit） |
-| `memtrace_observations.jsonl` | seed 24 别名（统一分析入口） |
-| `memfail_observations.jsonl` | MemFail 跨环境复现（no chains） |
-
----
-
-## GPU 1（SSH 2）— MemTrace-B seed 224 + STALE + replicate seed 24
-
-```bash
-cd ~/wsy/CMD_Memory
-
-# 冒烟（50 case，确认连通，~2min）
-./run_remaining_experiments.sh --role gpu1 --smoke
-
-# 正式运行（断开 SSH 仍继续）
-./run_remaining_experiments.sh --role gpu1 --detach
-```
-
-三个 phase 均使用双端点：Qwen judge `:8000` 冻结用于评估，Llama answerer `:8001` 用于生成与选择。为避免同卡显存与 KV-cache 初始化竞争，脚本会先等待 Qwen ready，再启动 Llama；默认显存配额分别为 `0.25` 和 `0.50`，可通过 `VLLM_QWEN_GPU_MEMORY_UTILIZATION`、`VLLM_LLAMA_GPU_MEMORY_UTILIZATION` 覆盖。Qwen 的 KV 预算较小，但本次带 `--deposit-after` 的 MemTrace 固定使用单 case worker，足以满足跑批需求。
-
-产出（`artifacts/arena/`）：
-
-| 文件 | 内容 |
-|------|------|
-| `memtrace_seed224.jsonl` | MemTrace-B, seed 224（Llama answerer + Qwen judge，+ chains + deposit） |
-| `stale_observations.jsonl` | STALE 邻接生态位竞争（no chains） |
-| `memtrace_llama.jsonl` | MemTrace-B replicate seed 24（Llama answerer + Qwen judge，+ chains + deposit） |
-
----
-
-## 断线存活、日志与断点续跑
-
-正式运行使用 `--detach`。它会以 `nohup + setsid` 启动独立会话，主日志写入
-`artifacts/arena/run_<role>_<timestamp>.log`；SSH 断开不会终止 arena 进程。启动后按脚本打印的路径查看进度，或使用：
-
-```bash
-tail -f artifacts/arena/run_gpu0_<timestamp>.log
-```
-
-Python 已启用无缓冲输出，phase 日志（`memtrace_*.log`、`memfail_run.log`、`stale_run.log`）和主日志均会持续更新。vLLM 冷启动就绪探测默认最多等待 300 秒。
-
-每个 Arena phase 在输出 JSONL 已存在且非空时会自动跳过。因此断线或前序 phase 完成后，直接重新执行同一条正式命令即可继续；如需强制重跑某个 phase，先删除它的 JSONL，再运行：
-
-```bash
-# GPU 0 强制重跑 MemTrace-B seed 124
-rm artifacts/arena/memtrace_seed124.jsonl
-./run_remaining_experiments.sh --role gpu0 --only memtrace_seed124 --detach
-
-# GPU 0 只跑 MemFail
-./run_remaining_experiments.sh --role gpu0 --only memfail --detach
-
-# GPU 1 只跑 STALE
-./run_remaining_experiments.sh --role gpu1 --only stale --detach
-
-# GPU 1 只跑 Llama（自动起双端点）
-./run_remaining_experiments.sh --role gpu1 --only memtrace_llama --detach
-```
-
-## 汇聚 + 统一分析
-
-GPU 1 完成后，把 JSONL 拉到 GPU 0：
-
-```bash
-# 在 GPU 0 上执行
-scp user@gpu1:~/wsy/CMD_Memory/artifacts/arena/memtrace_seed224.jsonl \
-       artifacts/arena/
-scp user@gpu1:~/wsy/CMD_Memory/artifacts/arena/stale_observations.jsonl \
-       artifacts/arena/
-scp user@gpu1:~/wsy/CMD_Memory/artifacts/arena/memtrace_llama.jsonl \
-       artifacts/arena/
-
-# 统一分析（无需 GPU）
-./run_remaining_experiments.sh --role analyze
-```
-
-分析器会按 manifest 中的 seed 为重复的 `arena_id` 建立独立 run ID，例如
-`memtrace_seed24`、`memtrace_seed124`；同 seed 的额外复现依次标记为
-`memtrace_seed24_rep2`，避免 ecology checkpoint 和跨 arena 统计互相覆盖。
-
-## Phase 1 双臂重测（离线闸门通过后）
-
-Phase 1 不复用旧 `gpu0` / `gpu1` 角色。每个 Arena 的 evolution-on 与
-all-frozen 必须留在同一张 GPU、同一组 Qwen/Llama 端点上，避免把硬件差异
-混入实验臂：
+默认输入是：
 
 ```text
-GPU 0: MemTrace seed 24 — evolution-on → all-frozen
-GPU 1: STALE            — evolution-on → all-frozen
+artifacts/neuro_symbolic_evolution_v4/prepared_cases.jsonl
 ```
 
-先在汇聚了四个 MemTrace JSONL 的机器上运行零调用 Phase 0：
+可用 `CMD_V4_SOURCE_CASES` 覆盖。每行必须使用
+`cmd-v4-live-materialization-input-v1`，且只包含以下闭合字段：
+
+```text
+schema_version
+case_id / family_id / probe_set
+context                 # deployment-visible PolicyContext；无 gold/family 特征
+graph                   # exact FrozenRelationGraph
+runtime_case            # graph hash 所绑定的 runtime-only state
+intents                 # 完整 RepairIntent，不是 grammar fragment
+legacy_intent_id
+chain_pairs             # 有序 [A, B]；A->B 与 B->A 分开
+probe_case              # 仅 live shadow evaluator 可读
+```
+
+`probe_case` 中的 gold 只在 intent 已生成、typed program 已执行后用于 judge scoring；
+它不会进入 policy context、intent proposal 或当次 selection。默认 live backend 是
+`experiments.v4_live_materialization:live_backend`。已经拥有完整
+`cmd-v4-prequential-case-v1` outcome bundle 时，可显式改为零调用 passthrough：
 
 ```bash
-python -m experiments.run_evolution_governance_phase0
+export CMD_V4_MATERIALIZER_BACKEND=experiments.v4_materialization:passthrough_backend
 ```
 
-确认 `artifacts/evolution_governance/phase0/phase0_summary.json` 中
-`phase1_gate_passed=true`，再把同一份 summary 复制到两台 GPU 的相同路径。
+输入缺失、schema 非闭合、graph/runtime hash 不一致、intent 不能编译或 endpoint
+未配置时，lane 会 fail closed，不会把失败伪装成负样本。
 
-两台先分别冒烟：
+## 5. 一次正式运行
+
+两条 GPU 命令必须使用同一个明确的 run ID。不要依赖自动时间戳，否则两个 shard
+会落入不同实验目录。
 
 ```bash
-# GPU 0
-./run_remaining_experiments.sh --role phase1_gpu0 --smoke
+cd /path/to/CMD_Counterfactual_Memory_Debugger
 
-# GPU 1
-./run_remaining_experiments.sh --role phase1_gpu1 --smoke
+export CMD_V4_SOURCE_CASES="$PWD/artifacts/neuro_symbolic_evolution_v4/prepared_cases.jsonl"
+export CMD_V4_CANDIDATE_BUDGET=4
+RUN_ID=v4-confirm-001
+
+./run_remaining_experiments.sh --role v4_gpu0 --run-id "$RUN_ID" --detach
+./run_remaining_experiments.sh --role v4_gpu1 --run-id "$RUN_ID" --detach
 ```
 
-冒烟只跑每个 Arena 的前 50 case，写入 `gpu0_smoke/`、`gpu1_smoke/`，
-不会占用正式输出。确认后并行启动：
+两张卡完成后运行 CPU merge/replay：
 
 ```bash
-# GPU 0
-./run_remaining_experiments.sh --role phase1_gpu0 --detach
-
-# GPU 1
-./run_remaining_experiments.sh --role phase1_gpu1 --detach
+./run_remaining_experiments.sh --role v4_merge --run-id "$RUN_ID" --detach
 ```
 
-GPU 1 完成后，将整个 `gpu1` 结果目录复制到 GPU 0：
+若 GPU 位于不同主机，先把 GPU1 的以下文件及 manifest 复制到汇聚主机的同一
+`RUN_ID` 目录：
+
+```text
+artifacts/neuro_symbolic_evolution_v4/runs/<RUN_ID>/materialized/gpu1.jsonl
+artifacts/neuro_symbolic_evolution_v4/runs/<RUN_ID>/materialized/gpu1.jsonl.manifest.json
+```
+
+正式 merge 会使用 `prepared_cases.jsonl` 的 case ID 集合检查无遗漏、无额外 case；
+然后校验 shard hash、重复 case、唯一 event index，并按
+`context.event_index, case_id` 排序。
+
+## 6. `--detach` 和 JSONL 流式监控
+
+`--detach` 由 Python supervisor 启动新 session，不再是不可审计的裸 `nohup`。
+每个 role 有一个不可复用的控制目录：
+
+```text
+artifacts/run_control/<RUN_ID>/<ROLE>/
+├── launch.json          # argv、GPU、PID、日志与 status 路径
+├── run.pid
+├── run.log              # stdout + stderr
+├── status.jsonl         # launched/running/completed/failed/stopping
+└── progress.jsonl       # case 级 materialization 进度（GPU role）
+```
+
+实时聚合所有已出现的 lifecycle/progress stream：
 
 ```bash
-scp -r user@gpu1:~/wsy/CMD_Memory/artifacts/evolution_governance/phase1/gpu1 \
-  artifacts/evolution_governance/phase1/
-./run_remaining_experiments.sh --role phase1_analyze
+./run_remaining_experiments.sh --role monitor --run-id "$RUN_ID"
+
+# 只打印当前 snapshot，不 follow
+./run_remaining_experiments.sh --role monitor --run-id "$RUN_ID" --once
 ```
 
-合并器会校验两端使用相同的 Phase 0 SHA256、seed 和 candidate budget，并要求
-Arena 恰好为 `memtrace` 与 `stale`。最终产物：
+查看或停止一个具体 role：
 
-- `phase1/combined/phase1_combined_summary.json`
-- `phase1/combined/phase1_combined_arena_summary.csv`
+```bash
+./run_remaining_experiments.sh \
+  --role status --run-id "$RUN_ID" --target-role v4_gpu0
 
-分析产出（`artifacts/arena/analysis/`）：
-
-| 文件 | 内容 |
-|------|------|
-| `signal_by_failure.csv` | gold-free/shadow 排序保真度按 failure_type |
-| `signal_by_probe_coordinates.csv` | 信号沿 age × question_type × evidence_condition 漂移 |
-| `niche_profiles.csv` | 每个 skill × failure_type × checkpoint 的 win rate |
-| `niche_overlap.csv` | skill 对余弦相似度 + 竞争标记 |
-| `succession.csv` | 各 skill 在各 checkpoint 的 winner share + diversity + JSD |
-| `cross_arena_niche_reproducibility.csv` | 同一 skill 在 memtrace/memfail/stale 上的 niche 余弦相似度 |
-| `chain_benefit_spectrum.csv` | 链增益分布（nonpositive/weak/meaningful） |
-| `chain_directionality.csv` | A→B vs B→A 平均增益差异 |
-| `coactivation_edges.csv` | 每 checkpoint 共激活网络边 |
-| `depositions.csv` | 沉积 composite skill |
-
----
-
-## 关键数据事实
-
-| 数据集 | cases | families | 运行位置 | chains |
-|--------|-------|----------|----------|--------|
-| MemTrace-B | 2047 | 182 | GPU 0 (×2 seeds) + GPU 1 (×1 seed) | yes |
-| MemTrace-B replicate seed 24 | 2047 | 182 | GPU 1 | yes |
-| MemFail | 692 | — | GPU 0 | no |
-| STALE | 1200 | ~400 | GPU 1 | no |
-
-## 吞吐估算
-
-| Arena | cases | LLM calls ~ | 单卡时间 |
-|-------|-------|------------|---------|
-| MemTrace-B (with chains) | 2047 | ~30K | ~1.5h |
-| MemFail (no chains) | 692 | ~8K | ~20min |
-| STALE (no chains) | 1200 | ~14K | ~25min |
-| MemTrace-B replicate seed 24 | 2047 | ~30K | 取决于实际吞吐 |
-
-`--deposit-after` 会将 MemTrace 限制为 `--case-workers 1`，实际墙钟时间应以主日志为准，不应把旧的 3.5h 估算当作上限。
-
-## 双端点评估设计
-
-所有 GPU phase 使用双端点：
-
-| 端点 | 端口 | 模型 | 用途 |
-|------|------|------|------|
-| Judge | 8000 | Qwen2.5-7B-Instruct | **冻结**，reference-free + shadow G-Eval |
-| Answerer | 8001 | Llama-3.1-8B-Instruct | 生成修复后回答 |
-
-Judge 冻结保证了跨模型可比性——gold-free 排名和 shadow 评分使用同一把尺子，
-只有 answerer 换了。这是审稿人认可的跨模型复现标准做法。
-
-## 模型选型说明
-
-| 模型 | 定位 | 理由 |
-|------|------|------|
-| Qwen2.5-7B-Instruct | 冻结 judge | 提供跨 phase 一致的选择与评估标尺 |
-| Llama-3.1-8B-Instruct | 跨家族复现 | 不同 pretrain corpus/tokenizer，真正测方法泛化 |
-
-不推荐的选择：
-- **Mistral-7B**：2023 年模型，现在显过时
-- **同家族换尺寸**（Qwen2.5-14B）：测的是 scaling 而非泛化，易被审稿人追问
-- **DeepSeek-R1**：reasoning-token 风格差异是额外变量，复杂化归因
-
-## 架构速查
-
-```
-case stream
-  → VLLMDualScoreArenaBackend
-    ├─ candidates()      gold-free: structural activation 排序
-    ├─ evaluate()        runtime: reference-free grounded-answer rubric
-    │                    shadow: G-Eval answer-rubric (读 gold_answer)
-    │                    两条评分路径隔离：runtime 物化后才算 shadow
-    └─ deposit_composite()  链沉积入候选池
-
-  → CompetitiveExecutor (top-3, winner-take-all via gold-free Δk)
-
-  → 三个 Observer (并行, append-only, 不改执行):
-    ├─ GoldFreeObserver   A: 排序保真度, Spearman ρ, oracle rank, shadow regret
-    ├─ EcologyObserver    B: win-rate niche, overlap, succession, diversity, JSD
-    └─ ChainObserver      C: co-activation, chain benefit spectrum, directionality
-
-  → write_arena_artifacts  →  JSONL (每行一个 record, allow_nan=False)
-  → analyze_arena_results  →  CSVs (描述性; 配对检验已计算,
-                                 hypothesis_test_role=descriptive_not_confirmatory)
+./run_remaining_experiments.sh \
+  --role stop --run-id "$RUN_ID" --target-role v4_gpu0
 ```
 
----
+停止使用进程组 `SIGTERM`，因此 supervisor 和它启动的 vLLM/worker 同属一个可控
+边界。状态 JSONL 是事实源；`run.log` 只用于诊断。
 
-## 旧干预式实验（Exp14-25）保留路径
+## 7. 冒烟
 
-已完成的自建数据实验作用：
+GPU 冒烟只取输入前 `CMD_V4_SMOKE_CASES` 行再按 hash lane 分片，默认 20：
 
-- **论文主体**：观测式 Arena（MemTrace-B / MemFail / STALE）
-- **Appendix 补充证据**：Exp24 多臂对照 + Exp22 operator transfer + Exp25 durability
-- **不必重跑**：除非审稿人要求额外的干预式对照
+```bash
+RUN_ID=v4-smoke-001
+./run_remaining_experiments.sh --role v4_gpu0 --run-id "$RUN_ID" --smoke --detach
+./run_remaining_experiments.sh --role v4_gpu1 --run-id "$RUN_ID" --smoke --detach
+./run_remaining_experiments.sh --role monitor --run-id "$RUN_ID"
+```
+
+`v4_merge --smoke` 不要求覆盖正式全集，但仍要求两个 shard 无重复、event index
+唯一。冒烟输入必须同时含 represented 和 unseen families，否则统计 gate 会拒绝，
+这是数据不足而不是代码失败。
+
+## 8. 六个实验臂与更新时序
+
+每个 case 使用相同 frozen candidates 和相同 candidate budget：
+
+| Arm | 含义 | 是否更新 |
+|---|---|---|
+| `identity` | 零修复 | 否 |
+| `legacy_symbolic` | 冻结 legacy intent | 否 |
+| `random_k` | case-hash 决定的随机候选 | 否 |
+| `global_policy` | 只有 global learned policy | 仅 represented |
+| `hierarchical_no_chain` | niche layering + species sediment | 仅 represented |
+| `full_v4` | 上述能力 + shadow repair-chain governance | 仅 represented |
+
+一个 case 内的执行顺序固定为：
+
+```text
+读取 L_t
+→ 六臂全部完成 selection
+→ 读取各自 selected intent 的 post-outcome
+→ 各臂只更新自己的 policy/repository
+→ L_(t+1) 对下一 case 生效
+```
+
+所有候选 outcome 都可用于离线 oracle/headroom 诊断，但未被某 arm 选中的 outcome
+不会进入该 arm 的学习。`full_v4` 的 chain 当前是 governed shadow evidence；在另有
+G5 deployment authorization 之前不声称在线 store mutation 或链执行收益。
+unseen family 只做 selection/scoring；其 outcome 不更新 policy、species 或 chain，
+否则“held-out-family safety”会被同一评估流内的在线适配污染。
+
+## 9. 输出与成功标准
+
+```text
+artifacts/neuro_symbolic_evolution_v4/runs/<RUN_ID>/
+├── materialized/
+│   ├── gpu0.jsonl
+│   ├── gpu0.jsonl.manifest.json
+│   ├── gpu1.jsonl
+│   └── gpu1.jsonl.manifest.json
+├── cases.merged.jsonl
+├── cases.merged.jsonl.manifest.json
+└── prequential/
+    ├── run_manifest.json
+    ├── arm_outcomes.jsonl
+    ├── progress.jsonl
+    ├── repositories/
+    │   ├── hierarchical_no_chain.sqlite
+    │   └── full_v4.sqlite
+    └── report.json
+```
+
+`report.json` 包含每臂 recovery、locality、utility、selection rate、utility AULC、
+represented/unseen 分层结果、repository hash、stable species/chain 计数和
+family-block bootstrap gate。
+
+能力演化 claim 只在以下条件同时成立时成立：
+
+1. `full_v4` 相对预注册 baseline 的 represented-family utility 差值与单侧 95%
+   lower bound 都大于 0；
+2. unseen-family safety estimate 不为负，lower bound 不低于冻结 margin；
+3. equal candidate budget、select-before-outcome、selected-action-only feedback 全部通过；
+4. locality、rollback、schema/hash 和 repository replay 无拒绝。
+
+`policy weights changed`、`repository 变大`、`出现 stable species` 或 `chain_count > 0`
+本身都不是能力增长证据。
+
+## 10. 旧实验角色
+
+旧 `gpu0/gpu1/analyze`、`phase1_*`、`sigil_*` 和 `route_a` 仍可用，并自动获得
+相同的 detached lifecycle、GPU ID 和 lane-specific 端口控制。查看完整列表：
+
+```bash
+./run_remaining_experiments.sh --help
+```
+
+V4 不会改写旧 arena JSONL，也不会用新结果重新解释 v1-v3 表格。

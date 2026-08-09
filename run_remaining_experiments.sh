@@ -1,50 +1,26 @@
 #!/usr/bin/env bash
-# CMD 观测式实验 — 双卡并行（每卡双端点：Llama answer/selection + frozen Qwen evaluation）
-#
-# Usage:
-#   SSH 1 (GPU 0):  ./run_remaining_experiments.sh --role gpu0
-#   SSH 2 (GPU 1):  ./run_remaining_experiments.sh --role gpu1
-#   后台运行:        ./run_remaining_experiments.sh --role gpu0 --detach
-#   任一台:         ./run_remaining_experiments.sh --role analyze   （先 scp 汇聚 JSONL）
-#   Phase 1 GPU 0:  ./run_remaining_experiments.sh --role phase1_gpu0 --detach
-#   Phase 1 GPU 1:  ./run_remaining_experiments.sh --role phase1_gpu1 --detach
-#   Phase 1 汇聚:   ./run_remaining_experiments.sh --role phase1_analyze
-#   SIGIL Stage 1 GPU 0: ./run_remaining_experiments.sh --role sigil_gpu0 --detach
-#   SIGIL Stage 1 GPU 1: ./run_remaining_experiments.sh --role sigil_gpu1 --detach
-#   SIGIL Stage 1 审计:  ./run_remaining_experiments.sh --role sigil_analyze
-#   冒烟:           ./run_remaining_experiments.sh --role gpu0 --smoke
-#   单 Arena 调试:  ./run_remaining_experiments.sh --role gpu0 --only memtrace_seed24
-#
-# GPU 0: MemTrace-B seed 24 → seed 124 → MemFail
-# GPU 1: MemTrace-B seed 224 → STALE → replicate seed 24
-#
-# 产出：artifacts/arena/*.jsonl，分析后 artifacts/arena/analysis/*.csv
+# CMD experiments: legacy arenas plus V4 two-GPU materialization/canonical replay.
 
 set -euo pipefail
 export PYTHONUNBUFFERED=1
 
-# ── 路径 ────────────────────────────────────────────────────────────────────
-CMD_ROOT="$HOME/wsy/CMD_Memory"
-CMD_VLLM_OVERLAY="$HOME/wsy/runtime/vllm085-transformers451"
+# ── Paths ───────────────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+CMD_ROOT="${CMD_ROOT:-$SCRIPT_DIR}"
+CMD_VLLM_OVERLAY="${CMD_VLLM_OVERLAY:-$HOME/wsy/runtime/vllm085-transformers451}"
 ARTIFACTS="$CMD_ROOT/artifacts/arena"
 EVOLUTION_ARTIFACTS="$CMD_ROOT/artifacts/evolution_governance"
 SIGIL_ARTIFACTS="$CMD_ROOT/artifacts/sigil_qd"
-QWVLLM_PORT=8000
-LLAMA_JUDGE_PORT=8000
-LLAMA_ANSWER_PORT=8001
-# Cross-judge lane: a third model serving only the *evaluation* judge, so the
-# answerer and selection judge stay byte-identical to the headline arm and the
-# judge is the single thing that changes. Reusing either existing model would
-# not work — selection is already Llama, so an evaluation judge on Llama trips
-# the same-model guard in _assert_distinct_judge_identities, and Qwen is the
-# headline evaluation judge, which is what we are trying to vary.
-CROSSJUDGE_PORT="${CROSSJUDGE_PORT:-8002}"
+RUNS_ROOT="${CMD_RUNS_ROOT:-$CMD_ROOT/artifacts/run_control}"
+V4_ARTIFACTS="${CMD_V4_ARTIFACTS:-$CMD_ROOT/artifacts/neuro_symbolic_evolution_v4}"
+V4_DATASET_DIR="${CMD_V4_DATASET_DIR:-$CMD_ROOT/data/evolution_v4}"
+V4_SOURCE_CASES="${CMD_V4_SOURCE_CASES:-$V4_ARTIFACTS/prepared_cases.jsonl}"
+V4_MATERIALIZER_BACKEND="${CMD_V4_MATERIALIZER_BACKEND:-experiments.v4_live_materialization:live_backend}"
+V4_CANDIDATE_BUDGET="${CMD_V4_CANDIDATE_BUDGET:-4}"
 CROSSJUDGE_MODEL="${CROSSJUDGE_MODEL:-mistral-7b-instruct-v0.3}"
 CROSSJUDGE_MODEL_REPO="${CROSSJUDGE_MODEL_REPO:-mistralai/Mistral-7B-Instruct-v0.3}"
 CROSSJUDGE_MODEL_DIRNAME="${CROSSJUDGE_MODEL_DIRNAME:-Mistral-7B-Instruct-v0.3}"
-PID_FILE="/tmp/vllm_shared.pid"
-LOG_FILE="/tmp/vllm_shared.log"
-JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://localhost:${LLAMA_JUDGE_PORT}/v1}"
 JUDGE_MODEL="${JUDGE_MODEL:-qwen2.5-7b-instruct}"
 JUDGE_API_KEY="${JUDGE_API_KEY:-dummy}"
 CMD_CASE_WORKERS="${CMD_CASE_WORKERS:-32}"
@@ -54,11 +30,14 @@ VLLM_QWEN_GPU_MEMORY_UTILIZATION="${VLLM_QWEN_GPU_MEMORY_UTILIZATION:-0.25}"
 VLLM_CROSSJUDGE_GPU_MEMORY_UTILIZATION="${VLLM_CROSSJUDGE_GPU_MEMORY_UTILIZATION:-0.22}"
 VLLM_LLAMA_GPU_MEMORY_UTILIZATION="${VLLM_LLAMA_GPU_MEMORY_UTILIZATION:-0.50}"
 
-# ── 参数 ────────────────────────────────────────────────────────────────────
+# ── Arguments ────────────────────────────────────────────────────────────────
 ROLE=""
 SMOKE=false
 ONLY=""
 DETACH=false
+RUN_ID=""
+TARGET_ROLE=""
+MONITOR_FOLLOW=true
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -68,13 +47,36 @@ while [[ $# -gt 0 ]]; do
       SMOKE=true; shift ;;
     --only)
       ONLY="$2"; shift 2 ;;
+    --run-id)
+      RUN_ID="$2"; shift 2 ;;
+    --target-role)
+      TARGET_ROLE="$2"; shift 2 ;;
+    --once)
+      MONITOR_FOLLOW=false; shift ;;
     --detach)
       DETACH=true; shift ;;
     --help|-h)
-      echo "Usage: $0 --role gpu0|gpu1|analyze|phase1_gpu0|phase1_gpu1|phase1_analyze|sigil_gpu0|sigil_gpu1|sigil_analyze|route_a [--smoke] [--only NAME] [--detach]"
+      echo "Usage: $0 --role ROLE [--run-id ID] [--smoke] [--only NAME] [--detach]"
       echo ""
-      echo "  GPU 0 (~3.5h): MemTrace-B seeds 24+124 → MemFail"
-      echo "  GPU 1 (~3.5h): MemTrace-B seed 224 → STALE → replicate seed 24"
+      echo "V4 roles:"
+      echo "  v4_prepare:    build if absent, then validate the CPU dataset package"
+      echo "  v4_gpu0:       materialize SHA256(case_id)%2 == 0 on GPU 0"
+      echo "  v4_gpu1:       materialize SHA256(case_id)%2 == 1 on GPU 1"
+      echo "  v4_merge:      verify/merge shards, then canonical six-arm replay (CPU)"
+      echo "  monitor:       stream lifecycle + experiment JSONL for --run-id"
+      echo "  status|stop:   inspect/terminate --target-role under --run-id"
+      echo ""
+      echo "GPU 0: physical id 0, ports 8000/8001 (override CMD_GPU0_ID/CMD_GPU0_PORT_BASE)"
+      echo "GPU 1: physical id 1, ports 8100/8101 (override CMD_GPU1_ID/CMD_GPU1_PORT_BASE)"
+      echo ""
+      echo "Legacy roles: gpu0, gpu1, analyze, phase1_gpu0, phase1_gpu1,"
+      echo "              phase1_analyze, sigil_gpu0, sigil_gpu1, sigil_analyze, route_a"
+      echo ""
+      echo "--detach creates launch.json, run.pid, run.log, and status.jsonl."
+      echo "Use the same explicit --run-id for v4_gpu0, v4_gpu1, monitor, and v4_merge."
+      echo ""
+      echo "  GPU 0 legacy: MemTrace-B seeds 24+124 → MemFail"
+      echo "  GPU 1 legacy: MemTrace-B seed 224 → STALE → replicate seed 24"
       echo "  analyze:        unified analysis (run after scp-ing results to one machine)"
       echo "  phase1_gpu0:    evolution-on vs frozen on MemTrace (same GPU/endpoints)"
       echo "  phase1_gpu1:    evolution-on vs frozen on STALE (same GPU/endpoints)"
@@ -83,7 +85,7 @@ while [[ $# -gt 0 ]]; do
       echo "  sigil_gpu1:     Stage 1 live item-gate shadow on STALE"
       echo "  sigil_analyze:  repair-validity audit + scope ledger (zero calls)"
       echo "  route_a:        Route A §15 chain; every stage gated, E0 STOP refuses downstream"
-      echo "  --detach:       run in a new session; logs to the role-specific artifacts directory"
+      echo "  --detach:       supervised background run with machine-readable lifecycle"
       echo ""
       echo "  --only:  skip straight to one named phase (memtrace_seed24, memtrace_seed124,"
       echo "           memtrace_seed224, memfail, stale, memtrace_llama,"
@@ -97,32 +99,70 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$ROLE" ]]; then
-  echo "ERROR: --role is required (gpu0 | gpu1 | analyze | phase1_gpu0 | phase1_gpu1 | phase1_analyze | sigil_gpu0 | sigil_gpu1 | sigil_analyze | route_a)" >&2
+  echo "ERROR: --role is required; see --help" >&2
   exit 1
 fi
 
-if $DETACH && [[ -z "${CMD_EXPERIMENTS_DETACHED:-}" ]]; then
-  detach_log_root="$ARTIFACTS"
-  if [[ "$ROLE" == phase1_* ]]; then
-    detach_log_root="${EVOLUTION_ARTIFACTS}/phase1/logs"
-  elif [[ "$ROLE" == sigil_* ]]; then
-    detach_log_root="${SIGIL_ARTIFACTS}/logs"
-  elif [[ "$ROLE" == route_a ]]; then
-    detach_log_root="${CMD_ROOT}/artifacts/route_a/logs"
-  fi
-  mkdir -p "$detach_log_root"
-  detach_log="${detach_log_root}/run_${ROLE}_$(date +%Y%m%d_%H%M%S).log"
-  detach_args=(--role "$ROLE")
+if [[ -z "$RUN_ID" ]]; then
+  RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+fi
+if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: --run-id may contain only letters, digits, dot, underscore, hyphen" >&2
+  exit 1
+fi
+
+LANE_GPU_ID=""
+LANE_LABEL="cpu"
+LANE_PORT_BASE=8000
+case "$ROLE" in
+  gpu0|phase1_gpu0|sigil_gpu0|v4_gpu0)
+    LANE_GPU_ID="${CMD_GPU0_ID:-0}"
+    LANE_LABEL="gpu0"
+    LANE_PORT_BASE="${CMD_GPU0_PORT_BASE:-8000}"
+    ;;
+  gpu1|phase1_gpu1|sigil_gpu1|v4_gpu1)
+    LANE_GPU_ID="${CMD_GPU1_ID:-1}"
+    LANE_LABEL="gpu1"
+    LANE_PORT_BASE="${CMD_GPU1_PORT_BASE:-8100}"
+    ;;
+esac
+
+QWVLLM_PORT="${CMD_QWVLLM_PORT:-$LANE_PORT_BASE}"
+LLAMA_JUDGE_PORT="${CMD_LLAMA_JUDGE_PORT:-$LANE_PORT_BASE}"
+LLAMA_ANSWER_PORT="${CMD_LLAMA_ANSWER_PORT:-$((LANE_PORT_BASE + 1))}"
+CROSSJUDGE_PORT="${CROSSJUDGE_PORT:-$((LANE_PORT_BASE + 2))}"
+PID_FILE="${CMD_VLLM_PID_FILE:-/tmp/vllm_shared_${LANE_LABEL}.pid}"
+LOG_FILE="${CMD_VLLM_LOG_FILE:-/tmp/vllm_shared_${LANE_LABEL}.log}"
+JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://localhost:${LLAMA_JUDGE_PORT}/v1}"
+V4_RUN_ROOT="${V4_ARTIFACTS}/runs/${RUN_ID}"
+CMD_RUN_DIR="${CMD_RUN_DIR:-${RUNS_ROOT}/${RUN_ID}/${ROLE}}"
+
+if $DETACH; then
+  case "$ROLE" in
+    monitor|status|stop)
+      echo "ERROR: control roles cannot be detached" >&2
+      exit 1 ;;
+  esac
+  detach_args=("$SCRIPT_PATH" --role "$ROLE" --run-id "$RUN_ID")
   $SMOKE && detach_args+=(--smoke)
   [[ -n "$ONLY" ]] && detach_args+=(--only "$ONLY")
-  nohup setsid env CMD_EXPERIMENTS_DETACHED=1 "$0" "${detach_args[@]}" \
-    > "$detach_log" 2>&1 < /dev/null &
-  detach_pid=$!
-  echo "[detach] started PID ${detach_pid} (log: ${detach_log})"
-  echo "[detach] follow: tail -f ${detach_log}"
+  [[ -n "$TARGET_ROLE" ]] && detach_args+=(--target-role "$TARGET_ROLE")
+  gpu_args=()
+  [[ -n "$LANE_GPU_ID" ]] && gpu_args=(--gpu-id "$LANE_GPU_ID")
+  cd "$CMD_ROOT"
+  python -m experiments.detached_run launch \
+    --run-dir "$CMD_RUN_DIR" \
+    --run-id "$RUN_ID" \
+    --role "$ROLE" \
+    "${gpu_args[@]}" \
+    -- "${detach_args[@]}"
+  echo "[detach] control dir: ${CMD_RUN_DIR}"
+  echo "[detach] monitor: ${SCRIPT_PATH} --role monitor --run-id ${RUN_ID}"
+  echo "[detach] status:  ${SCRIPT_PATH} --role status --run-id ${RUN_ID} --target-role ${ROLE}"
   exit 0
 fi
 
+mkdir -p "$CMD_RUN_DIR"
 cd "$CMD_ROOT"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -210,7 +250,7 @@ start_qwen_vllm() {
     PYTHONPATH="$CMD_VLLM_OVERLAY" \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
-    CUDA_VISIBLE_DEVICES=0 \
+    CUDA_VISIBLE_DEVICES="${LANE_GPU_ID:-${CUDA_VISIBLE_DEVICES:-0}}" \
     vllm serve "$CMD_QWEN_MODEL_DIR" \
     --host 127.0.0.1 \
     --served-model-name qwen2.5-7b-instruct \
@@ -292,7 +332,7 @@ start_llama_dual_vllm() {
       PYTHONPATH="$CMD_VLLM_OVERLAY" \
       HF_HUB_OFFLINE=1 \
       TRANSFORMERS_OFFLINE=1 \
-      CUDA_VISIBLE_DEVICES=0 \
+      CUDA_VISIBLE_DEVICES="${LANE_GPU_ID:-${CUDA_VISIBLE_DEVICES:-0}}" \
       vllm serve "$CMD_QWEN_MODEL_DIR" \
       --host 127.0.0.1 \
       --served-model-name qwen2.5-7b-instruct \
@@ -301,7 +341,7 @@ start_llama_dual_vllm() {
       --max-model-len 8192 \
       --max-num-seqs 32 \
       --enable-prefix-caching \
-      > /tmp/vllm_qwen_judge.log 2>&1 &
+      > "/tmp/vllm_qwen_judge_${LANE_LABEL}.log" 2>&1 &
     echo "[vLLM] Qwen judge pid $!"
     # Do not load both 8B models concurrently on one GPU: simultaneous KV-cache
     # profiling can leave either engine with no usable cache blocks.
@@ -315,7 +355,7 @@ start_llama_dual_vllm() {
       PYTHONPATH="$CMD_VLLM_OVERLAY" \
       HF_HUB_OFFLINE=1 \
       TRANSFORMERS_OFFLINE=1 \
-      CUDA_VISIBLE_DEVICES=0 \
+      CUDA_VISIBLE_DEVICES="${LANE_GPU_ID:-${CUDA_VISIBLE_DEVICES:-0}}" \
       vllm serve "$CMD_LLAMA_MODEL_DIR" \
       --host 127.0.0.1 \
       --served-model-name llama-3.1-8b-instruct \
@@ -324,7 +364,7 @@ start_llama_dual_vllm() {
       --max-model-len 8192 \
       --max-num-seqs 32 \
       --enable-prefix-caching \
-      > /tmp/vllm_llama_answer.log 2>&1 &
+      > "/tmp/vllm_llama_answer_${LANE_LABEL}.log" 2>&1 &
     echo "[vLLM] Llama answerer pid $!"
     wait_for_vllm_endpoint "$LLAMA_ANSWER_PORT" "Llama answerer"
   fi
@@ -346,7 +386,7 @@ start_crossjudge_vllm() {
     PYTHONPATH="$CMD_VLLM_OVERLAY" \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
-    CUDA_VISIBLE_DEVICES=0 \
+    CUDA_VISIBLE_DEVICES="${LANE_GPU_ID:-${CUDA_VISIBLE_DEVICES:-0}}" \
     vllm serve "$model_dir" \
     --host 127.0.0.1 \
     --served-model-name "$CROSSJUDGE_MODEL" \
@@ -355,7 +395,7 @@ start_crossjudge_vllm() {
     --max-model-len 8192 \
     --max-num-seqs 32 \
     --enable-prefix-caching \
-    > /tmp/vllm_crossjudge.log 2>&1 &
+    > "/tmp/vllm_crossjudge_${LANE_LABEL}.log" 2>&1 &
   echo "[vLLM] cross-judge pid $!"
   wait_for_vllm_endpoint "$CROSSJUDGE_PORT" "cross-judge"
 }
@@ -514,8 +554,8 @@ run_route_a_e0b() {
 }
 
 run_route_a_e3() {
-  route_a_step e3 "E3 open operator synthesis" \
-    python -m experiments.run_open_operator_synthesis
+  echo "[route-a] RETIRED E3 open grammar synthesis; use run_memory_evolution_v4" >&2
+  return 1
 }
 
 run_route_a_e4() {
@@ -1016,6 +1056,141 @@ main_sigil_analyze() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
+# V4: parallel materialization, single canonical prequential replay
+# ══════════════════════════════════════════════════════════════════════════════
+
+main_v4_prepare() {
+  local manifest="${V4_DATASET_DIR}/dataset_manifest.json"
+  local validation="${V4_DATASET_DIR}/validation_report.json"
+  if [[ ! -f "$manifest" ]]; then
+    python -m experiments.build_v4_evolution_dataset \
+      --output-dir "$V4_DATASET_DIR"
+  fi
+  python -m experiments.validate_v4_evolution_dataset \
+    --dataset-dir "$V4_DATASET_DIR" \
+    --output "$validation"
+  echo "===== V4 CPU DATASET PASS: ${manifest} ====="
+}
+
+main_v4_materialize() {
+  local lane="$1"
+  local output_dir="${V4_RUN_ROOT}/materialized"
+  local output="${output_dir}/${lane}.jsonl"
+  local progress="${CMD_RUN_DIR}/progress.jsonl"
+  local limit_args=()
+  mkdir -p "$output_dir"
+  if [[ ! -f "$V4_SOURCE_CASES" ]]; then
+    echo "ERROR: V4 source cases not found: ${V4_SOURCE_CASES}" >&2
+    echo "Set CMD_V4_SOURCE_CASES to frozen prepared/materialized case JSONL." >&2
+    return 1
+  fi
+  $SMOKE && limit_args=(--limit "${CMD_V4_SMOKE_CASES:-20}")
+
+  local started_vllm=false
+  if [[ "$V4_MATERIALIZER_BACKEND" != "experiments.v4_materialization:passthrough_backend" ]]; then
+    if ! start_llama_dual_vllm; then
+      stop_llama_dual_vllm
+      return 1
+    fi
+    started_vllm=true
+    llama_dual_env
+    if ! gate_g0; then
+      stop_llama_dual_vllm
+      return 1
+    fi
+  fi
+  local code=0
+  python -m experiments.v4_materialization materialize \
+    --source "$V4_SOURCE_CASES" \
+    --lane "$lane" \
+    --backend "$V4_MATERIALIZER_BACKEND" \
+    --output "$output" \
+    --progress "$progress" \
+    "${limit_args[@]}" || code=$?
+  if $started_vllm; then
+    stop_llama_dual_vllm
+  fi
+  if [[ $code -ne 0 ]]; then
+    return "$code"
+  fi
+  echo "===== V4 ${lane} MATERIALIZATION DONE: ${output} ====="
+}
+
+main_v4_gpu0() {
+  if [[ "$LANE_GPU_ID" != "${CMD_GPU0_ID:-0}" ]]; then
+    echo "ERROR: v4_gpu0 lane was not bound to CMD_GPU0_ID" >&2
+    return 1
+  fi
+  main_v4_materialize gpu0
+}
+
+main_v4_gpu1() {
+  if [[ "$LANE_GPU_ID" != "${CMD_GPU1_ID:-1}" ]]; then
+    echo "ERROR: v4_gpu1 lane was not bound to CMD_GPU1_ID" >&2
+    return 1
+  fi
+  main_v4_materialize gpu1
+}
+
+main_v4_merge() {
+  local materialized="${V4_RUN_ROOT}/materialized"
+  local merged="${V4_RUN_ROOT}/cases.merged.jsonl"
+  local replay="${V4_RUN_ROOT}/prequential"
+  local bootstrap_samples="${CMD_V4_BOOTSTRAP_SAMPLES:-10000}"
+  local expected_args=(--expected-source "$V4_SOURCE_CASES")
+  $SMOKE && bootstrap_samples=100
+  $SMOKE && expected_args=()
+  for lane in gpu0 gpu1; do
+    if [[ ! -f "${materialized}/${lane}.jsonl" ]]; then
+      echo "ERROR: missing ${lane} shard: ${materialized}/${lane}.jsonl" >&2
+      return 1
+    fi
+  done
+  python -m experiments.v4_materialization merge \
+    --shard "${materialized}/gpu0.jsonl" \
+    --shard "${materialized}/gpu1.jsonl" \
+    "${expected_args[@]}" \
+    --output "$merged"
+  python -m experiments.v4_prequential_runner \
+    --cases "$merged" \
+    --output-dir "$replay" \
+    --candidate-budget "$V4_CANDIDATE_BUDGET" \
+    --bootstrap-samples "$bootstrap_samples" \
+    --bootstrap-seed "${CMD_V4_BOOTSTRAP_SEED:-24}" \
+    --primary-baseline "${CMD_V4_PRIMARY_BASELINE:-global_policy}"
+  echo "===== V4 CANONICAL REPLAY DONE: ${replay}/report.json ====="
+}
+
+main_control_status() {
+  if [[ -z "$TARGET_ROLE" ]]; then
+    echo "ERROR: status/stop requires --target-role" >&2
+    return 1
+  fi
+  python -m experiments.detached_run "$ROLE" \
+    --run-dir "${RUNS_ROOT}/${RUN_ID}/${TARGET_ROLE}"
+}
+
+main_monitor() {
+  local monitor_args=()
+  local path
+  for path in "${RUNS_ROOT}/${RUN_ID}"/*/status.jsonl \
+              "${RUNS_ROOT}/${RUN_ID}"/*/progress.jsonl \
+              "${V4_RUN_ROOT}"/prequential/progress.jsonl; do
+    [[ -f "$path" ]] && monitor_args+=(--input "$path")
+  done
+  if [[ ${#monitor_args[@]} -eq 0 ]]; then
+    echo "ERROR: no JSONL streams found for run-id ${RUN_ID}" >&2
+    return 1
+  fi
+  if $MONITOR_FOLLOW; then
+    python -m experiments.jsonl_monitor "${monitor_args[@]}" \
+      --follow --exit-when-terminal
+  else
+    python -m experiments.jsonl_monitor "${monitor_args[@]}"
+  fi
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Dispatch
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1030,6 +1205,12 @@ case "$ROLE" in
   sigil_gpu1)     main_sigil_gpu1 ;;
   sigil_analyze)  main_sigil_analyze ;;
   route_a)        main_route_a ;;
+  v4_prepare)     main_v4_prepare ;;
+  v4_gpu0)        main_v4_gpu0 ;;
+  v4_gpu1)        main_v4_gpu1 ;;
+  v4_merge)       main_v4_merge ;;
+  monitor)        main_monitor ;;
+  status|stop)    main_control_status ;;
   *)
     echo "ERROR: invalid --role; see --help" >&2
     exit 1 ;;
