@@ -30,6 +30,17 @@ class PositiveRelationJudge:
         self.calls += 1
         return json.dumps({"relation": "same_slot_different_value", "slot": "fact"})
 
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        assert schema_name == "slot_relation"
+        return self.generate(prompt, system=system)
+
 
 class CompleteIntentJudge:
     def __init__(self) -> None:
@@ -101,8 +112,31 @@ class LeakingIntentJudge(CompleteIntentJudge):
 
 
 class MalformedRelationJudge:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def generate(self, prompt: str, *, system: str | None = None) -> str:
+        self.calls += 1
         return "not-json"
+
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        return self.generate(prompt, system=system)
+
+
+class RetryingRelationJudge(PositiveRelationJudge):
+    def generate(self, prompt: str, *, system: str | None = None) -> str:
+        assert "gold" not in prompt.casefold()
+        self.calls += 1
+        if self.calls % 2:
+            return '{"relation":"unrelated","reason":"extra"}'
+        return '```json\n{"relation":"same_slot_different_value","slot":"fact"}\n```'
 
 
 def _dataset(tmp_path: Path) -> Path:
@@ -152,7 +186,7 @@ def test_valid_frozen_inputs_produce_gpu_loadable_prepared_cases(
     rows = _rows(output)
 
     assert manifest["build_status"] == "gpu_input_ready"
-    assert report["decision"] == "PASS"
+    assert report["decision"] == "PASS", report["reasons"]
     assert len(rows) == 2
     assert all(validate_live_input(row).case_id == row["case_id"] for row in rows)
     assert all(len(row["intents"]) == 4 for row in rows)
@@ -228,6 +262,57 @@ def test_relation_cache_replay_makes_zero_repeated_relation_calls(
     assert (tmp_path / "replay.jsonl").read_bytes() == (
         tmp_path / "first.jsonl"
     ).read_bytes()
+
+
+def test_relation_attempt_ledger_binds_structured_retries_and_raw_responses(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    artifacts = tmp_path / "artifacts"
+    judge = RetryingRelationJudge()
+
+    manifest = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=tmp_path / "prepared.jsonl",
+        artifacts_dir=artifacts,
+        cache_path=tmp_path / "relation_cache.sqlite",
+        relation_judge=judge,
+        intent_judge=CompleteIntentJudge(),
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v1",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        max_relation_attempts=3,
+        limit=2,
+    )
+    attempts = _rows(artifacts / "relation_responses.jsonl")
+    report = validate_prepared_cases(
+        dataset_dir=dataset,
+        prepared_path=tmp_path / "prepared.jsonl",
+        manifest_path=artifacts / "preparation_manifest.json",
+    )
+
+    assert report["decision"] == "PASS", report["reasons"]
+    assert manifest["relation_model_call_count"] == judge.calls == len(attempts)
+    assert manifest["relation_attempt_count"] == len(attempts)
+    assert manifest["relation_retry_count"] * 2 == len(attempts)
+    assert manifest["max_relation_attempts"] == 3
+    assert manifest["relation_reason_counts"] == {
+        "accepted_fenced_json": len(attempts) // 2,
+        "invalid_schema": len(attempts) // 2,
+    }
+    assert all(row["structured_output_used"] is True for row in attempts)
+    for row in attempts:
+        raw = row["raw_response"]
+        assert row["raw_response_sha256"] == hashlib.sha256(raw.encode()).hexdigest()
+        assert row["response_record_sha256"] == canonical_sha256(
+            {
+                key: value
+                for key, value in row.items()
+                if key != "response_record_sha256"
+            }
+        )
 
 
 def test_validator_refuses_rehashed_evaluation_family_leak_in_runtime_context(
@@ -319,14 +404,17 @@ def test_preparation_refuses_relation_uncertainty_above_frozen_cutoff(
     tmp_path: Path,
 ) -> None:
     dataset = _dataset(tmp_path)
+    malformed = MalformedRelationJudge()
+    artifacts = tmp_path / "artifacts"
+    cache = tmp_path / "relation_cache.sqlite"
 
     with pytest.raises(ValueError, match="uncertainty rate exceeds frozen cutoff"):
         prepare_live_cases(
             dataset_dir=dataset,
             output_path=tmp_path / "prepared.jsonl",
-            artifacts_dir=tmp_path / "artifacts",
-            cache_path=tmp_path / "relation_cache.sqlite",
-            relation_judge=MalformedRelationJudge(),
+            artifacts_dir=artifacts,
+            cache_path=cache,
+            relation_judge=malformed,
             intent_judge=CompleteIntentJudge(),
             instrument_model_id="relation-model-v1",
             instrument_model_hash="a" * 64,
@@ -338,6 +426,33 @@ def test_preparation_refuses_relation_uncertainty_above_frozen_cutoff(
         )
 
     assert not (tmp_path / "prepared.jsonl").exists()
+    assert not (artifacts / "preparation_manifest.json").exists()
+    attempts = _rows(artifacts / "relation_responses.jsonl")
+    failure_report = json.loads(
+        (artifacts / "relation_measurement_report.json").read_text(encoding="utf-8")
+    )
+    assert len(attempts) == malformed.calls
+    assert failure_report["decision"] == "REFUSE"
+    assert failure_report["reason_counts"] == {"malformed_json": len(attempts)}
+
+    recovered = PositiveRelationJudge()
+    recovered_manifest = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=tmp_path / "prepared.jsonl",
+        artifacts_dir=artifacts,
+        cache_path=cache,
+        relation_judge=recovered,
+        intent_judge=CompleteIntentJudge(),
+        instrument_model_id="relation-model-v1",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v1",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        max_uncertain_rate=0.05,
+        limit=2,
+    )
+    assert recovered.calls > 0
+    assert recovered_manifest["relation_uncertain_count"] == 0
 
 
 def test_validator_refuses_rehashed_proposer_ledger_drift(
@@ -501,3 +616,86 @@ def test_validator_returns_refuse_for_adversarial_manifest_numeric_types(
 
     assert report["decision"] == "REFUSE"
     assert "preparation_manifest_numeric_contract" in report["reasons"]
+
+
+def test_validator_refuses_malformed_rehashed_relation_attempt_without_throwing(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    output = tmp_path / "prepared.jsonl"
+    artifacts = tmp_path / "artifacts"
+    prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=output,
+        artifacts_dir=artifacts,
+        cache_path=tmp_path / "cache.sqlite",
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=CompleteIntentJudge(),
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v1",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        limit=2,
+    )
+    response_path = artifacts / "relation_responses.jsonl"
+    responses = _rows(response_path)
+    responses[0]["attempt_index"] = "not-an-integer"
+    responses[0]["response_record_sha256"] = canonical_sha256(
+        {
+            key: value
+            for key, value in responses[0].items()
+            if key != "response_record_sha256"
+        }
+    )
+    response_path.write_text(
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            + "\n"
+            for row in responses
+        ),
+        encoding="utf-8",
+    )
+    report_path = artifacts / "relation_measurement_report.json"
+    measurement_report = json.loads(report_path.read_text(encoding="utf-8"))
+    measurement_report["response_stream_sha256"] = canonical_sha256(responses)
+    measurement_report["report_sha256"] = canonical_sha256(
+        {
+            key: value
+            for key, value in measurement_report.items()
+            if key != "report_sha256"
+        }
+    )
+    report_path.write_text(
+        json.dumps(measurement_report, ensure_ascii=False, sort_keys=True, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest_path = artifacts / "preparation_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    response_file_sha = hashlib.sha256(response_path.read_bytes()).hexdigest()
+    report_file_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest["relation_response_stream_sha256"] = response_file_sha
+    manifest["relation_measurement_report_sha256"] = report_file_sha
+    manifest["file_sha256"]["relation_responses.jsonl"] = response_file_sha
+    manifest["file_sha256"]["relation_measurement_report.json"] = report_file_sha
+    manifest["preparation_manifest_sha256"] = canonical_sha256(
+        {
+            key: value
+            for key, value in manifest.items()
+            if key != "preparation_manifest_sha256"
+        }
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    validation = validate_prepared_cases(
+        dataset_dir=dataset,
+        prepared_path=output,
+        manifest_path=manifest_path,
+    )
+
+    assert validation["decision"] == "REFUSE"
+    assert "relation_response_attempt_index" in validation["reasons"]

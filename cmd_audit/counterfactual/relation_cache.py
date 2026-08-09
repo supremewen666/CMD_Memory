@@ -68,8 +68,12 @@ class RelationCacheKey:
             "normalization_version": normalization_version,
             "instrument_version": instrument_version,
         }
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        return cls(cache_key=hashlib.sha256(encoded.encode("utf-8")).hexdigest(), **payload)
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        return cls(
+            cache_key=hashlib.sha256(encoded.encode("utf-8")).hexdigest(), **payload
+        )
 
 
 class RelationCache:
@@ -97,9 +101,14 @@ class RelationCache:
             """
         )
         existing_columns = {
-            row[1] for row in self._connection.execute("PRAGMA table_info(relation_verdicts)")
+            row[1]
+            for row in self._connection.execute("PRAGMA table_info(relation_verdicts)")
         }
-        for name in ("model_config_hash", "normalization_version", "instrument_version"):
+        for name in (
+            "model_config_hash",
+            "normalization_version",
+            "instrument_version",
+        ):
             if name not in existing_columns:
                 self._connection.execute(
                     f"ALTER TABLE relation_verdicts ADD COLUMN {name} TEXT NOT NULL DEFAULT 'legacy'"
@@ -109,14 +118,50 @@ class RelationCache:
     def get(self, key: RelationCacheKey) -> "RelationVerdict | None":
         with self._lock:
             row = self._connection.execute(
-                "SELECT verdict_json FROM relation_verdicts WHERE cache_key = ?", (key.cache_key,)
+                "SELECT verdict_json FROM relation_verdicts WHERE cache_key = ?",
+                (key.cache_key,),
             ).fetchone()
         if row is None:
             return None
-        from .slot_relation import RelationType, RelationVerdict
+        from .slot_relation import (
+            RelationAttempt,
+            RelationReason,
+            RelationType,
+            RelationVerdict,
+        )
 
         payload = json.loads(row[0])
-        return RelationVerdict(relation=RelationType(payload["relation"]), **{k: payload[k] for k in ("slot", "abstained", "prompt_sha256", "parser_version", "model_id")})
+        attempts = tuple(
+            RelationAttempt(
+                attempt_index=attempt["attempt_index"],
+                reason_code=RelationReason(attempt["reason_code"]),
+                raw_response=attempt["raw_response"],
+                raw_response_sha256=attempt["raw_response_sha256"],
+                structured_output_used=attempt["structured_output_used"],
+            )
+            for attempt in payload.get("attempts", ())
+        )
+        return RelationVerdict(
+            relation=RelationType(payload["relation"]),
+            **{
+                key: payload[key]
+                for key in (
+                    "slot",
+                    "abstained",
+                    "prompt_sha256",
+                    "parser_version",
+                    "model_id",
+                )
+            },
+            reason_code=RelationReason(
+                payload.get(
+                    "reason_code",
+                    "accepted" if not payload["abstained"] else "invalid_schema",
+                )
+            ),
+            raw_response_sha256=payload.get("raw_response_sha256"),
+            attempts=attempts,
+        )
 
     def put(self, key: RelationCacheKey, verdict: "RelationVerdict") -> None:
         payload = asdict(verdict)
@@ -131,15 +176,25 @@ class RelationCache:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    key.cache_key, key.canonical_left, key.canonical_right,
-                    key.prompt_sha256, key.parser_version, key.model_id,
-                    key.model_config_hash, key.normalization_version, key.instrument_version,
+                    key.cache_key,
+                    key.canonical_left,
+                    key.canonical_right,
+                    key.prompt_sha256,
+                    key.parser_version,
+                    key.model_id,
+                    key.model_config_hash,
+                    key.normalization_version,
+                    key.instrument_version,
                     json.dumps(payload, sort_keys=True, separators=(",", ":")),
                 ),
             )
 
     def resolve(
-        self, key: RelationCacheKey, measure: Callable[[], "RelationVerdict"]
+        self,
+        key: RelationCacheKey,
+        measure: Callable[[], "RelationVerdict"],
+        *,
+        cache_if: Callable[["RelationVerdict"], bool] | None = None,
     ) -> "RelationVerdict":
         """Return a cached measurement or execute it exactly once per process."""
         with self._lock:
@@ -147,7 +202,8 @@ class RelationCache:
             if cached is not None:
                 return cached
             verdict = measure()
-            self.put(key, verdict)
+            if cache_if is None or cache_if(verdict):
+                self.put(key, verdict)
             return verdict
 
     def audit_rows(self) -> list[dict[str, Any]]:
@@ -162,10 +218,16 @@ class RelationCache:
             ).fetchall()
         return [
             {
-                "cache_key": row[0], "canonical_left": row[1], "canonical_right": row[2],
-                "prompt_sha256": row[3], "parser_version": row[4], "model_id": row[5],
-                "model_config_hash": row[6], "normalization_version": row[7],
-                "instrument_version": row[8], "verdict": json.loads(row[9]),
+                "cache_key": row[0],
+                "canonical_left": row[1],
+                "canonical_right": row[2],
+                "prompt_sha256": row[3],
+                "parser_version": row[4],
+                "model_id": row[5],
+                "model_config_hash": row[6],
+                "normalization_version": row[7],
+                "instrument_version": row[8],
+                "verdict": json.loads(row[9]),
             }
             for row in rows
         ]

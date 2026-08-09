@@ -40,6 +40,7 @@ def test_shell_is_syntax_valid_and_defaults_to_its_checkout() -> None:
     assert "python -m experiments.prepare_v4_live_cases" in source
     assert "python -m experiments.validate_v4_prepared_cases" in source
     assert "prepared_cases.smoke.jsonl" in source
+    assert "CMD_V4_MAX_RELATION_ATTEMPTS:-3" in source
 
 
 def test_v4_gpu_roles_validate_the_exact_prepared_bundle_before_model_start() -> None:

@@ -103,10 +103,12 @@ edge。使用新增 role 完成 GPU 输入冻结：
 ```
 
 该 role 在 GPU0 上依次使用 Qwen relation instrument 和 Llama complete-intent
-proposer，输出 SQLite cache、instrument manifest、graph/intent ledger、prepared
-manifest 与零模型调用 validation report。默认 relation `uncertain` 上限为 5%；超过
-即拒绝整次准备。可用 `CMD_V4_MAX_UNCERTAIN_RATE` 覆盖，但正式协议必须在观察结果前
-冻结该值。
+proposer。relation 调用使用冻结 JSON Schema、最多 3 次确定性尝试，并把每次原始响应、
+response hash 与 `accepted_fenced_json` / `malformed_json` / `invalid_schema` /
+`transport_error` reason code 写入审计 ledger。可用
+`CMD_V4_MAX_RELATION_ATTEMPTS` 覆盖尝试预算。默认 relation `uncertain` 上限仍为 5%；
+超过即拒绝整次准备，但会保留 `relation_responses.jsonl` 和
+`relation_measurement_report.json` 供诊断。正式协议必须在观察结果前冻结这些值。
 
 3,939 个 source cases 中，3,100 个至少有一对 retrieved items，可形成 graph-bound
 intent；其余 839 个只有一个 retrieved item，明确记录为
@@ -163,6 +165,8 @@ artifacts/neuro_symbolic_evolution_v4/
     ├── smoke/
     │   ├── instrument_manifest.json
     │   ├── relation_cache_records.jsonl
+    │   ├── relation_responses.jsonl
+    │   ├── relation_measurement_report.json
     │   ├── graphs.jsonl
     │   ├── intent_proposals.jsonl
     │   └── preparation_manifest.json

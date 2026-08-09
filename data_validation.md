@@ -204,6 +204,10 @@
   `data/evolution_v4/relation_requests.jsonl.gz`, bind the resulting cache and
   complete proposer intents into `prepared_cases.jsonl` with:
   `./run_remaining_experiments.sh --role v4_prepare_inputs --run-id <ID> --detach`.
+  Relation measurements use strict JSON Schema, versioned bounded retry, and a
+  content-addressed raw-response/reason ledger. Exhausted uncertain verdicts are
+  not persisted as reusable cache facts; a refused run retains its measurement
+  report for diagnosis while still producing no GPU-ready manifest.
   `v4_gpu0` and `v4_gpu1` invoke `experiments.validate_v4_prepared_cases`
   themselves before starting model endpoints; an absent/mismatched preparation
   manifest therefore cannot enter GPU execution. Gold/labels may never fill that gap.

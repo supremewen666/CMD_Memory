@@ -1123,6 +1123,7 @@ main_v4_prepare_inputs() {
     --progress "${CMD_RUN_DIR}/progress.jsonl" \
     --candidate-budget "$V4_CANDIDATE_BUDGET" \
     --max-uncertain-rate "${CMD_V4_MAX_UNCERTAIN_RATE:-0.05}" \
+    --max-relation-attempts "${CMD_V4_MAX_RELATION_ATTEMPTS:-3}" \
     --max-proposer-retries "${CMD_V4_MAX_PROPOSER_RETRIES:-2}" \
     "${limit_args[@]}" || code=$?
   if $started_vllm; then

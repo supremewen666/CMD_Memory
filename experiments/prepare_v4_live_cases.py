@@ -42,8 +42,10 @@ from cmd_audit.counterfactual.relation_graph import (
 from cmd_audit.counterfactual.slot_relation import (
     PARSER_VERSION,
     PROMPT_TEMPLATE_SHA256,
+    RELATION_RESPONSE_SCHEMA_SHA256,
     SLOT_RELATION_VERSION,
     RelationType,
+    RelationVerdict,
     judge_relation,
 )
 from cmd_audit.repair.parametric_policy import (
@@ -64,13 +66,16 @@ from experiments.v4_live_materialization import (
 from experiments.validate_v4_evolution_dataset import validate_bundle
 
 
-PREPARATION_SCHEMA_VERSION = "cmd-v4-live-input-preparation-manifest-v1"
-INSTRUMENT_MANIFEST_SCHEMA_VERSION = "cmd-v4-relation-instrument-manifest-v1"
-CACHE_RECORDS_SCHEMA_VERSION = "cmd-v4-relation-cache-records-v1"
+PREPARATION_SCHEMA_VERSION = "cmd-v4-live-input-preparation-manifest-v2"
+INSTRUMENT_MANIFEST_SCHEMA_VERSION = "cmd-v4-relation-instrument-manifest-v2"
+CACHE_RECORDS_SCHEMA_VERSION = "cmd-v4-relation-cache-records-v2"
+RELATION_RESPONSE_ROW_VERSION = "cmd-v4-relation-response-row-v1"
+RELATION_MEASUREMENT_REPORT_VERSION = "cmd-v4-relation-measurement-report-v1"
 INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v1"
 INTENT_PROPOSAL_ROW_VERSION = "cmd-v4-intent-proposal-row-v1"
 GRAPH_ROW_VERSION = "cmd-v4-frozen-graph-row-v1"
 DEFAULT_MAX_UNCERTAIN_RATE = 0.05
+DEFAULT_RELATION_ATTEMPTS = 3
 DEFAULT_PROPOSER_RETRIES = 2
 _HEX = re.compile(r"^[0-9a-f]{64}$")
 _PROPOSAL_KEYS = frozenset(
@@ -334,6 +339,33 @@ def _cache_record(measurement: RelationMeasurementBinding) -> dict[str, object]:
     }
 
 
+def _response_records(
+    cache_key: str,
+    verdict: RelationVerdict,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for attempt in verdict.attempts:
+        payload: dict[str, object] = {
+            "schema_version": RELATION_RESPONSE_ROW_VERSION,
+            "cache_key": cache_key,
+            "attempt_index": attempt.attempt_index,
+            "reason_code": attempt.reason_code.value,
+            "raw_response": attempt.raw_response,
+            "raw_response_sha256": attempt.raw_response_sha256,
+            "structured_output_used": attempt.structured_output_used,
+            "prompt_sha256": verdict.prompt_sha256,
+            "parser_version": verdict.parser_version,
+            "instrument_version": SLOT_RELATION_VERSION,
+        }
+        rows.append(
+            {
+                **payload,
+                "response_record_sha256": canonical_sha256(payload),
+            }
+        )
+    return rows
+
+
 def _selected_assignments(
     assignments: Sequence[Mapping[str, object]],
     eligible_case_ids: set[str],
@@ -365,6 +397,7 @@ def _instrument_manifest(
     model_id: str,
     model_hash: str,
     max_uncertain_rate: float,
+    max_relation_attempts: int,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "schema_version": INSTRUMENT_MANIFEST_SCHEMA_VERSION,
@@ -376,6 +409,10 @@ def _instrument_manifest(
         "model_id": model_id,
         "model_config_sha256": model_hash,
         "max_uncertain_rate": max_uncertain_rate,
+        "max_relation_attempts": max_relation_attempts,
+        "response_schema_sha256": RELATION_RESPONSE_SCHEMA_SHA256,
+        "structured_output_required": True,
+        "raw_response_audit": True,
         "text_only": True,
         "direction_free": True,
         "gold_inputs": False,
@@ -391,16 +428,18 @@ def _measure_relations(
     instrument_manifest_sha256: str,
     model_id: str,
     model_hash: str,
-    max_uncertain_rate: float,
+    max_relation_attempts: int,
     progress_path: Path | None,
 ) -> tuple[
     dict[str, RelationMeasurementBinding],
+    list[dict[str, object]],
     list[dict[str, object]],
     int,
     int,
 ]:
     by_request: dict[str, RelationMeasurementBinding] = {}
     selected_cache_records: dict[str, dict[str, object]] = {}
+    selected_response_records: dict[str, dict[str, object]] = {}
     model_calls = 0
     uncertain = 0
     total = len(requests)
@@ -432,8 +471,7 @@ def _measure_relations(
             normalization_version=NORMALIZATION_VERSION,
             instrument_version=SLOT_RELATION_VERSION,
         )
-        if cache.get(key) is None:
-            model_calls += 1
+        cached_before = cache.get(key) is not None
         verdict = judge_relation(
             request["left_text"],
             request["right_text"],
@@ -441,7 +479,10 @@ def _measure_relations(
             cache=cache,
             model_id=model_id,
             model_config_hash=model_hash,
+            max_attempts=max_relation_attempts,
         )
+        if not cached_before:
+            model_calls += len(verdict.attempts)
         uncertain += verdict.relation is RelationType.UNCERTAIN
         measurement = RelationMeasurementBinding.build(
             left_text=request["left_text"],
@@ -462,6 +503,10 @@ def _measure_relations(
             raise ValueError("relation request IDs must be unique strings")
         by_request[request_id] = measurement
         selected_cache_records[measurement.cache_key] = _cache_record(measurement)
+        for response_record in _response_records(measurement.cache_key, verdict):
+            selected_response_records[response_record["response_record_sha256"]] = (
+                response_record
+            )
         _append_progress(
             progress_path,
             {
@@ -471,17 +516,15 @@ def _measure_relations(
                 "request_id": request_id,
                 "cache_key": measurement.cache_key,
                 "relation": measurement.relation,
+                "reason_code": verdict.reason_code.value,
+                "attempt_count": len(verdict.attempts),
+                "cache_hit": cached_before,
             },
-        )
-    uncertain_rate = uncertain / total if total else 0.0
-    if uncertain_rate > max_uncertain_rate:
-        raise ValueError(
-            "relation uncertainty rate exceeds frozen cutoff: "
-            f"{uncertain_rate:.6f} > {max_uncertain_rate:.6f}"
         )
     return (
         by_request,
         [selected_cache_records[key] for key in sorted(selected_cache_records)],
+        [selected_response_records[key] for key in sorted(selected_response_records)],
         model_calls,
         uncertain,
     )
@@ -835,6 +878,7 @@ def prepare_live_cases(
     proposer_model_hash: str,
     candidate_budget: int = 4,
     max_uncertain_rate: float = DEFAULT_MAX_UNCERTAIN_RATE,
+    max_relation_attempts: int = DEFAULT_RELATION_ATTEMPTS,
     max_proposer_retries: int = DEFAULT_PROPOSER_RETRIES,
     limit: int | None = None,
     progress_path: Path | None = None,
@@ -859,15 +903,16 @@ def prepare_live_cases(
         raise ValueError("max_uncertain_rate must be finite in [0, 1]")
     if max_proposer_retries < 0:
         raise ValueError("max_proposer_retries must be non-negative")
+    if (
+        isinstance(max_relation_attempts, bool)
+        or not isinstance(max_relation_attempts, int)
+        or max_relation_attempts < 1
+    ):
+        raise ValueError("max_relation_attempts must be a positive integer")
+    if not callable(getattr(relation_judge, "generate_json", None)):
+        raise ValueError("V4 relation judge must support strict JSON Schema output")
     manifest_path = artifacts_dir / "preparation_manifest.json"
-    reserved = (
-        output_path,
-        manifest_path,
-        artifacts_dir / "instrument_manifest.json",
-        artifacts_dir / "relation_cache_records.jsonl",
-        artifacts_dir / "graphs.jsonl",
-        artifacts_dir / "intent_proposals.jsonl",
-    )
+    reserved = (output_path, manifest_path)
     if any(path.exists() for path in reserved):
         raise ValueError("refusing to overwrite immutable V4 preparation artifacts")
 
@@ -919,20 +964,76 @@ def prepare_live_cases(
         model_id=instrument_model_id,
         model_hash=instrument_model_hash,
         max_uncertain_rate=float(max_uncertain_rate),
+        max_relation_attempts=max_relation_attempts,
     )
     instrument_hash = instrument_manifest["instrument_manifest_sha256"]
     with RelationCache(cache_path) as cache:
-        measurements, cache_records, relation_calls, uncertain_count = (
-            _measure_relations(
-                selected_requests,
-                judge=relation_judge,
-                cache=cache,
-                instrument_manifest_sha256=instrument_hash,
-                model_id=instrument_model_id,
-                model_hash=instrument_model_hash,
-                max_uncertain_rate=float(max_uncertain_rate),
-                progress_path=progress_path,
-            )
+        (
+            measurements,
+            cache_records,
+            response_records,
+            relation_calls,
+            uncertain_count,
+        ) = _measure_relations(
+            selected_requests,
+            judge=relation_judge,
+            cache=cache,
+            instrument_manifest_sha256=instrument_hash,
+            model_id=instrument_model_id,
+            model_hash=instrument_model_hash,
+            max_relation_attempts=max_relation_attempts,
+            progress_path=progress_path,
+        )
+    relation_uncertain_rate = uncertain_count / len(selected_requests)
+    relation_reason_counts = dict(
+        sorted(Counter(str(row["reason_code"]) for row in response_records).items())
+    )
+    attempts_by_cache = Counter(str(row["cache_key"]) for row in response_records)
+    relation_retry_count = sum(
+        max(0, attempt_count - 1) for attempt_count in attempts_by_cache.values()
+    )
+    response_stream_sha256 = canonical_sha256(response_records)
+    measurement_report_body: dict[str, object] = {
+        "schema_version": RELATION_MEASUREMENT_REPORT_VERSION,
+        "decision": (
+            "PASS" if relation_uncertain_rate <= float(max_uncertain_rate) else "REFUSE"
+        ),
+        "instrument_manifest_sha256": instrument_hash,
+        "relation_request_count": len(selected_requests),
+        "relation_attempt_count": len(response_records),
+        "relation_retry_count": relation_retry_count,
+        "relation_uncertain_count": uncertain_count,
+        "relation_uncertain_rate": relation_uncertain_rate,
+        "max_uncertain_rate": float(max_uncertain_rate),
+        "reason_counts": relation_reason_counts,
+        "response_stream_sha256": response_stream_sha256,
+    }
+    measurement_report = {
+        **measurement_report_body,
+        "report_sha256": canonical_sha256(measurement_report_body),
+    }
+    _atomic_json(artifacts_dir / "instrument_manifest.json", instrument_manifest)
+    _atomic_jsonl(artifacts_dir / "relation_cache_records.jsonl", cache_records)
+    _atomic_jsonl(artifacts_dir / "relation_responses.jsonl", response_records)
+    _atomic_json(
+        artifacts_dir / "relation_measurement_report.json",
+        measurement_report,
+    )
+    if relation_uncertain_rate > float(max_uncertain_rate):
+        _append_progress(
+            progress_path,
+            {
+                "event": "relation_gate_refused",
+                "relation_uncertain_count": uncertain_count,
+                "relation_uncertain_rate": relation_uncertain_rate,
+                "max_uncertain_rate": float(max_uncertain_rate),
+                "reason_counts": relation_reason_counts,
+                "report_sha256": measurement_report["report_sha256"],
+            },
+        )
+        raise ValueError(
+            "relation uncertainty rate exceeds frozen cutoff: "
+            f"{relation_uncertain_rate:.6f} > {float(max_uncertain_rate):.6f}"
         )
     cache_payload = {
         "schema_version": CACHE_RECORDS_SCHEMA_VERSION,
@@ -1058,6 +1159,11 @@ def prepare_live_cases(
 
     _atomic_json(artifacts_dir / "instrument_manifest.json", instrument_manifest)
     _atomic_jsonl(artifacts_dir / "relation_cache_records.jsonl", cache_records)
+    _atomic_jsonl(artifacts_dir / "relation_responses.jsonl", response_records)
+    _atomic_json(
+        artifacts_dir / "relation_measurement_report.json",
+        measurement_report,
+    )
     _atomic_jsonl(artifacts_dir / "graphs.jsonl", graph_rows)
     _atomic_jsonl(artifacts_dir / "intent_proposals.jsonl", intent_rows)
     _atomic_jsonl(output_path, prepared_rows)
@@ -1067,6 +1173,12 @@ def prepare_live_cases(
         ),
         "relation_cache_records.jsonl": _file_sha256(
             artifacts_dir / "relation_cache_records.jsonl"
+        ),
+        "relation_responses.jsonl": _file_sha256(
+            artifacts_dir / "relation_responses.jsonl"
+        ),
+        "relation_measurement_report.json": _file_sha256(
+            artifacts_dir / "relation_measurement_report.json"
         ),
         "graphs.jsonl": _file_sha256(artifacts_dir / "graphs.jsonl"),
         "intent_proposals.jsonl": _file_sha256(
@@ -1091,6 +1203,10 @@ def prepare_live_cases(
         ),
         "instrument_manifest_sha256": instrument_hash,
         "relation_cache_sha256": relation_cache_sha256,
+        "relation_response_stream_sha256": file_hashes["relation_responses.jsonl"],
+        "relation_measurement_report_sha256": file_hashes[
+            "relation_measurement_report.json"
+        ],
         "graph_stream_sha256": file_hashes["graphs.jsonl"],
         "intent_stream_sha256": file_hashes["intent_proposals.jsonl"],
         "prepared_stream_sha256": file_hashes["prepared_cases.jsonl"],
@@ -1113,9 +1229,13 @@ def prepare_live_cases(
         "relation_request_count": len(selected_requests),
         "unique_relation_cache_record_count": len(cache_records),
         "relation_model_call_count": relation_calls,
+        "relation_attempt_count": len(response_records),
+        "relation_retry_count": relation_retry_count,
+        "relation_reason_counts": relation_reason_counts,
         "relation_uncertain_count": uncertain_count,
-        "relation_uncertain_rate": uncertain_count / len(selected_requests),
+        "relation_uncertain_rate": relation_uncertain_rate,
         "max_uncertain_rate": float(max_uncertain_rate),
+        "max_relation_attempts": max_relation_attempts,
         "relation_counts": dict(sorted(relation_counts.items())),
         "actionability_counts": dict(sorted(actionability_counts.items())),
         "proposer_model_id": proposer_model_id,
@@ -1157,6 +1277,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--max-uncertain-rate", type=float, default=DEFAULT_MAX_UNCERTAIN_RATE
     )
     parser.add_argument(
+        "--max-relation-attempts",
+        type=int,
+        default=DEFAULT_RELATION_ATTEMPTS,
+    )
+    parser.add_argument(
         "--max-proposer-retries", type=int, default=DEFAULT_PROPOSER_RETRIES
     )
     parser.add_argument("--instrument-model-hash")
@@ -1184,6 +1309,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             proposer_model_hash=proposer_hash,
             candidate_budget=args.candidate_budget,
             max_uncertain_rate=args.max_uncertain_rate,
+            max_relation_attempts=args.max_relation_attempts,
             max_proposer_retries=args.max_proposer_retries,
             limit=args.limit,
             progress_path=args.progress,
@@ -1201,9 +1327,12 @@ if __name__ == "__main__":
 
 __all__ = [
     "DEFAULT_MAX_UNCERTAIN_RATE",
+    "DEFAULT_RELATION_ATTEMPTS",
     "INTENT_PROPOSER_VERSION",
     "IntentProposalCache",
     "PREPARATION_SCHEMA_VERSION",
+    "RELATION_MEASUREMENT_REPORT_VERSION",
+    "RELATION_RESPONSE_ROW_VERSION",
     "parse_intent_proposals",
     "intent_proposal_cache_key",
     "prepare_live_cases",

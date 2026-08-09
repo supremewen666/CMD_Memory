@@ -13,12 +13,20 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from cmd_audit.counterfactual.relation_graph import canonical_sha256
+from cmd_audit.counterfactual.slot_relation import (
+    RELATION_RESPONSE_SCHEMA_SHA256,
+    RelationReason,
+    RelationType,
+    parse_judge_response,
+)
 from experiments.prepare_v4_live_cases import (
     CACHE_RECORDS_SCHEMA_VERSION,
     GRAPH_ROW_VERSION,
     INSTRUMENT_MANIFEST_SCHEMA_VERSION,
     INTENT_PROPOSAL_ROW_VERSION,
     PREPARATION_SCHEMA_VERSION,
+    RELATION_MEASUREMENT_REPORT_VERSION,
+    RELATION_RESPONSE_ROW_VERSION,
     intent_proposal_cache_key,
     parse_intent_proposals,
     proposer_surface,
@@ -47,6 +55,8 @@ _MANIFEST_KEYS = frozenset(
         "dataset_manifest_file_sha256",
         "instrument_manifest_sha256",
         "relation_cache_sha256",
+        "relation_response_stream_sha256",
+        "relation_measurement_report_sha256",
         "graph_stream_sha256",
         "intent_stream_sha256",
         "prepared_stream_sha256",
@@ -65,9 +75,13 @@ _MANIFEST_KEYS = frozenset(
         "relation_request_count",
         "unique_relation_cache_record_count",
         "relation_model_call_count",
+        "relation_attempt_count",
+        "relation_retry_count",
+        "relation_reason_counts",
         "relation_uncertain_count",
         "relation_uncertain_rate",
         "max_uncertain_rate",
+        "max_relation_attempts",
         "relation_counts",
         "actionability_counts",
         "proposer_model_id",
@@ -112,6 +126,10 @@ _INSTRUMENT_KEYS = frozenset(
         "model_id",
         "model_config_sha256",
         "max_uncertain_rate",
+        "max_relation_attempts",
+        "response_schema_sha256",
+        "structured_output_required",
+        "raw_response_audit",
         "text_only",
         "direction_free",
         "gold_inputs",
@@ -130,6 +148,47 @@ _CACHE_RECORD_KEYS = frozenset(
         "normalization_version",
         "instrument_version",
         "verdict",
+    }
+)
+_CACHE_VERDICT_KEYS = frozenset(
+    {
+        "relation",
+        "slot",
+        "abstained",
+        "prompt_sha256",
+        "parser_version",
+        "model_id",
+    }
+)
+_RESPONSE_ROW_KEYS = frozenset(
+    {
+        "schema_version",
+        "cache_key",
+        "attempt_index",
+        "reason_code",
+        "raw_response",
+        "raw_response_sha256",
+        "structured_output_used",
+        "prompt_sha256",
+        "parser_version",
+        "instrument_version",
+        "response_record_sha256",
+    }
+)
+_MEASUREMENT_REPORT_KEYS = frozenset(
+    {
+        "schema_version",
+        "decision",
+        "instrument_manifest_sha256",
+        "relation_request_count",
+        "relation_attempt_count",
+        "relation_retry_count",
+        "relation_uncertain_count",
+        "relation_uncertain_rate",
+        "max_uncertain_rate",
+        "reason_counts",
+        "response_stream_sha256",
+        "report_sha256",
     }
 )
 
@@ -257,7 +316,10 @@ def validate_prepared_cases(
         "relation_request_count": 1,
         "unique_relation_cache_record_count": 1,
         "relation_model_call_count": 0,
+        "relation_attempt_count": 1,
+        "relation_retry_count": 0,
         "relation_uncertain_count": 0,
+        "max_relation_attempts": 1,
         "proposer_model_call_count": 0,
         "proposer_cache_hit_count": 0,
         "max_proposer_retries": 0,
@@ -297,6 +359,9 @@ def validate_prepared_cases(
     expected_artifacts = {
         "instrument_manifest.json": artifacts_dir / "instrument_manifest.json",
         "relation_cache_records.jsonl": artifacts_dir / "relation_cache_records.jsonl",
+        "relation_responses.jsonl": artifacts_dir / "relation_responses.jsonl",
+        "relation_measurement_report.json": artifacts_dir
+        / "relation_measurement_report.json",
         "graphs.jsonl": artifacts_dir / "graphs.jsonl",
         "intent_proposals.jsonl": artifacts_dir / "intent_proposals.jsonl",
         "prepared_cases.jsonl": prepared_path,
@@ -327,6 +392,10 @@ def validate_prepared_cases(
         graph_rows = _load_jsonl(artifacts_dir / "graphs.jsonl")
         intent_rows = _load_jsonl(artifacts_dir / "intent_proposals.jsonl")
         cache_records = _load_jsonl(artifacts_dir / "relation_cache_records.jsonl")
+        response_records = _load_jsonl(artifacts_dir / "relation_responses.jsonl")
+        measurement_report = _load_json(
+            artifacts_dir / "relation_measurement_report.json"
+        )
         instrument_manifest = _load_json(artifacts_dir / "instrument_manifest.json")
     except (OSError, ValueError, json.JSONDecodeError) as error:
         reasons.append(f"prepared_input_error:{type(error).__name__}")
@@ -353,6 +422,10 @@ def validate_prepared_cases(
         or instrument_manifest.get("text_only") is not True
         or instrument_manifest.get("direction_free") is not True
         or instrument_manifest.get("gold_inputs") is not False
+        or instrument_manifest.get("structured_output_required") is not True
+        or instrument_manifest.get("raw_response_audit") is not True
+        or instrument_manifest.get("response_schema_sha256")
+        != RELATION_RESPONSE_SCHEMA_SHA256
     ):
         reasons.append("instrument_manifest_contract")
     instrument_body = {
@@ -370,17 +443,31 @@ def validate_prepared_cases(
         "max_uncertain_rate"
     ):
         reasons.append("instrument_uncertainty_cutoff_mismatch")
+    if instrument_manifest.get("max_relation_attempts") != manifest.get(
+        "max_relation_attempts"
+    ):
+        reasons.append("instrument_relation_attempt_budget_mismatch")
     cache_record_hashes: set[str] = set()
+    cache_by_key: dict[str, Mapping[str, object]] = {}
     for record in cache_records:
         if set(record) != _CACHE_RECORD_KEYS or not isinstance(
             record.get("verdict"), Mapping
         ):
             reasons.append("relation_cache_record_not_closed")
             continue
+        verdict = record["verdict"]
+        if set(verdict) != _CACHE_VERDICT_KEYS:
+            reasons.append("relation_cache_verdict_not_closed")
+            continue
         digest = canonical_sha256(record)
         if digest in cache_record_hashes:
             reasons.append("duplicate_relation_cache_record")
         cache_record_hashes.add(digest)
+        cache_key = record.get("cache_key")
+        if not isinstance(cache_key, str) or cache_key in cache_by_key:
+            reasons.append("duplicate_or_invalid_relation_cache_key")
+        else:
+            cache_by_key[cache_key] = record
     cache_payload = {
         "schema_version": CACHE_RECORDS_SCHEMA_VERSION,
         "instrument_manifest_sha256": manifest.get("instrument_manifest_sha256"),
@@ -390,6 +477,147 @@ def validate_prepared_cases(
         reasons.append("relation_cache_logical_hash_mismatch")
     if manifest.get("unique_relation_cache_record_count") != len(cache_records):
         reasons.append("relation_cache_record_count_mismatch")
+    response_hashes: set[str] = set()
+    responses_by_cache: dict[str, list[Mapping[str, object]]] = defaultdict(list)
+    valid_reason_codes = {reason.value for reason in RelationReason}
+    for row in response_records:
+        if (
+            set(row) != _RESPONSE_ROW_KEYS
+            or row.get("schema_version") != RELATION_RESPONSE_ROW_VERSION
+        ):
+            reasons.append("relation_response_row_not_closed")
+            continue
+        claimed_hash = row.get("response_record_sha256")
+        row_body = {
+            key: value for key, value in row.items() if key != "response_record_sha256"
+        }
+        if (
+            claimed_hash != canonical_sha256(row_body)
+            or claimed_hash in response_hashes
+        ):
+            reasons.append("relation_response_record_hash_or_uniqueness")
+        if isinstance(claimed_hash, str):
+            response_hashes.add(claimed_hash)
+        raw_response = row.get("raw_response")
+        raw_hash = row.get("raw_response_sha256")
+        if raw_response is None:
+            if raw_hash is not None or row.get("reason_code") != "transport_error":
+                reasons.append("relation_response_raw_binding")
+        elif (
+            not isinstance(raw_response, str)
+            or raw_hash != hashlib.sha256(raw_response.encode("utf-8")).hexdigest()
+        ):
+            reasons.append("relation_response_raw_binding")
+        if (
+            row.get("reason_code") not in valid_reason_codes
+            or row.get("structured_output_used") is not True
+            or row.get("prompt_sha256")
+            != instrument_manifest.get("prompt_template_sha256")
+            or row.get("parser_version") != instrument_manifest.get("parser_version")
+            or row.get("instrument_version")
+            != instrument_manifest.get("instrument_version")
+        ):
+            reasons.append("relation_response_instrument_binding")
+        cache_key = row.get("cache_key")
+        if not isinstance(cache_key, str) or cache_key not in cache_by_key:
+            reasons.append("relation_response_unknown_cache_key")
+        elif not _valid_integer(row.get("attempt_index"), minimum=1):
+            reasons.append("relation_response_attempt_index")
+        else:
+            responses_by_cache[cache_key].append(row)
+    max_relation_attempts_raw = manifest.get("max_relation_attempts")
+    max_relation_attempts = (
+        max_relation_attempts_raw
+        if _valid_integer(max_relation_attempts_raw, minimum=1)
+        else -1
+    )
+    for cache_key, record in cache_by_key.items():
+        rows = sorted(
+            responses_by_cache.get(cache_key, ()),
+            key=lambda row: row["attempt_index"],
+        )
+        indexes = [row.get("attempt_index") for row in rows]
+        verdict = record["verdict"]
+        if indexes != list(range(1, len(rows) + 1)):
+            reasons.append("relation_response_attempt_sequence")
+        if not rows or len(rows) > max_relation_attempts:
+            reasons.append("relation_response_attempt_count_mismatch")
+            continue
+        final = rows[-1]
+        if final.get("raw_response") is None:
+            final_relation = RelationType.UNCERTAIN.value
+            final_slot = None
+            final_abstained = True
+        else:
+            parsed_final = parse_judge_response(
+                final["raw_response"],
+                prompt_sha256=str(final.get("prompt_sha256", "")),
+                model_id=str(verdict.get("model_id", "")),
+            )
+            final_relation = parsed_final.relation.value
+            final_slot = parsed_final.slot
+            final_abstained = parsed_final.abstained
+            if parsed_final.reason_code.value != final.get("reason_code"):
+                reasons.append("relation_response_final_reason_mismatch")
+        if (
+            verdict.get("relation") != final_relation
+            or verdict.get("slot") != final_slot
+            or verdict.get("abstained") is not final_abstained
+        ):
+            reasons.append("relation_response_final_verdict_mismatch")
+    expected_reason_counts = dict(
+        sorted(Counter(str(row.get("reason_code")) for row in response_records).items())
+    )
+    expected_retry_count = sum(
+        max(0, len(rows) - 1) for rows in responses_by_cache.values()
+    )
+    if manifest.get("relation_attempt_count") != len(response_records):
+        reasons.append("relation_attempt_count_mismatch")
+    if manifest.get("relation_retry_count") != expected_retry_count:
+        reasons.append("relation_retry_count_mismatch")
+    if manifest.get("relation_reason_counts") != expected_reason_counts:
+        reasons.append("relation_reason_counts_mismatch")
+    if manifest.get("relation_model_call_count", 0) > len(response_records):
+        reasons.append("relation_model_call_count_exceeds_attempts")
+    if manifest.get("relation_response_stream_sha256") != _file_sha256(
+        artifacts_dir / "relation_responses.jsonl"
+    ):
+        reasons.append("relation_response_stream_binding_mismatch")
+    report_body = {
+        key: value
+        for key, value in measurement_report.items()
+        if key != "report_sha256"
+    }
+    if (
+        set(measurement_report) != _MEASUREMENT_REPORT_KEYS
+        or measurement_report.get("schema_version")
+        != RELATION_MEASUREMENT_REPORT_VERSION
+        or measurement_report.get("decision") != "PASS"
+        or measurement_report.get("report_sha256") != canonical_sha256(report_body)
+        or measurement_report.get("instrument_manifest_sha256")
+        != manifest.get("instrument_manifest_sha256")
+        or measurement_report.get("relation_request_count")
+        != manifest.get("relation_request_count")
+        or measurement_report.get("relation_attempt_count")
+        != manifest.get("relation_attempt_count")
+        or measurement_report.get("relation_retry_count")
+        != manifest.get("relation_retry_count")
+        or measurement_report.get("relation_uncertain_count")
+        != manifest.get("relation_uncertain_count")
+        or measurement_report.get("relation_uncertain_rate")
+        != manifest.get("relation_uncertain_rate")
+        or measurement_report.get("max_uncertain_rate")
+        != manifest.get("max_uncertain_rate")
+        or measurement_report.get("reason_counts")
+        != manifest.get("relation_reason_counts")
+        or measurement_report.get("response_stream_sha256")
+        != canonical_sha256(response_records)
+    ):
+        reasons.append("relation_measurement_report_contract")
+    if manifest.get("relation_measurement_report_sha256") != _file_sha256(
+        artifacts_dir / "relation_measurement_report.json"
+    ):
+        reasons.append("relation_measurement_report_binding_mismatch")
     if manifest.get("graph_stream_sha256") != _file_sha256(
         artifacts_dir / "graphs.jsonl"
     ):
