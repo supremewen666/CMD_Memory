@@ -271,6 +271,29 @@ def test_intent_schema_encodes_actionability_instead_of_only_identifier_enums() 
     assert replace["properties"]["replacement_item_id"] == {"const": "new"}
 
 
+def test_intent_schema_avoids_unsupported_vllm_unique_items_keyword() -> None:
+    surface = {
+        "proposals_needed": 3,
+        "retrieved_items": [{"item_id": "old"}, {"item_id": "new"}],
+        "edges": [
+            {
+                "edge_id": "unknown",
+                "actionability": {
+                    "mode": "abstain",
+                    "target_item_id": None,
+                    "survivor_item_id": None,
+                },
+            }
+        ],
+    }
+
+    schema = preparation_module.intent_response_schema(surface)
+    proposals = schema["properties"]["proposals"]
+
+    assert proposals["minItems"] == proposals["maxItems"] == 3
+    assert "uniqueItems" not in proposals
+
+
 def test_valid_frozen_inputs_produce_gpu_loadable_prepared_cases(
     tmp_path: Path,
 ) -> None:

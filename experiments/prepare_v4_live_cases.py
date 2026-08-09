@@ -72,7 +72,7 @@ INSTRUMENT_MANIFEST_SCHEMA_VERSION = "cmd-v4-relation-instrument-manifest-v2"
 CACHE_RECORDS_SCHEMA_VERSION = "cmd-v4-relation-cache-records-v2"
 RELATION_RESPONSE_ROW_VERSION = "cmd-v4-relation-response-row-v1"
 RELATION_MEASUREMENT_REPORT_VERSION = "cmd-v4-relation-measurement-report-v1"
-INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v2-structured-json"
+INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v3-vllm-json-schema"
 INTENT_PROPOSAL_ROW_VERSION = "cmd-v4-intent-proposal-row-v1"
 INTENT_RESPONSE_ROW_VERSION = "cmd-v4-intent-response-row-v1"
 INTENT_PROPOSAL_REPORT_VERSION = "cmd-v4-intent-proposal-report-v1"
@@ -786,7 +786,6 @@ def intent_response_schema(
                 "type": "array",
                 "minItems": proposals_needed,
                 "maxItems": proposals_needed,
-                "uniqueItems": True,
                 "items": {"oneOf": proposal_branches},
             }
         },
