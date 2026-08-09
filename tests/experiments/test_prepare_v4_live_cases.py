@@ -42,6 +42,22 @@ class PositiveRelationJudge:
         return self.generate(prompt, system=system)
 
 
+def _slotted_proposals(schema: object) -> dict[str, dict[str, object]]:
+    slots = schema["properties"]["proposals"]["properties"]
+    proposals = {}
+    for index, (slot_name, slot_schema) in enumerate(slots.items(), 1):
+        branch = slot_schema["oneOf"][0]
+        properties = branch["properties"]
+        proposals[slot_name] = {
+            "strategy_id": f"slotted_semantic_action_v{index}",
+            "relation_edge_id": properties["relation_edge_id"]["const"],
+            "effect": properties["effect"]["const"],
+            "target_item_id": properties["target_item_id"]["const"],
+            "replacement_item_id": properties["replacement_item_id"]["const"],
+        }
+    return proposals
+
+
 class CompleteIntentJudge:
     def __init__(self) -> None:
         self.calls = 0
@@ -112,13 +128,32 @@ class CompleteIntentJudge:
         system: str | None = None,
     ) -> str:
         assert schema_name == "repair_intents"
-        return self.generate(prompt, system=system)
+        assert "gold" not in prompt.casefold()
+        assert "family_id" not in prompt
+        self.calls += 1
+        return json.dumps({"proposals": _slotted_proposals(schema)})
 
 
 class LeakingIntentJudge(CompleteIntentJudge):
-    def generate(self, prompt: str, *, system: str | None = None) -> str:
-        value = json.loads(super().generate(prompt, system=system))
-        value["proposals"][0]["strategy_id"] = "gold_case_target_strategy_v1"
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        value = json.loads(
+            super().generate_json(
+                prompt,
+                schema=schema,
+                schema_name=schema_name,
+                system=system,
+            )
+        )
+        value["proposals"]["candidate_1"]["strategy_id"] = (
+            "gold_case_target_strategy_v1"
+        )
         return json.dumps(value)
 
 
@@ -168,26 +203,84 @@ class RetryingIntentJudge(CompleteIntentJudge):
         if len(self.schema_hashes) % 2:
             self.calls += 1
             return "not-json"
-        return f"```json\n{self.generate(prompt, system=system)}\n```"
+        response = super().generate_json(
+            prompt,
+            schema=schema,
+            schema_name=schema_name,
+            system=system,
+        )
+        return f"```json\n{response}\n```"
 
 
 class DuplicateUntilCorrectedIntentJudge(CompleteIntentJudge):
-    def generate(self, prompt: str, *, system: str | None = None) -> str:
-        response = json.loads(super().generate(prompt, system=system))
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        response = json.loads(
+            super().generate_json(
+                prompt,
+                schema=schema,
+                schema_name=schema_name,
+                system=system,
+            )
+        )
         if "duplicate concrete intents" not in prompt:
-            response["proposals"] = [response["proposals"][0]] * 3
+            repeated = response["proposals"]["candidate_1"]
+            response["proposals"] = {
+                slot_name: repeated for slot_name in response["proposals"]
+            }
         return json.dumps(response)
 
 
 class RenamedDuplicateActionIntentJudge(CompleteIntentJudge):
-    def generate(self, prompt: str, *, system: str | None = None) -> str:
-        response = json.loads(super().generate(prompt, system=system))
-        repeated = response["proposals"][0]
-        response["proposals"] = [
-            {**repeated, "strategy_id": f"renamed_duplicate_action_v{index}"}
-            for index in range(1, 4)
-        ]
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        response = json.loads(
+            super().generate_json(
+                prompt,
+                schema=schema,
+                schema_name=schema_name,
+                system=system,
+            )
+        )
+        repeated = response["proposals"]["candidate_1"]
+        response["proposals"] = {
+            slot_name: {
+                **repeated,
+                "strategy_id": f"renamed_duplicate_action_v{index}",
+            }
+            for index, slot_name in enumerate(response["proposals"], 1)
+        }
         return json.dumps(response)
+
+
+class SlottedIntentJudge:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        assert schema_name == "repair_intents"
+        assert "gold" not in prompt.casefold()
+        self.calls += 1
+        return json.dumps({"proposals": _slotted_proposals(schema)})
 
 
 class MalformedIntentJudge:
@@ -256,7 +349,12 @@ def test_intent_schema_encodes_actionability_instead_of_only_identifier_enums() 
     }
 
     schema = preparation_module.intent_response_schema(surface)
-    branches = schema["properties"]["proposals"]["items"]["oneOf"]
+    slots = schema["properties"]["proposals"]["properties"]
+    branches = [
+        branch
+        for slot_schema in slots.values()
+        for branch in slot_schema["oneOf"]
+    ]
     directed = [
         branch
         for branch in branches
@@ -268,23 +366,28 @@ def test_intent_schema_encodes_actionability_instead_of_only_identifier_enums() 
         if branch["properties"]["relation_edge_id"] == {"const": "unknown"}
     ]
 
-    assert {tuple(branch["properties"]["effect"]["enum"]) for branch in directed} == {
-        ("abstain", "annotate_conflict", "verify"),
-        ("demote", "suppress"),
-        ("replace",),
+    assert {branch["properties"]["effect"]["const"] for branch in directed} == {
+        "abstain",
+        "annotate_conflict",
+        "demote",
+        "replace",
+        "suppress",
+        "verify",
     }
-    assert len(unknown) == 1
-    assert unknown[0]["properties"]["effect"]["enum"] == [
+    assert {branch["properties"]["effect"]["const"] for branch in unknown} == {
         "abstain",
         "annotate_conflict",
         "verify",
-    ]
-    assert unknown[0]["properties"]["target_item_id"] == {"const": None}
-    assert unknown[0]["properties"]["replacement_item_id"] == {"const": None}
+    }
+    assert all(
+        branch["properties"]["target_item_id"] == {"const": None}
+        and branch["properties"]["replacement_item_id"] == {"const": None}
+        for branch in unknown
+    )
     replace = next(
         branch
         for branch in directed
-        if branch["properties"]["effect"]["enum"] == ["replace"]
+        if branch["properties"]["effect"] == {"const": "replace"}
     )
     assert replace["properties"]["target_item_id"] == {"const": "old"}
     assert replace["properties"]["replacement_item_id"] == {"const": "new"}
@@ -309,8 +412,64 @@ def test_intent_schema_avoids_unsupported_vllm_unique_items_keyword() -> None:
     schema = preparation_module.intent_response_schema(surface)
     proposals = schema["properties"]["proposals"]
 
-    assert proposals["minItems"] == proposals["maxItems"] == 3
-    assert "uniqueItems" not in proposals
+    assert proposals["required"] == ["candidate_1", "candidate_2", "candidate_3"]
+    assert "uniqueItems" not in json.dumps(schema)
+
+
+def test_intent_schema_partitions_actions_across_closed_candidate_slots() -> None:
+    surface = {
+        "proposals_needed": 3,
+        "retrieved_items": [
+            {"item_id": "old"},
+            {"item_id": "new"},
+            {"item_id": "other"},
+        ],
+        "edges": [
+            {
+                "edge_id": "directed",
+                "actionability": {
+                    "mode": "destructive",
+                    "target_item_id": "old",
+                    "survivor_item_id": "new",
+                },
+            },
+            {
+                "edge_id": "unknown",
+                "actionability": {
+                    "mode": "annotate_only",
+                    "target_item_id": None,
+                    "survivor_item_id": None,
+                },
+            },
+        ],
+    }
+
+    schema = preparation_module.intent_response_schema(surface)
+    proposals = schema["properties"]["proposals"]
+    slots = proposals["properties"]
+
+    assert proposals["additionalProperties"] is False
+    assert proposals["required"] == ["candidate_1", "candidate_2", "candidate_3"]
+    assert set(slots) == set(proposals["required"])
+    action_sets = []
+    for slot in proposals["required"]:
+        actions = {
+            (
+                branch["properties"]["relation_edge_id"]["const"],
+                branch["properties"]["effect"]["const"],
+                branch["properties"]["target_item_id"]["const"],
+                branch["properties"]["replacement_item_id"]["const"],
+            )
+            for branch in slots[slot]["oneOf"]
+        }
+        assert actions
+        action_sets.append(actions)
+    assert len(set.union(*action_sets)) == 9
+    assert all(
+        left.isdisjoint(right)
+        for index, left in enumerate(action_sets)
+        for right in action_sets[index + 1 :]
+    )
 
 
 def test_valid_frozen_inputs_produce_gpu_loadable_prepared_cases(
@@ -365,6 +524,39 @@ def test_valid_frozen_inputs_produce_gpu_loadable_prepared_cases(
     assert manifest["relation_cache_sha256"]
     assert manifest["graph_stream_sha256"]
     assert manifest["intent_stream_sha256"]
+
+
+def test_slotted_structured_intents_produce_gpu_loadable_prepared_cases(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    output = tmp_path / "prepared_cases.jsonl"
+    artifacts = tmp_path / "preparation"
+    proposer = SlottedIntentJudge()
+
+    manifest = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=output,
+        artifacts_dir=artifacts,
+        cache_path=tmp_path / "relation_cache.sqlite",
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=proposer,
+        instrument_model_id="relation-model-v1",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v5",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        limit=2,
+    )
+
+    report = validate_prepared_cases(
+        dataset_dir=dataset,
+        prepared_path=output,
+        manifest_path=artifacts / "preparation_manifest.json",
+    )
+    assert manifest["build_status"] == "gpu_input_ready"
+    assert manifest["proposer_model_call_count"] == proposer.calls == 2
+    assert report["decision"] == "PASS", report["reasons"]
 
 
 def test_relation_cache_replay_makes_zero_repeated_relation_calls(
@@ -808,7 +1000,7 @@ def test_validator_refuses_rehashed_proposer_ledger_drift(
     )
     ledger_path = artifacts / "intent_proposals.jsonl"
     ledger = _rows(ledger_path)
-    ledger[0]["proposer_response"]["proposals"][0]["strategy_id"] = (
+    ledger[0]["proposer_response"]["proposals"]["candidate_1"]["strategy_id"] = (
         "different_reusable_strategy_v1"
     )
     ledger_path.write_text(

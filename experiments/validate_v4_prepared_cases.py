@@ -916,9 +916,8 @@ def validate_prepared_cases(
                 )
                 if intent_row.get("proposer_cache_key") != expected_cache_key:
                     reasons.append(f"proposer_cache_key_mismatch:{case_id}")
-                response_schema_sha256 = canonical_sha256(
-                    intent_response_schema(expected_surface)
-                )
+                response_schema = intent_response_schema(expected_surface)
+                response_schema_sha256 = canonical_sha256(response_schema)
                 audit_rows = sorted(
                     intent_responses_by_case.get(case_id, ()),
                     key=lambda audit_row: int(audit_row["attempt_index"]),
@@ -945,6 +944,7 @@ def validate_prepared_cases(
                         graph=frozen.graph,
                         proposals_needed=candidate_budget - 1,
                         proposer_model_hash=manifest["proposer_model_sha256"],
+                        response_schema=response_schema,
                     )
                     if [
                         intent.to_mapping() for intent in final_replayed
@@ -967,6 +967,7 @@ def validate_prepared_cases(
                     graph=frozen.graph,
                     proposals_needed=candidate_budget - 1,
                     proposer_model_hash=manifest["proposer_model_sha256"],
+                    response_schema=response_schema,
                 )
                 if [intent.to_mapping() for intent in replayed] != intent_row.get(
                     "intents", []

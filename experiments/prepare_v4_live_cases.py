@@ -72,7 +72,7 @@ INSTRUMENT_MANIFEST_SCHEMA_VERSION = "cmd-v4-relation-instrument-manifest-v2"
 CACHE_RECORDS_SCHEMA_VERSION = "cmd-v4-relation-cache-records-v2"
 RELATION_RESPONSE_ROW_VERSION = "cmd-v4-relation-response-row-v1"
 RELATION_MEASUREMENT_REPORT_VERSION = "cmd-v4-relation-measurement-report-v1"
-INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v4-corrective-json"
+INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v5-disjoint-slots"
 INTENT_PROPOSAL_ROW_VERSION = "cmd-v4-intent-proposal-row-v1"
 INTENT_RESPONSE_ROW_VERSION = "cmd-v4-intent-response-row-v1"
 INTENT_PROPOSAL_REPORT_VERSION = "cmd-v4-intent-proposal-report-v1"
@@ -97,9 +97,10 @@ _SINGLE_JSON_FENCE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 INTENT_PROMPT_TEMPLATE = (
-    "Return exactly one JSON object with key proposals. The value must contain "
-    "exactly proposals_needed complete repair proposals. Use only listed edge "
-    "and item identifiers. Destructive effects demote, suppress, or replace "
+    "Return exactly one JSON object with key proposals. The value is a closed "
+    "candidate-slot object defined by the supplied JSON Schema; fill every required "
+    "candidate_N slot exactly once. Use only listed edge and item identifiers. "
+    "Destructive effects demote, suppress, or replace "
     "require the listed actionability target; replace also requires its survivor. "
     "Unknown or conflicting direction permits only annotate_conflict, verify, or "
     "abstain. strategy_id must name a reusable versioned semantic motif and must "
@@ -713,7 +714,7 @@ def intent_response_schema(
     def branch(
         *,
         edge_id: str,
-        effects: Sequence[str],
+        effect: str,
         target_item_id: str | None,
         replacement_item_id: str | None,
     ) -> dict[str, object]:
@@ -728,7 +729,7 @@ def intent_response_schema(
                     "maxLength": 128,
                 },
                 "relation_edge_id": {"const": edge_id},
-                "effect": {"type": "string", "enum": list(effects)},
+                "effect": {"const": effect},
                 "target_item_id": {"const": target_item_id},
                 "replacement_item_id": {"const": replacement_item_id},
             },
@@ -751,13 +752,14 @@ def intent_response_schema(
         survivor = actionability.get("survivor_item_id")
         if mode not in {item.value for item in ActionMode}:
             raise ValueError("proposer surface has unknown actionability mode")
-        proposal_branches.append(
+        proposal_branches.extend(
             branch(
                 edge_id=edge_id,
-                effects=_SAFE_INTENT_EFFECTS,
+                effect=effect,
                 target_item_id=None,
                 replacement_item_id=None,
             )
+            for effect in _SAFE_INTENT_EFFECTS
         )
         if mode == ActionMode.DESTRUCTIVE.value:
             if (
@@ -769,23 +771,33 @@ def intent_response_schema(
             ):
                 raise ValueError("destructive actionability has invalid target binding")
             proposal_branches.extend(
-                (
-                    branch(
-                        edge_id=edge_id,
-                        effects=_TARGET_ONLY_INTENT_EFFECTS,
-                        target_item_id=target,
-                        replacement_item_id=None,
-                    ),
-                    branch(
-                        edge_id=edge_id,
-                        effects=("replace",),
-                        target_item_id=target,
-                        replacement_item_id=survivor,
-                    ),
+                branch(
+                    edge_id=edge_id,
+                    effect=effect,
+                    target_item_id=target,
+                    replacement_item_id=None,
+                )
+                for effect in _TARGET_ONLY_INTENT_EFFECTS
+            )
+            proposal_branches.append(
+                branch(
+                    edge_id=edge_id,
+                    effect="replace",
+                    target_item_id=target,
+                    replacement_item_id=survivor,
                 )
             )
         elif target is not None or survivor is not None:
             raise ValueError("non-destructive actionability cannot bind item targets")
+
+    proposal_branches.sort(key=lambda item: _canonical_bytes(item))
+    if len(proposal_branches) < proposals_needed:
+        raise ValueError("proposal budget exceeds distinct legal action space")
+    slot_names = [f"candidate_{index}" for index in range(1, proposals_needed + 1)]
+    slot_schemas = {
+        slot_name: {"oneOf": proposal_branches[index::proposals_needed]}
+        for index, slot_name in enumerate(slot_names)
+    }
 
     return {
         "type": "object",
@@ -793,10 +805,10 @@ def intent_response_schema(
         "required": ["proposals"],
         "properties": {
             "proposals": {
-                "type": "array",
-                "minItems": proposals_needed,
-                "maxItems": proposals_needed,
-                "items": {"oneOf": proposal_branches},
+                "type": "object",
+                "additionalProperties": False,
+                "required": slot_names,
+                "properties": slot_schemas,
             }
         },
     }
@@ -854,6 +866,7 @@ def parse_intent_proposals(
     graph: FrozenRelationGraph,
     proposals_needed: int,
     proposer_model_hash: str,
+    response_schema: Mapping[str, object],
 ) -> tuple[RepairIntent, ...]:
     value, _ = _parse_intent_response_object(response)
     if set(value) != {"proposals"}:
@@ -862,14 +875,29 @@ def parse_intent_proposals(
             "proposer response must be a closed proposals object",
         )
     proposals = value["proposals"]
-    if not isinstance(proposals, list) or len(proposals) != proposals_needed:
+    try:
+        proposal_schema = response_schema["properties"]["proposals"]
+        slot_names = proposal_schema["required"]
+        slot_schemas = proposal_schema["properties"]
+    except (KeyError, TypeError) as error:
+        raise ValueError("response schema lacks closed candidate slots") from error
+    if (
+        not isinstance(slot_names, list)
+        or slot_names
+        != [f"candidate_{index}" for index in range(1, proposals_needed + 1)]
+        or not isinstance(slot_schemas, Mapping)
+        or set(slot_schemas) != set(slot_names)
+        or not isinstance(proposals, Mapping)
+        or set(proposals) != set(slot_names)
+    ):
         raise IntentProposalError(
             IntentProposalReason.INVALID_SCHEMA,
-            "proposer response does not match frozen proposal budget",
+            "proposer response does not match frozen candidate slots",
         )
     edges = {edge.edge_id: edge for edge in graph.edges}
     intents: list[RepairIntent] = []
-    for proposal in proposals:
+    for slot_name in slot_names:
+        proposal = proposals[slot_name]
         if not isinstance(proposal, Mapping) or set(proposal) != _PROPOSAL_KEYS:
             raise IntentProposalError(
                 IntentProposalReason.INVALID_SCHEMA,
@@ -898,6 +926,26 @@ def parse_intent_proposals(
                 IntentProposalReason.COMPILER_REJECTED,
                 "intent proposal failed typed compilation",
             ) from error
+        action_tuple = (
+            intent.relation_edge_id,
+            intent.effect,
+            intent.target_item_id,
+            intent.replacement_item_id,
+        )
+        allowed_actions = {
+            (
+                branch["properties"]["relation_edge_id"]["const"],
+                branch["properties"]["effect"]["const"],
+                branch["properties"]["target_item_id"]["const"],
+                branch["properties"]["replacement_item_id"]["const"],
+            )
+            for branch in slot_schemas[slot_name]["oneOf"]
+        }
+        if action_tuple not in allowed_actions:
+            raise IntentProposalError(
+                IntentProposalReason.INVALID_SCHEMA,
+                "intent proposal violates its frozen candidate slot",
+            )
         intents.append(intent)
     if len({intent.intent_id for intent in intents}) != len(intents):
         raise IntentProposalError(
@@ -1004,6 +1052,7 @@ def _propose_intents(
             graph=graph,
             proposals_needed=proposals_needed,
             proposer_model_hash=proposer_model_hash,
+            response_schema=response_schema,
         )
         intents = (baseline, *proposed)
         if len({intent.intent_id for intent in intents}) != candidate_budget:
@@ -1073,6 +1122,7 @@ def _propose_intents(
                 graph=graph,
                 proposals_needed=proposals_needed,
                 proposer_model_hash=proposer_model_hash,
+                response_schema=response_schema,
             )
             intents = (baseline, *proposed)
             if len({intent.intent_id for intent in intents}) != candidate_budget:
