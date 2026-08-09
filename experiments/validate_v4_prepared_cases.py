@@ -23,11 +23,15 @@ from experiments.prepare_v4_live_cases import (
     CACHE_RECORDS_SCHEMA_VERSION,
     GRAPH_ROW_VERSION,
     INSTRUMENT_MANIFEST_SCHEMA_VERSION,
+    INTENT_PROPOSAL_REPORT_VERSION,
     INTENT_PROPOSAL_ROW_VERSION,
+    INTENT_RESPONSE_ROW_VERSION,
+    IntentProposalReason,
     PREPARATION_SCHEMA_VERSION,
     RELATION_MEASUREMENT_REPORT_VERSION,
     RELATION_RESPONSE_ROW_VERSION,
     intent_proposal_cache_key,
+    intent_response_schema,
     parse_intent_proposals,
     proposer_surface,
 )
@@ -59,6 +63,8 @@ _MANIFEST_KEYS = frozenset(
         "relation_measurement_report_sha256",
         "graph_stream_sha256",
         "intent_stream_sha256",
+        "intent_response_stream_sha256",
+        "intent_proposal_report_sha256",
         "prepared_stream_sha256",
         "file_sha256",
         "candidate_budget",
@@ -89,6 +95,10 @@ _MANIFEST_KEYS = frozenset(
         "proposer_version",
         "proposer_prompt_template_sha256",
         "proposer_model_call_count",
+        "proposer_attempt_count",
+        "proposer_retry_count",
+        "proposer_reason_counts",
+        "intent_response_schema_version",
         "proposer_cache_hit_count",
         "max_proposer_retries",
         "runtime_uses_gold",
@@ -113,6 +123,39 @@ _INTENT_ROW_KEYS = frozenset(
         "attempts",
         "proposer_cache_key",
         "proposer_cache_hit",
+    }
+)
+_INTENT_RESPONSE_KEYS = frozenset(
+    {
+        "schema_version",
+        "case_id",
+        "proposer_cache_key",
+        "attempt_index",
+        "reason_code",
+        "raw_response",
+        "raw_response_sha256",
+        "structured_output_used",
+        "prompt_template_sha256",
+        "proposer_version",
+        "response_schema_sha256",
+        "response_record_sha256",
+    }
+)
+_INTENT_REPORT_KEYS = frozenset(
+    {
+        "schema_version",
+        "decision",
+        "proposer_version",
+        "prompt_template_sha256",
+        "expected_case_count",
+        "audited_case_count",
+        "attempt_record_count",
+        "model_call_count",
+        "retry_count",
+        "reason_counts",
+        "response_stream_sha256",
+        "failure_reason",
+        "report_sha256",
     }
 )
 _INSTRUMENT_KEYS = frozenset(
@@ -321,6 +364,8 @@ def validate_prepared_cases(
         "relation_uncertain_count": 0,
         "max_relation_attempts": 1,
         "proposer_model_call_count": 0,
+        "proposer_attempt_count": 0,
+        "proposer_retry_count": 0,
         "proposer_cache_hit_count": 0,
         "max_proposer_retries": 0,
     }
@@ -364,6 +409,8 @@ def validate_prepared_cases(
         / "relation_measurement_report.json",
         "graphs.jsonl": artifacts_dir / "graphs.jsonl",
         "intent_proposals.jsonl": artifacts_dir / "intent_proposals.jsonl",
+        "intent_responses.jsonl": artifacts_dir / "intent_responses.jsonl",
+        "intent_proposal_report.json": artifacts_dir / "intent_proposal_report.json",
         "prepared_cases.jsonl": prepared_path,
     }
     if not isinstance(file_hashes, Mapping) or set(file_hashes) != set(
@@ -391,6 +438,10 @@ def validate_prepared_cases(
         prepared_rows = _load_jsonl(prepared_path)
         graph_rows = _load_jsonl(artifacts_dir / "graphs.jsonl")
         intent_rows = _load_jsonl(artifacts_dir / "intent_proposals.jsonl")
+        intent_response_rows = _load_jsonl(artifacts_dir / "intent_responses.jsonl")
+        intent_proposal_report = _load_json(
+            artifacts_dir / "intent_proposal_report.json"
+        )
         cache_records = _load_jsonl(artifacts_dir / "relation_cache_records.jsonl")
         response_records = _load_jsonl(artifacts_dir / "relation_responses.jsonl")
         measurement_report = _load_json(
@@ -626,6 +677,14 @@ def validate_prepared_cases(
         artifacts_dir / "intent_proposals.jsonl"
     ):
         reasons.append("intent_stream_binding_mismatch")
+    if manifest.get("intent_response_stream_sha256") != _file_sha256(
+        artifacts_dir / "intent_responses.jsonl"
+    ):
+        reasons.append("intent_response_stream_binding_mismatch")
+    if manifest.get("intent_proposal_report_sha256") != _file_sha256(
+        artifacts_dir / "intent_proposal_report.json"
+    ):
+        reasons.append("intent_proposal_report_binding_mismatch")
 
     runtime_by_id = {str(row.get("case_id")): row for row in runtime_rows}
     shadow_by_id = {str(row.get("case_id")): row for row in shadow_rows}
@@ -682,6 +741,115 @@ def validate_prepared_cases(
         reasons.append("graph_case_coverage_mismatch")
     if len(intent_by_id) != len(intent_rows) or set(intent_by_id) != set(selected_ids):
         reasons.append("intent_case_coverage_mismatch")
+
+    intent_responses_by_case: dict[str, list[Mapping[str, object]]] = defaultdict(list)
+    intent_response_hashes: set[str] = set()
+    valid_intent_reasons = {reason.value for reason in IntentProposalReason}
+    for response_row in intent_response_rows:
+        if (
+            set(response_row) != _INTENT_RESPONSE_KEYS
+            or response_row.get("schema_version") != INTENT_RESPONSE_ROW_VERSION
+        ):
+            reasons.append("intent_response_row_not_closed")
+            continue
+        response_body = {
+            key: value
+            for key, value in response_row.items()
+            if key != "response_record_sha256"
+        }
+        response_hash = response_row.get("response_record_sha256")
+        if (
+            response_hash != canonical_sha256(response_body)
+            or response_hash in intent_response_hashes
+        ):
+            reasons.append("intent_response_record_hash_or_uniqueness")
+        if isinstance(response_hash, str):
+            intent_response_hashes.add(response_hash)
+        raw_response = response_row.get("raw_response")
+        raw_hash = response_row.get("raw_response_sha256")
+        reason_code = response_row.get("reason_code")
+        if raw_response is None:
+            if raw_hash is not None or reason_code != "transport_error":
+                reasons.append("intent_response_raw_binding")
+        elif (
+            not isinstance(raw_response, str)
+            or raw_hash != hashlib.sha256(raw_response.encode("utf-8")).hexdigest()
+        ):
+            reasons.append("intent_response_raw_binding")
+        attempt_index = response_row.get("attempt_index")
+        if not _valid_integer(attempt_index):
+            reasons.append("intent_response_attempt_index")
+            continue
+        if (
+            reason_code not in valid_intent_reasons
+            or response_row.get("structured_output_used") is not True
+            or response_row.get("prompt_template_sha256")
+            != manifest.get("proposer_prompt_template_sha256")
+            or response_row.get("proposer_version") != manifest.get("proposer_version")
+        ):
+            reasons.append("intent_response_proposer_binding")
+        if (attempt_index == 0) != (reason_code == "cache_replay"):
+            reasons.append("intent_response_cache_replay_contract")
+        case_id = response_row.get("case_id")
+        if not isinstance(case_id, str) or case_id not in selected_ids:
+            reasons.append("intent_response_unknown_case")
+        else:
+            intent_responses_by_case[case_id].append(response_row)
+
+    intent_report_body = {
+        key: value
+        for key, value in intent_proposal_report.items()
+        if key != "report_sha256"
+    }
+    positive_intent_attempts = [
+        row
+        for row in intent_response_rows
+        if _valid_integer(row.get("attempt_index"), minimum=1)
+    ]
+    attempts_by_proposer_cache = Counter(
+        str(row.get("proposer_cache_key")) for row in positive_intent_attempts
+    )
+    expected_proposer_retries = sum(
+        max(0, count - 1) for count in attempts_by_proposer_cache.values()
+    )
+    expected_proposer_reasons = dict(
+        sorted(
+            Counter(str(row.get("reason_code")) for row in intent_response_rows).items()
+        )
+    )
+    if (
+        set(intent_proposal_report) != _INTENT_REPORT_KEYS
+        or intent_proposal_report.get("schema_version")
+        != INTENT_PROPOSAL_REPORT_VERSION
+        or intent_proposal_report.get("decision") != "PASS"
+        or intent_proposal_report.get("failure_reason") is not None
+        or intent_proposal_report.get("proposer_version")
+        != manifest.get("proposer_version")
+        or intent_proposal_report.get("prompt_template_sha256")
+        != manifest.get("proposer_prompt_template_sha256")
+        or intent_proposal_report.get("expected_case_count") != len(selected_ids)
+        or intent_proposal_report.get("audited_case_count")
+        != len(intent_responses_by_case)
+        or intent_proposal_report.get("attempt_record_count")
+        != len(intent_response_rows)
+        or intent_proposal_report.get("model_call_count")
+        != len(positive_intent_attempts)
+        or intent_proposal_report.get("retry_count") != expected_proposer_retries
+        or intent_proposal_report.get("reason_counts") != expected_proposer_reasons
+        or intent_proposal_report.get("response_stream_sha256")
+        != canonical_sha256(intent_response_rows)
+        or intent_proposal_report.get("report_sha256")
+        != canonical_sha256(intent_report_body)
+    ):
+        reasons.append("intent_proposal_report_contract")
+    if manifest.get("intent_response_schema_version") != INTENT_RESPONSE_ROW_VERSION:
+        reasons.append("intent_response_schema_version_mismatch")
+    if manifest.get("proposer_attempt_count") != len(intent_response_rows):
+        reasons.append("proposer_attempt_count_mismatch")
+    if manifest.get("proposer_retry_count") != expected_proposer_retries:
+        reasons.append("proposer_retry_count_mismatch")
+    if manifest.get("proposer_reason_counts") != expected_proposer_reasons:
+        reasons.append("proposer_reason_counts_mismatch")
 
     event_indexes: list[int] = []
     relation_counts: Counter[str] = Counter()
@@ -748,6 +916,40 @@ def validate_prepared_cases(
                 )
                 if intent_row.get("proposer_cache_key") != expected_cache_key:
                     reasons.append(f"proposer_cache_key_mismatch:{case_id}")
+                response_schema_sha256 = canonical_sha256(
+                    intent_response_schema(expected_surface)
+                )
+                audit_rows = sorted(
+                    intent_responses_by_case.get(case_id, ()),
+                    key=lambda audit_row: int(audit_row["attempt_index"]),
+                )
+                audit_indexes = [audit_row["attempt_index"] for audit_row in audit_rows]
+                if audit_indexes == [0]:
+                    expected_current_attempts = 0
+                elif audit_indexes == list(range(1, len(audit_rows) + 1)):
+                    expected_current_attempts = len(audit_rows)
+                else:
+                    expected_current_attempts = -1
+                    reasons.append(f"intent_response_attempt_sequence:{case_id}")
+                if not audit_rows or any(
+                    audit_row.get("proposer_cache_key") != expected_cache_key
+                    or audit_row.get("response_schema_sha256") != response_schema_sha256
+                    for audit_row in audit_rows
+                ):
+                    reasons.append(f"intent_response_schema_or_cache_binding:{case_id}")
+                elif audit_rows[-1].get("raw_response") is None:
+                    reasons.append(f"intent_response_final_transport_failure:{case_id}")
+                else:
+                    final_replayed = parse_intent_proposals(
+                        audit_rows[-1]["raw_response"],
+                        graph=frozen.graph,
+                        proposals_needed=candidate_budget - 1,
+                        proposer_model_hash=manifest["proposer_model_sha256"],
+                    )
+                    if [
+                        intent.to_mapping() for intent in final_replayed
+                    ] != intent_row.get("intents", [])[1:]:
+                        reasons.append(f"intent_response_final_binding:{case_id}")
                 response = intent_row.get("proposer_response")
                 if not isinstance(response, Mapping):
                     raise ValueError("proposer response is not a mapping")
@@ -788,6 +990,8 @@ def validate_prepared_cases(
                 )
                 if not valid_attempts:
                     reasons.append(f"proposer_attempt_count_invalid:{case_id}")
+                elif attempts != expected_current_attempts:
+                    reasons.append(f"proposer_attempt_ledger_mismatch:{case_id}")
                 else:
                     proposer_attempt_sum += attempts
                     proposer_cache_hit_sum += cache_hit

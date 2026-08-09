@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 from datetime import datetime
+from enum import Enum
 import gzip
 import hashlib
 import json
@@ -71,8 +72,10 @@ INSTRUMENT_MANIFEST_SCHEMA_VERSION = "cmd-v4-relation-instrument-manifest-v2"
 CACHE_RECORDS_SCHEMA_VERSION = "cmd-v4-relation-cache-records-v2"
 RELATION_RESPONSE_ROW_VERSION = "cmd-v4-relation-response-row-v1"
 RELATION_MEASUREMENT_REPORT_VERSION = "cmd-v4-relation-measurement-report-v1"
-INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v1"
+INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v2-structured-json"
 INTENT_PROPOSAL_ROW_VERSION = "cmd-v4-intent-proposal-row-v1"
+INTENT_RESPONSE_ROW_VERSION = "cmd-v4-intent-response-row-v1"
+INTENT_PROPOSAL_REPORT_VERSION = "cmd-v4-intent-proposal-report-v1"
 GRAPH_ROW_VERSION = "cmd-v4-frozen-graph-row-v1"
 DEFAULT_MAX_UNCERTAIN_RATE = 0.05
 DEFAULT_RELATION_ATTEMPTS = 3
@@ -86,6 +89,12 @@ _PROPOSAL_KEYS = frozenset(
         "target_item_id",
         "replacement_item_id",
     }
+)
+_SAFE_INTENT_EFFECTS = ("abstain", "annotate_conflict", "verify")
+_TARGET_ONLY_INTENT_EFFECTS = ("demote", "suppress")
+_SINGLE_JSON_FENCE = re.compile(
+    r"\A```(?:json)?[ \t]*\r?\n(?P<body>.*?)\r?\n```[ \t]*\Z",
+    re.IGNORECASE | re.DOTALL,
 )
 INTENT_PROMPT_TEMPLATE = (
     "Return exactly one JSON object with key proposals. The value must contain "
@@ -104,6 +113,22 @@ ORDERING_POLICY = OrderingPolicy(
     accepted_sources=("event_sequence",),
     source_semantics=(("event_sequence", "chronology_lower_target"),),
 )
+
+
+class IntentProposalReason(str, Enum):
+    ACCEPTED = "accepted"
+    ACCEPTED_FENCED_JSON = "accepted_fenced_json"
+    CACHE_REPLAY = "cache_replay"
+    MALFORMED_JSON = "malformed_json"
+    INVALID_SCHEMA = "invalid_schema"
+    COMPILER_REJECTED = "compiler_rejected"
+    TRANSPORT_ERROR = "transport_error"
+
+
+class IntentProposalError(ValueError):
+    def __init__(self, reason_code: IntentProposalReason, message: str) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
 
 
 class TextGenerator(Protocol):
@@ -650,6 +675,153 @@ def proposer_surface(
     }
 
 
+def intent_response_schema(
+    surface: Mapping[str, object],
+) -> dict[str, object]:
+    """Build a closed schema that admits only intents the typed compiler can use."""
+    proposals_needed = surface.get("proposals_needed")
+    edges = surface.get("edges")
+    items = surface.get("retrieved_items")
+    if (
+        isinstance(proposals_needed, bool)
+        or not isinstance(proposals_needed, int)
+        or proposals_needed < 1
+        or not isinstance(edges, list)
+        or not edges
+        or not isinstance(items, list)
+        or not items
+    ):
+        raise ValueError("proposer surface cannot define a response schema")
+    item_ids = sorted(
+        str(item["item_id"])
+        for item in items
+        if isinstance(item, Mapping) and isinstance(item.get("item_id"), str)
+    )
+    if len(item_ids) != len(items) or len(set(item_ids)) != len(item_ids):
+        raise ValueError("proposer surface carries invalid identifiers")
+
+    def branch(
+        *,
+        edge_id: str,
+        effects: Sequence[str],
+        target_item_id: str | None,
+        replacement_item_id: str | None,
+    ) -> dict[str, object]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": sorted(_PROPOSAL_KEYS),
+            "properties": {
+                "strategy_id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128,
+                },
+                "relation_edge_id": {"const": edge_id},
+                "effect": {"type": "string", "enum": list(effects)},
+                "target_item_id": {"const": target_item_id},
+                "replacement_item_id": {"const": replacement_item_id},
+            },
+        }
+
+    proposal_branches: list[dict[str, object]] = []
+    edge_ids: set[str] = set()
+    for edge in edges:
+        if not isinstance(edge, Mapping) or not isinstance(edge.get("edge_id"), str):
+            raise ValueError("proposer surface carries invalid edge identifiers")
+        edge_id = edge["edge_id"]
+        if not edge_id or edge_id in edge_ids:
+            raise ValueError("proposer surface edge identifiers must be unique")
+        edge_ids.add(edge_id)
+        actionability = edge.get("actionability")
+        if not isinstance(actionability, Mapping):
+            raise ValueError("proposer surface edge lacks actionability")
+        mode = actionability.get("mode")
+        target = actionability.get("target_item_id")
+        survivor = actionability.get("survivor_item_id")
+        if mode not in {item.value for item in ActionMode}:
+            raise ValueError("proposer surface has unknown actionability mode")
+        proposal_branches.append(
+            branch(
+                edge_id=edge_id,
+                effects=_SAFE_INTENT_EFFECTS,
+                target_item_id=None,
+                replacement_item_id=None,
+            )
+        )
+        if mode == ActionMode.DESTRUCTIVE.value:
+            if (
+                not isinstance(target, str)
+                or not isinstance(survivor, str)
+                or target not in item_ids
+                or survivor not in item_ids
+                or target == survivor
+            ):
+                raise ValueError("destructive actionability has invalid target binding")
+            proposal_branches.extend(
+                (
+                    branch(
+                        edge_id=edge_id,
+                        effects=_TARGET_ONLY_INTENT_EFFECTS,
+                        target_item_id=target,
+                        replacement_item_id=None,
+                    ),
+                    branch(
+                        edge_id=edge_id,
+                        effects=("replace",),
+                        target_item_id=target,
+                        replacement_item_id=survivor,
+                    ),
+                )
+            )
+        elif target is not None or survivor is not None:
+            raise ValueError("non-destructive actionability cannot bind item targets")
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["proposals"],
+        "properties": {
+            "proposals": {
+                "type": "array",
+                "minItems": proposals_needed,
+                "maxItems": proposals_needed,
+                "uniqueItems": True,
+                "items": {"oneOf": proposal_branches},
+            }
+        },
+    }
+
+
+def _parse_intent_response_object(
+    response: str,
+) -> tuple[Mapping[str, object], IntentProposalReason]:
+    if not isinstance(response, str):
+        raise IntentProposalError(
+            IntentProposalReason.MALFORMED_JSON,
+            "proposer response must be text",
+        )
+    fenced = _SINGLE_JSON_FENCE.fullmatch(response.strip())
+    payload = fenced.group("body") if fenced else response
+    try:
+        value = json.loads(payload)
+    except json.JSONDecodeError as error:
+        raise IntentProposalError(
+            IntentProposalReason.MALFORMED_JSON,
+            "proposer response is not one JSON object",
+        ) from error
+    if not isinstance(value, Mapping):
+        raise IntentProposalError(
+            IntentProposalReason.INVALID_SCHEMA,
+            "proposer response must be a JSON object",
+        )
+    return value, (
+        IntentProposalReason.ACCEPTED_FENCED_JSON
+        if fenced
+        else IntentProposalReason.ACCEPTED
+    )
+
+
 def intent_proposal_cache_key(
     surface: Mapping[str, object],
     *,
@@ -674,35 +846,89 @@ def parse_intent_proposals(
     proposals_needed: int,
     proposer_model_hash: str,
 ) -> tuple[RepairIntent, ...]:
-    value = json.loads(response)
-    if not isinstance(value, Mapping) or set(value) != {"proposals"}:
-        raise ValueError("proposer response must be a closed proposals object")
+    value, _ = _parse_intent_response_object(response)
+    if set(value) != {"proposals"}:
+        raise IntentProposalError(
+            IntentProposalReason.INVALID_SCHEMA,
+            "proposer response must be a closed proposals object",
+        )
     proposals = value["proposals"]
     if not isinstance(proposals, list) or len(proposals) != proposals_needed:
-        raise ValueError("proposer response does not match frozen proposal budget")
+        raise IntentProposalError(
+            IntentProposalReason.INVALID_SCHEMA,
+            "proposer response does not match frozen proposal budget",
+        )
     edges = {edge.edge_id: edge for edge in graph.edges}
     intents: list[RepairIntent] = []
     for proposal in proposals:
         if not isinstance(proposal, Mapping) or set(proposal) != _PROPOSAL_KEYS:
-            raise ValueError("intent proposal mapping is not closed")
+            raise IntentProposalError(
+                IntentProposalReason.INVALID_SCHEMA,
+                "intent proposal mapping is not closed",
+            )
         edge = edges.get(proposal["relation_edge_id"])
         if edge is None:
-            raise ValueError("intent proposal references an absent graph edge")
-        intent = RepairIntent.build(
-            strategy_id=proposal["strategy_id"],
-            relation_edge_id=edge.edge_id,
-            target_item_id=proposal["target_item_id"],
-            effect=proposal["effect"],
-            replacement_item_id=proposal["replacement_item_id"],
-            proposer_id=INTENT_PROPOSER_VERSION,
-            proposer_model_hash=proposer_model_hash,
-            evidence_ids=_evidence_ids(edge),
-        )
-        compile_intent(intent, graph=graph)
+            raise IntentProposalError(
+                IntentProposalReason.INVALID_SCHEMA,
+                "intent proposal references an absent graph edge",
+            )
+        try:
+            intent = RepairIntent.build(
+                strategy_id=proposal["strategy_id"],
+                relation_edge_id=edge.edge_id,
+                target_item_id=proposal["target_item_id"],
+                effect=proposal["effect"],
+                replacement_item_id=proposal["replacement_item_id"],
+                proposer_id=INTENT_PROPOSER_VERSION,
+                proposer_model_hash=proposer_model_hash,
+                evidence_ids=_evidence_ids(edge),
+            )
+            compile_intent(intent, graph=graph)
+        except (KeyError, TypeError, ValueError) as error:
+            raise IntentProposalError(
+                IntentProposalReason.COMPILER_REJECTED,
+                "intent proposal failed typed compilation",
+            ) from error
         intents.append(intent)
     if len({intent.intent_id for intent in intents}) != len(intents):
-        raise ValueError("intent proposer emitted duplicate concrete intents")
+        raise IntentProposalError(
+            IntentProposalReason.INVALID_SCHEMA,
+            "intent proposer emitted duplicate concrete intents",
+        )
     return tuple(intents)
+
+
+def _intent_response_record(
+    *,
+    case_id: str,
+    cache_key: str,
+    attempt_index: int,
+    reason_code: IntentProposalReason,
+    raw_response: str | None,
+    structured_output_used: bool,
+    response_schema_sha256: str,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "schema_version": INTENT_RESPONSE_ROW_VERSION,
+        "case_id": case_id,
+        "proposer_cache_key": cache_key,
+        "attempt_index": attempt_index,
+        "reason_code": reason_code.value,
+        "raw_response": raw_response,
+        "raw_response_sha256": (
+            hashlib.sha256(raw_response.encode("utf-8")).hexdigest()
+            if raw_response is not None
+            else None
+        ),
+        "structured_output_used": structured_output_used,
+        "prompt_template_sha256": INTENT_PROMPT_TEMPLATE_SHA256,
+        "proposer_version": INTENT_PROPOSER_VERSION,
+        "response_schema_sha256": response_schema_sha256,
+    }
+    return {
+        **payload,
+        "response_record_sha256": canonical_sha256(payload),
+    }
 
 
 def _propose_intents(
@@ -714,6 +940,7 @@ def _propose_intents(
     proposer_model_hash: str,
     max_retries: int,
     cache_path: Path,
+    attempt_records: list[dict[str, object]],
 ) -> tuple[tuple[RepairIntent, ...], dict[str, object], int]:
     if candidate_budget < 1:
         raise ValueError("candidate_budget must be positive")
@@ -737,6 +964,8 @@ def _propose_intents(
         graph,
         proposals_needed=proposals_needed,
     )
+    response_schema = intent_response_schema(surface)
+    response_schema_sha256 = canonical_sha256(response_schema)
     input_sha256 = canonical_sha256(surface)
     cache_key = intent_proposal_cache_key(
         surface,
@@ -746,8 +975,9 @@ def _propose_intents(
     with IntentProposalCache(cache_path) as cache:
         cached_response = cache.get(cache_key)
     if cached_response is not None:
+        cached_raw = _canonical_bytes(cached_response).decode("utf-8")
         proposed = parse_intent_proposals(
-            _canonical_bytes(cached_response).decode("utf-8"),
+            cached_raw,
             graph=graph,
             proposals_needed=proposals_needed,
             proposer_model_hash=proposer_model_hash,
@@ -755,6 +985,17 @@ def _propose_intents(
         intents = (baseline, *proposed)
         if len({intent.intent_id for intent in intents}) != candidate_budget:
             raise ValueError("cached baseline and proposer intents are not unique")
+        attempt_records.append(
+            _intent_response_record(
+                case_id=graph.case_id,
+                cache_key=cache_key,
+                attempt_index=0,
+                reason_code=IntentProposalReason.CACHE_REPLAY,
+                raw_response=cached_raw,
+                structured_output_used=True,
+                response_schema_sha256=response_schema_sha256,
+            )
+        )
         return (
             intents,
             {
@@ -767,10 +1008,32 @@ def _propose_intents(
             },
             0,
         )
+    structured_generate = getattr(judge, "generate_json", None)
+    if not callable(structured_generate):
+        raise ValueError("V4 intent proposer must support strict JSON Schema output")
     prompt = f"{INTENT_PROMPT_TEMPLATE}\nPROPOSER_INPUT:\n{_canonical_bytes(surface).decode('utf-8')}"
-    last_error: Exception | None = None
+    last_reason = IntentProposalReason.TRANSPORT_ERROR
     for attempt in range(1, max_retries + 2):
-        response = judge.generate(prompt)
+        try:
+            response = structured_generate(
+                prompt,
+                schema=response_schema,
+                schema_name="repair_intents",
+            )
+        except Exception:
+            last_reason = IntentProposalReason.TRANSPORT_ERROR
+            attempt_records.append(
+                _intent_response_record(
+                    case_id=graph.case_id,
+                    cache_key=cache_key,
+                    attempt_index=attempt,
+                    reason_code=last_reason,
+                    raw_response=None,
+                    structured_output_used=True,
+                    response_schema_sha256=response_schema_sha256,
+                )
+            )
+            continue
         try:
             proposed = parse_intent_proposals(
                 response,
@@ -780,8 +1043,22 @@ def _propose_intents(
             )
             intents = (baseline, *proposed)
             if len({intent.intent_id for intent in intents}) != candidate_budget:
-                raise ValueError("baseline and proposer intents are not unique")
-            parsed_response = json.loads(response)
+                raise IntentProposalError(
+                    IntentProposalReason.COMPILER_REJECTED,
+                    "baseline and proposer intents are not unique",
+                )
+            parsed_response, accepted_reason = _parse_intent_response_object(response)
+            attempt_records.append(
+                _intent_response_record(
+                    case_id=graph.case_id,
+                    cache_key=cache_key,
+                    attempt_index=attempt,
+                    reason_code=accepted_reason,
+                    raw_response=response,
+                    structured_output_used=True,
+                    response_schema_sha256=response_schema_sha256,
+                )
+            )
             with IntentProposalCache(cache_path) as cache:
                 cache.put(
                     cache_key=cache_key,
@@ -802,11 +1079,72 @@ def _propose_intents(
                 },
                 attempt,
             )
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            last_error = error
+        except IntentProposalError as error:
+            last_reason = error.reason_code
+            attempt_records.append(
+                _intent_response_record(
+                    case_id=graph.case_id,
+                    cache_key=cache_key,
+                    attempt_index=attempt,
+                    reason_code=last_reason,
+                    raw_response=response,
+                    structured_output_used=True,
+                    response_schema_sha256=response_schema_sha256,
+                )
+            )
     raise ValueError(
-        f"intent proposer exhausted closed-schema retries: {type(last_error).__name__}"
-    ) from last_error
+        f"intent proposer exhausted closed-schema retries: {last_reason.value}"
+    )
+
+
+def _write_intent_audit(
+    *,
+    artifacts_dir: Path,
+    records: Sequence[Mapping[str, object]],
+    decision: str,
+    expected_case_count: int,
+    failure_reason: str | None,
+) -> dict[str, object]:
+    ordered = sorted(
+        (dict(row) for row in records),
+        key=lambda row: (
+            str(row["case_id"]),
+            str(row["proposer_cache_key"]),
+            int(row["attempt_index"]),
+        ),
+    )
+    positive_attempts_by_cache = Counter(
+        str(row["proposer_cache_key"])
+        for row in ordered
+        if int(row["attempt_index"]) > 0
+    )
+    retry_count = sum(
+        max(0, count - 1) for count in positive_attempts_by_cache.values()
+    )
+    reason_counts = dict(
+        sorted(Counter(str(row["reason_code"]) for row in ordered).items())
+    )
+    report_body: dict[str, object] = {
+        "schema_version": INTENT_PROPOSAL_REPORT_VERSION,
+        "decision": decision,
+        "proposer_version": INTENT_PROPOSER_VERSION,
+        "prompt_template_sha256": INTENT_PROMPT_TEMPLATE_SHA256,
+        "expected_case_count": expected_case_count,
+        "audited_case_count": len({str(row["case_id"]) for row in ordered}),
+        "attempt_record_count": len(ordered),
+        "model_call_count": sum(int(row["attempt_index"]) > 0 for row in ordered),
+        "retry_count": retry_count,
+        "reason_counts": reason_counts,
+        "response_stream_sha256": canonical_sha256(ordered),
+        "failure_reason": failure_reason,
+    }
+    report = {
+        **report_body,
+        "report_sha256": canonical_sha256(report_body),
+    }
+    _atomic_jsonl(artifacts_dir / "intent_responses.jsonl", ordered)
+    _atomic_json(artifacts_dir / "intent_proposal_report.json", report)
+    return report
 
 
 def _policy_context(
@@ -911,6 +1249,10 @@ def prepare_live_cases(
         raise ValueError("max_relation_attempts must be a positive integer")
     if not callable(getattr(relation_judge, "generate_json", None)):
         raise ValueError("V4 relation judge must support strict JSON Schema output")
+    if candidate_budget > 1 and not callable(
+        getattr(intent_judge, "generate_json", None)
+    ):
+        raise ValueError("V4 intent proposer must support strict JSON Schema output")
     manifest_path = artifacts_dir / "preparation_manifest.json"
     reserved = (output_path, manifest_path)
     if any(path.exists() for path in reserved):
@@ -1072,6 +1414,7 @@ def prepare_live_cases(
 
     prepared_rows: list[dict[str, object]] = []
     intent_rows: list[dict[str, object]] = []
+    intent_response_records: list[dict[str, object]] = []
     proposer_calls = 0
     proposer_cache_hits = 0
     for index, assignment in enumerate(selected_assignments, 1):
@@ -1095,15 +1438,35 @@ def prepare_live_cases(
         ):
             raise ValueError("shadow row mapping is not closed or versioned")
         graph = graphs[case_id]
-        intents, proposal_binding, calls = _propose_intents(
-            runtime_row["runtime_case"],
-            graph,
-            judge=intent_judge,
-            candidate_budget=candidate_budget,
-            proposer_model_hash=proposer_model_hash,
-            max_retries=max_proposer_retries,
-            cache_path=cache_path,
-        )
+        try:
+            intents, proposal_binding, calls = _propose_intents(
+                runtime_row["runtime_case"],
+                graph,
+                judge=intent_judge,
+                candidate_budget=candidate_budget,
+                proposer_model_hash=proposer_model_hash,
+                max_retries=max_proposer_retries,
+                cache_path=cache_path,
+                attempt_records=intent_response_records,
+            )
+        except Exception as error:
+            failed_report = _write_intent_audit(
+                artifacts_dir=artifacts_dir,
+                records=intent_response_records,
+                decision="REFUSE",
+                expected_case_count=len(selected_assignments),
+                failure_reason=f"{type(error).__name__}:{error}",
+            )
+            _append_progress(
+                progress_path,
+                {
+                    "event": "intent_gate_refused",
+                    "case_id": case_id,
+                    "reason": failed_report["failure_reason"],
+                    "report_sha256": failed_report["report_sha256"],
+                },
+            )
+            raise
         proposer_calls += calls
         proposer_cache_hits += proposal_binding["proposer_cache_hit"] is True
         chain_pairs = (
@@ -1157,6 +1520,14 @@ def prepare_live_cases(
             },
         )
 
+    intent_proposal_report = _write_intent_audit(
+        artifacts_dir=artifacts_dir,
+        records=intent_response_records,
+        decision="PASS",
+        expected_case_count=len(selected_assignments),
+        failure_reason=None,
+    )
+
     _atomic_json(artifacts_dir / "instrument_manifest.json", instrument_manifest)
     _atomic_jsonl(artifacts_dir / "relation_cache_records.jsonl", cache_records)
     _atomic_jsonl(artifacts_dir / "relation_responses.jsonl", response_records)
@@ -1184,6 +1555,12 @@ def prepare_live_cases(
         "intent_proposals.jsonl": _file_sha256(
             artifacts_dir / "intent_proposals.jsonl"
         ),
+        "intent_responses.jsonl": _file_sha256(
+            artifacts_dir / "intent_responses.jsonl"
+        ),
+        "intent_proposal_report.json": _file_sha256(
+            artifacts_dir / "intent_proposal_report.json"
+        ),
         "prepared_cases.jsonl": _file_sha256(output_path),
     }
     relation_counts = Counter(
@@ -1209,6 +1586,8 @@ def prepare_live_cases(
         ],
         "graph_stream_sha256": file_hashes["graphs.jsonl"],
         "intent_stream_sha256": file_hashes["intent_proposals.jsonl"],
+        "intent_response_stream_sha256": file_hashes["intent_responses.jsonl"],
+        "intent_proposal_report_sha256": file_hashes["intent_proposal_report.json"],
         "prepared_stream_sha256": file_hashes["prepared_cases.jsonl"],
         "file_sha256": file_hashes,
         "candidate_budget": candidate_budget,
@@ -1243,6 +1622,10 @@ def prepare_live_cases(
         "proposer_version": INTENT_PROPOSER_VERSION,
         "proposer_prompt_template_sha256": INTENT_PROMPT_TEMPLATE_SHA256,
         "proposer_model_call_count": proposer_calls,
+        "proposer_attempt_count": intent_proposal_report["attempt_record_count"],
+        "proposer_retry_count": intent_proposal_report["retry_count"],
+        "proposer_reason_counts": intent_proposal_report["reason_counts"],
+        "intent_response_schema_version": INTENT_RESPONSE_ROW_VERSION,
         "proposer_cache_hit_count": proposer_cache_hits,
         "max_proposer_retries": max_proposer_retries,
         "runtime_uses_gold": False,
@@ -1329,12 +1712,16 @@ __all__ = [
     "DEFAULT_MAX_UNCERTAIN_RATE",
     "DEFAULT_RELATION_ATTEMPTS",
     "INTENT_PROPOSER_VERSION",
+    "INTENT_PROPOSAL_REPORT_VERSION",
+    "INTENT_RESPONSE_ROW_VERSION",
+    "IntentProposalReason",
     "IntentProposalCache",
     "PREPARATION_SCHEMA_VERSION",
     "RELATION_MEASUREMENT_REPORT_VERSION",
     "RELATION_RESPONSE_ROW_VERSION",
     "parse_intent_proposals",
     "intent_proposal_cache_key",
+    "intent_response_schema",
     "prepare_live_cases",
     "proposer_surface",
 ]

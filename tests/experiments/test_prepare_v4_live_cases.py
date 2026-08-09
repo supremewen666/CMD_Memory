@@ -103,6 +103,17 @@ class CompleteIntentJudge:
             ]
         return json.dumps({"proposals": proposals})
 
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        assert schema_name == "repair_intents"
+        return self.generate(prompt, system=system)
+
 
 class LeakingIntentJudge(CompleteIntentJudge):
     def generate(self, prompt: str, *, system: str | None = None) -> str:
@@ -139,6 +150,46 @@ class RetryingRelationJudge(PositiveRelationJudge):
         return '```json\n{"relation":"same_slot_different_value","slot":"fact"}\n```'
 
 
+class RetryingIntentJudge(CompleteIntentJudge):
+    def __init__(self) -> None:
+        super().__init__()
+        self.schema_hashes: list[str] = []
+
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        assert schema_name == "repair_intents"
+        self.schema_hashes.append(canonical_sha256(schema))
+        if len(self.schema_hashes) % 2:
+            self.calls += 1
+            return "not-json"
+        return f"```json\n{self.generate(prompt, system=system)}\n```"
+
+
+class MalformedIntentJudge:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, prompt: str, *, system: str | None = None) -> str:
+        raise AssertionError("plain generation must not be used")
+
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        self.calls += 1
+        return "Here are the repair intents: not-json"
+
+
 def _dataset(tmp_path: Path) -> Path:
     output = tmp_path / "dataset"
     build_dataset(
@@ -155,6 +206,69 @@ def _dataset(tmp_path: Path) -> Path:
 
 def _rows(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_intent_schema_encodes_actionability_instead_of_only_identifier_enums() -> None:
+    surface = {
+        "proposals_needed": 2,
+        "retrieved_items": [
+            {"item_id": "old"},
+            {"item_id": "new"},
+            {"item_id": "other"},
+        ],
+        "edges": [
+            {
+                "edge_id": "directed",
+                "actionability": {
+                    "mode": "destructive",
+                    "target_item_id": "old",
+                    "survivor_item_id": "new",
+                },
+            },
+            {
+                "edge_id": "unknown",
+                "actionability": {
+                    "mode": "annotate_only",
+                    "target_item_id": None,
+                    "survivor_item_id": None,
+                },
+            },
+        ],
+    }
+
+    schema = preparation_module.intent_response_schema(surface)
+    branches = schema["properties"]["proposals"]["items"]["oneOf"]
+    directed = [
+        branch
+        for branch in branches
+        if branch["properties"]["relation_edge_id"] == {"const": "directed"}
+    ]
+    unknown = [
+        branch
+        for branch in branches
+        if branch["properties"]["relation_edge_id"] == {"const": "unknown"}
+    ]
+
+    assert {tuple(branch["properties"]["effect"]["enum"]) for branch in directed} == {
+        ("abstain", "annotate_conflict", "verify"),
+        ("demote", "suppress"),
+        ("replace",),
+    }
+    assert len(unknown) == 1
+    assert unknown[0]["properties"]["effect"]["enum"] == [
+        "abstain",
+        "annotate_conflict",
+        "verify",
+    ]
+    assert unknown[0]["properties"]["target_item_id"] == {"const": None}
+    assert unknown[0]["properties"]["replacement_item_id"] == {"const": None}
+    replace = next(
+        branch
+        for branch in directed
+        if branch["properties"]["effect"]["enum"] == ["replace"]
+    )
+    assert replace["properties"]["target_item_id"] == {"const": "old"}
+    assert replace["properties"]["replacement_item_id"] == {"const": "new"}
 
 
 def test_valid_frozen_inputs_produce_gpu_loadable_prepared_cases(
@@ -248,6 +362,11 @@ def test_relation_cache_replay_makes_zero_repeated_relation_calls(
         candidate_budget=4,
         limit=2,
     )
+    replay_validation = validate_prepared_cases(
+        dataset_dir=dataset,
+        prepared_path=tmp_path / "replay.jsonl",
+        manifest_path=tmp_path / "replay-artifacts" / "preparation_manifest.json",
+    )
 
     assert first_relation_judge.calls > 0
     assert first_intent_judge.calls > 0
@@ -255,6 +374,7 @@ def test_relation_cache_replay_makes_zero_repeated_relation_calls(
     assert replay_intent_judge.calls == 0
     assert replay_manifest["relation_model_call_count"] == 0
     assert replay_manifest["proposer_model_call_count"] == 0
+    assert replay_validation["decision"] == "PASS", replay_validation["reasons"]
     assert (
         replay_manifest["relation_cache_sha256"]
         == first_manifest["relation_cache_sha256"]
@@ -313,6 +433,109 @@ def test_relation_attempt_ledger_binds_structured_retries_and_raw_responses(
                 if key != "response_record_sha256"
             }
         )
+
+
+def test_intent_attempt_ledger_binds_structured_retries_and_fenced_json(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    artifacts = tmp_path / "artifacts"
+    proposer = RetryingIntentJudge()
+
+    manifest = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=tmp_path / "prepared.jsonl",
+        artifacts_dir=artifacts,
+        cache_path=tmp_path / "cache.sqlite",
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=proposer,
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v2",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        max_proposer_retries=2,
+        limit=2,
+    )
+    attempts = _rows(artifacts / "intent_responses.jsonl")
+    proposal_report = json.loads(
+        (artifacts / "intent_proposal_report.json").read_text(encoding="utf-8")
+    )
+    validation = validate_prepared_cases(
+        dataset_dir=dataset,
+        prepared_path=tmp_path / "prepared.jsonl",
+        manifest_path=artifacts / "preparation_manifest.json",
+    )
+
+    assert validation["decision"] == "PASS", validation["reasons"]
+    assert manifest["proposer_model_call_count"] == proposer.calls == len(attempts)
+    assert manifest["proposer_attempt_count"] == len(attempts)
+    assert manifest["proposer_retry_count"] == len(attempts) // 2
+    assert manifest["proposer_reason_counts"] == {
+        "accepted_fenced_json": len(attempts) // 2,
+        "malformed_json": len(attempts) // 2,
+    }
+    assert proposal_report["decision"] == "PASS"
+    assert all(row["structured_output_used"] is True for row in attempts)
+    assert len(set(proposer.schema_hashes)) == 2
+
+
+def test_exhausted_intent_json_failure_keeps_audit_and_allows_clean_rerun(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    artifacts = tmp_path / "artifacts"
+    cache = tmp_path / "cache.sqlite"
+    malformed = MalformedIntentJudge()
+
+    with pytest.raises(
+        ValueError,
+        match="intent proposer exhausted closed-schema retries: malformed_json",
+    ):
+        prepare_live_cases(
+            dataset_dir=dataset,
+            output_path=tmp_path / "prepared.jsonl",
+            artifacts_dir=artifacts,
+            cache_path=cache,
+            relation_judge=PositiveRelationJudge(),
+            intent_judge=malformed,
+            instrument_model_id="relation-model-v2",
+            instrument_model_hash="a" * 64,
+            proposer_model_id="intent-model-v2",
+            proposer_model_hash="b" * 64,
+            candidate_budget=4,
+            max_proposer_retries=2,
+            limit=2,
+        )
+
+    attempts = _rows(artifacts / "intent_responses.jsonl")
+    failure_report = json.loads(
+        (artifacts / "intent_proposal_report.json").read_text(encoding="utf-8")
+    )
+    assert malformed.calls == len(attempts) == 3
+    assert failure_report["decision"] == "REFUSE"
+    assert failure_report["reason_counts"] == {"malformed_json": 3}
+    assert not (artifacts / "preparation_manifest.json").exists()
+    assert not (tmp_path / "prepared.jsonl").exists()
+
+    recovered = CompleteIntentJudge()
+    manifest = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=tmp_path / "prepared.jsonl",
+        artifacts_dir=artifacts,
+        cache_path=cache,
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=recovered,
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v2",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        max_proposer_retries=2,
+        limit=2,
+    )
+    assert manifest["build_status"] == "gpu_input_ready"
+    assert recovered.calls > 0
 
 
 def test_validator_refuses_rehashed_evaluation_family_leak_in_runtime_context(

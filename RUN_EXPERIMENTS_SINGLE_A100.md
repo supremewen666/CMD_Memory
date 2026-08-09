@@ -109,6 +109,10 @@ response hash 与 `accepted_fenced_json` / `malformed_json` / `invalid_schema` /
 `CMD_V4_MAX_RELATION_ATTEMPTS` 覆盖尝试预算。默认 relation `uncertain` 上限仍为 5%；
 超过即拒绝整次准备，但会保留 `relation_responses.jsonl` 和
 `relation_measurement_report.json` 供诊断。正式协议必须在观察结果前冻结这些值。
+Llama intent proposer 同样使用按当前 graph edge/item ID 动态生成的 JSON Schema；每次
+malformed/schema/compiler/transport 尝试写入 `intent_responses.jsonl`，最终报告写入
+`intent_proposal_report.json`。旧版自由文本 proposal cache 因 proposer version 提升而
+不会复用。
 
 3,939 个 source cases 中，3,100 个至少有一对 retrieved items，可形成 graph-bound
 intent；其余 839 个只有一个 retrieved item，明确记录为
@@ -169,6 +173,8 @@ artifacts/neuro_symbolic_evolution_v4/
     │   ├── relation_measurement_report.json
     │   ├── graphs.jsonl
     │   ├── intent_proposals.jsonl
+    │   ├── intent_responses.jsonl
+    │   ├── intent_proposal_report.json
     │   └── preparation_manifest.json
     └── full/
         └── ...同一组冻结工件

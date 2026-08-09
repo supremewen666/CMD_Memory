@@ -208,6 +208,9 @@
   content-addressed raw-response/reason ledger. Exhausted uncertain verdicts are
   not persisted as reusable cache facts; a refused run retains its measurement
   report for diagnosis while still producing no GPU-ready manifest.
+  The complete-intent proposer uses a graph-bound dynamic JSON Schema and a
+  separately hashed attempt ledger/report; malformed JSON, schema violations,
+  typed-compiler rejection, and transport failures remain distinguishable.
   `v4_gpu0` and `v4_gpu1` invoke `experiments.validate_v4_prepared_cases`
   themselves before starting model endpoints; an absent/mismatched preparation
   manifest therefore cannot enter GPU execution. Gold/labels may never fill that gap.
