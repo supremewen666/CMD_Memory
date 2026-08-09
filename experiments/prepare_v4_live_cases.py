@@ -72,7 +72,7 @@ INSTRUMENT_MANIFEST_SCHEMA_VERSION = "cmd-v4-relation-instrument-manifest-v2"
 CACHE_RECORDS_SCHEMA_VERSION = "cmd-v4-relation-cache-records-v2"
 RELATION_RESPONSE_ROW_VERSION = "cmd-v4-relation-response-row-v1"
 RELATION_MEASUREMENT_REPORT_VERSION = "cmd-v4-relation-measurement-report-v1"
-INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v3-vllm-json-schema"
+INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v4-corrective-json"
 INTENT_PROPOSAL_ROW_VERSION = "cmd-v4-intent-proposal-row-v1"
 INTENT_RESPONSE_ROW_VERSION = "cmd-v4-intent-response-row-v1"
 INTENT_PROPOSAL_REPORT_VERSION = "cmd-v4-intent-proposal-report-v1"
@@ -103,10 +103,20 @@ INTENT_PROMPT_TEMPLATE = (
     "require the listed actionability target; replace also requires its survivor. "
     "Unknown or conflicting direction permits only annotate_conflict, verify, or "
     "abstain. strategy_id must name a reusable versioned semantic motif and must "
-    "not contain any concrete item identifier. Do not add fields or prose."
+    "not contain any concrete item identifier. Every proposal must use a distinct "
+    "edge/effect/target/replacement action tuple. Do not repeat a proposal. Do not "
+    "add fields or prose."
+)
+INTENT_CORRECTION_TEMPLATE = (
+    "CORRECTION_FEEDBACK:\n"
+    "The previous response was rejected with reason_code={reason_code}: {reason}. "
+    "Return a corrected JSON object, not the previous response. In particular, "
+    "duplicate concrete intents must be replaced with distinct legal action tuples; "
+    "vary the effect among the permitted alternatives before inventing another "
+    "strategy name."
 )
 INTENT_PROMPT_TEMPLATE_SHA256 = hashlib.sha256(
-    INTENT_PROMPT_TEMPLATE.encode("utf-8")
+    f"{INTENT_PROMPT_TEMPLATE}\n{INTENT_CORRECTION_TEMPLATE}".encode("utf-8")
 ).hexdigest()
 ORDERING_POLICY = OrderingPolicy(
     policy_version="cmd-v4-event-sequence-ordering-v1",
@@ -894,6 +904,20 @@ def parse_intent_proposals(
             IntentProposalReason.INVALID_SCHEMA,
             "intent proposer emitted duplicate concrete intents",
         )
+    action_tuples = {
+        (
+            intent.relation_edge_id,
+            intent.effect,
+            intent.target_item_id,
+            intent.replacement_item_id,
+        )
+        for intent in intents
+    }
+    if len(action_tuples) != len(intents):
+        raise IntentProposalError(
+            IntentProposalReason.INVALID_SCHEMA,
+            "intent proposer emitted duplicate concrete actions",
+        )
     return tuple(intents)
 
 
@@ -1010,12 +1034,22 @@ def _propose_intents(
     structured_generate = getattr(judge, "generate_json", None)
     if not callable(structured_generate):
         raise ValueError("V4 intent proposer must support strict JSON Schema output")
-    prompt = f"{INTENT_PROMPT_TEMPLATE}\nPROPOSER_INPUT:\n{_canonical_bytes(surface).decode('utf-8')}"
+    surface_json = _canonical_bytes(surface).decode("utf-8")
+    correction_feedback: str | None = None
     last_reason = IntentProposalReason.TRANSPORT_ERROR
     for attempt in range(1, max_retries + 2):
+        attempt_prompt = "\n".join(
+            part
+            for part in (
+                INTENT_PROMPT_TEMPLATE,
+                correction_feedback,
+                f"PROPOSER_INPUT:\n{surface_json}",
+            )
+            if part is not None
+        )
         try:
             response = structured_generate(
-                prompt,
+                attempt_prompt,
                 schema=response_schema,
                 schema_name="repair_intents",
             )
@@ -1080,6 +1114,10 @@ def _propose_intents(
             )
         except IntentProposalError as error:
             last_reason = error.reason_code
+            correction_feedback = INTENT_CORRECTION_TEMPLATE.format(
+                reason_code=error.reason_code.value,
+                reason=str(error),
+            )
             attempt_records.append(
                 _intent_response_record(
                     case_id=graph.case_id,

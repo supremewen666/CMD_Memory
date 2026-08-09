@@ -171,6 +171,25 @@ class RetryingIntentJudge(CompleteIntentJudge):
         return f"```json\n{self.generate(prompt, system=system)}\n```"
 
 
+class DuplicateUntilCorrectedIntentJudge(CompleteIntentJudge):
+    def generate(self, prompt: str, *, system: str | None = None) -> str:
+        response = json.loads(super().generate(prompt, system=system))
+        if "duplicate concrete intents" not in prompt:
+            response["proposals"] = [response["proposals"][0]] * 3
+        return json.dumps(response)
+
+
+class RenamedDuplicateActionIntentJudge(CompleteIntentJudge):
+    def generate(self, prompt: str, *, system: str | None = None) -> str:
+        response = json.loads(super().generate(prompt, system=system))
+        repeated = response["proposals"][0]
+        response["proposals"] = [
+            {**repeated, "strategy_id": f"renamed_duplicate_action_v{index}"}
+            for index in range(1, 4)
+        ]
+        return json.dumps(response)
+
+
 class MalformedIntentJudge:
     def __init__(self) -> None:
         self.calls = 0
@@ -501,6 +520,72 @@ def test_intent_attempt_ledger_binds_structured_retries_and_fenced_json(
     assert proposal_report["decision"] == "PASS"
     assert all(row["structured_output_used"] is True for row in attempts)
     assert len(set(proposer.schema_hashes)) == 2
+
+
+def test_duplicate_intent_response_is_corrected_with_audited_retry(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    artifacts = tmp_path / "artifacts"
+    proposer = DuplicateUntilCorrectedIntentJudge()
+
+    manifest = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=tmp_path / "prepared.jsonl",
+        artifacts_dir=artifacts,
+        cache_path=tmp_path / "cache.sqlite",
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=proposer,
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v3",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        max_proposer_retries=2,
+        limit=2,
+    )
+
+    report = json.loads(
+        (artifacts / "intent_proposal_report.json").read_text(encoding="utf-8")
+    )
+    assert manifest["build_status"] == "gpu_input_ready"
+    assert report["decision"] == "PASS"
+    assert report["reason_counts"] == {"accepted": 2, "invalid_schema": 2}
+    assert report["model_call_count"] == proposer.calls == 4
+
+
+def test_strategy_renaming_cannot_disguise_duplicate_concrete_actions(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    artifacts = tmp_path / "artifacts"
+    proposer = RenamedDuplicateActionIntentJudge()
+
+    with pytest.raises(
+        ValueError,
+        match="intent proposer exhausted closed-schema retries: invalid_schema",
+    ):
+        prepare_live_cases(
+            dataset_dir=dataset,
+            output_path=tmp_path / "prepared.jsonl",
+            artifacts_dir=artifacts,
+            cache_path=tmp_path / "cache.sqlite",
+            relation_judge=PositiveRelationJudge(),
+            intent_judge=proposer,
+            instrument_model_id="relation-model-v2",
+            instrument_model_hash="a" * 64,
+            proposer_model_id="intent-model-v3",
+            proposer_model_hash="b" * 64,
+            candidate_budget=4,
+            max_proposer_retries=2,
+            limit=2,
+        )
+
+    report = json.loads(
+        (artifacts / "intent_proposal_report.json").read_text(encoding="utf-8")
+    )
+    assert report["decision"] == "REFUSE"
+    assert report["reason_counts"] == {"invalid_schema": 3}
 
 
 def test_exhausted_intent_json_failure_keeps_audit_and_allows_clean_rerun(
