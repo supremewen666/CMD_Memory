@@ -283,6 +283,30 @@ class SlottedIntentJudge:
         return json.dumps({"proposals": _slotted_proposals(schema)})
 
 
+class CompilerLeakUntilCorrectedIntentJudge(CompleteIntentJudge):
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        response = json.loads(
+            super().generate_json(
+                prompt,
+                schema=schema,
+                schema_name=schema_name,
+                system=system,
+            )
+        )
+        if "strategy_identifier_uses_forbidden_token" not in prompt:
+            response["proposals"]["candidate_1"]["strategy_id"] = (
+                "target_specific_strategy_v1"
+            )
+        return json.dumps(response)
+
+
 class MalformedIntentJudge:
     def __init__(self) -> None:
         self.calls = 0
@@ -743,6 +767,38 @@ def test_duplicate_intent_response_is_corrected_with_audited_retry(
     assert manifest["build_status"] == "gpu_input_ready"
     assert report["decision"] == "PASS"
     assert report["reason_counts"] == {"accepted": 2, "invalid_schema": 2}
+    assert report["model_call_count"] == proposer.calls == 4
+
+
+def test_compiler_rejection_reason_drives_audited_correction_retry(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    artifacts = tmp_path / "artifacts"
+    proposer = CompilerLeakUntilCorrectedIntentJudge()
+
+    manifest = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=tmp_path / "prepared.jsonl",
+        artifacts_dir=artifacts,
+        cache_path=tmp_path / "cache.sqlite",
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=proposer,
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v5",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        max_proposer_retries=2,
+        limit=2,
+    )
+
+    report = json.loads(
+        (artifacts / "intent_proposal_report.json").read_text(encoding="utf-8")
+    )
+    assert manifest["build_status"] == "gpu_input_ready"
+    assert report["decision"] == "PASS"
+    assert report["reason_counts"] == {"accepted": 2, "compiler_rejected": 2}
     assert report["model_call_count"] == proposer.calls == 4
 
 

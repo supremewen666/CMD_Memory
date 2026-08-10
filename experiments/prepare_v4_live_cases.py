@@ -922,9 +922,16 @@ def parse_intent_proposals(
             )
             compile_intent(intent, graph=graph)
         except (KeyError, TypeError, ValueError) as error:
+            rejection_detail = (
+                "strategy_identifier_uses_forbidden_token_"
+                "use_neutral_semantic_motif_name"
+                if str(error)
+                == "strategy_id carries case/target/gold/evaluation leakage"
+                else "typed_compilation_invariant_failed"
+            )
             raise IntentProposalError(
                 IntentProposalReason.COMPILER_REJECTED,
-                "intent proposal failed typed compilation",
+                f"intent proposal failed typed compilation: {rejection_detail}",
             ) from error
         action_tuple = (
             intent.relation_edge_id,
