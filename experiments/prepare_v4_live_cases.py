@@ -76,6 +76,8 @@ INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v5-disjoint-slots"
 INTENT_PROPOSAL_ROW_VERSION = "cmd-v4-intent-proposal-row-v1"
 INTENT_RESPONSE_ROW_VERSION = "cmd-v4-intent-response-row-v1"
 INTENT_PROPOSAL_REPORT_VERSION = "cmd-v4-intent-proposal-report-v1"
+INTENT_QUARANTINE_ROW_VERSION = "cmd-v4-intent-quarantine-row-v1"
+PREPARATION_ATTEMPT_SCHEMA_VERSION = "cmd-v4-preparation-attempt-manifest-v1"
 GRAPH_ROW_VERSION = "cmd-v4-frozen-graph-row-v1"
 DEFAULT_MAX_UNCERTAIN_RATE = 0.05
 DEFAULT_RELATION_ATTEMPTS = 3
@@ -139,6 +141,14 @@ class IntentProposalReason(str, Enum):
 class IntentProposalError(ValueError):
     def __init__(self, reason_code: IntentProposalReason, message: str) -> None:
         super().__init__(message)
+        self.reason_code = reason_code
+
+
+class IntentProposalExhausted(ValueError):
+    def __init__(self, reason_code: IntentProposalReason) -> None:
+        super().__init__(
+            f"intent proposer exhausted closed-schema retries: {reason_code.value}"
+        )
         self.reason_code = reason_code
 
 
@@ -1055,13 +1065,27 @@ def _propose_intents(
         cached_response = cache.get(cache_key)
     if cached_response is not None:
         cached_raw = _canonical_bytes(cached_response).decode("utf-8")
-        proposed = parse_intent_proposals(
-            cached_raw,
-            graph=graph,
-            proposals_needed=proposals_needed,
-            proposer_model_hash=proposer_model_hash,
-            response_schema=response_schema,
-        )
+        try:
+            proposed = parse_intent_proposals(
+                cached_raw,
+                graph=graph,
+                proposals_needed=proposals_needed,
+                proposer_model_hash=proposer_model_hash,
+                response_schema=response_schema,
+            )
+        except IntentProposalError as error:
+            attempt_records.append(
+                _intent_response_record(
+                    case_id=graph.case_id,
+                    cache_key=cache_key,
+                    attempt_index=0,
+                    reason_code=error.reason_code,
+                    raw_response=cached_raw,
+                    structured_output_used=True,
+                    response_schema_sha256=response_schema_sha256,
+                )
+            )
+            raise
         intents = (baseline, *proposed)
         if len({intent.intent_id for intent in intents}) != candidate_budget:
             raise ValueError("cached baseline and proposer intents are not unique")
@@ -1187,9 +1211,7 @@ def _propose_intents(
                     response_schema_sha256=response_schema_sha256,
                 )
             )
-    raise ValueError(
-        f"intent proposer exhausted closed-schema retries: {last_reason.value}"
-    )
+    raise IntentProposalExhausted(last_reason)
 
 
 def _write_intent_audit(
@@ -1315,8 +1337,9 @@ def prepare_live_cases(
     max_proposer_retries: int = DEFAULT_PROPOSER_RETRIES,
     limit: int | None = None,
     progress_path: Path | None = None,
+    collect_proposer_failures: bool = False,
 ) -> dict[str, object]:
-    """Build one immutable prepared stream; persistent cache permits safe resume."""
+    """Build one immutable prepared stream; optionally quarantine proposer failures."""
     dataset_dir = Path(dataset_dir)
     output_path = Path(output_path)
     artifacts_dir = Path(artifacts_dir)
@@ -1336,6 +1359,8 @@ def prepare_live_cases(
         raise ValueError("max_uncertain_rate must be finite in [0, 1]")
     if max_proposer_retries < 0:
         raise ValueError("max_proposer_retries must be non-negative")
+    if not isinstance(collect_proposer_failures, bool):
+        raise ValueError("collect_proposer_failures must be boolean")
     if (
         isinstance(max_relation_attempts, bool)
         or not isinstance(max_relation_attempts, int)
@@ -1510,6 +1535,7 @@ def prepare_live_cases(
     prepared_rows: list[dict[str, object]] = []
     intent_rows: list[dict[str, object]] = []
     intent_response_records: list[dict[str, object]] = []
+    quarantine_rows: list[dict[str, object]] = []
     proposer_calls = 0
     proposer_cache_hits = 0
     for index, assignment in enumerate(selected_assignments, 1):
@@ -1533,6 +1559,7 @@ def prepare_live_cases(
         ):
             raise ValueError("shadow row mapping is not closed or versioned")
         graph = graphs[case_id]
+        case_attempt_start = len(intent_response_records)
         try:
             intents, proposal_binding, calls = _propose_intents(
                 runtime_row["runtime_case"],
@@ -1544,6 +1571,64 @@ def prepare_live_cases(
                 cache_path=cache_path,
                 attempt_records=intent_response_records,
             )
+        except (IntentProposalExhausted, IntentProposalError) as error:
+            if collect_proposer_failures:
+                case_records = intent_response_records[case_attempt_start:]
+                quarantine_payload: dict[str, object] = {
+                    "schema_version": INTENT_QUARANTINE_ROW_VERSION,
+                    "case_id": case_id,
+                    "selection_event_index": int(
+                        assignment["selection_event_index"]
+                    ),
+                    "graph_sha256": graph.graph_sha256,
+                    "reason_code": error.reason_code.value,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                    "attempt_count": sum(
+                        int(row["attempt_index"]) > 0 for row in case_records
+                    ),
+                    "response_record_sha256s": sorted(
+                        str(row["response_record_sha256"])
+                        for row in case_records
+                    ),
+                }
+                quarantine_rows.append(
+                    {
+                        **quarantine_payload,
+                        "quarantine_row_sha256": canonical_sha256(
+                            quarantine_payload
+                        ),
+                    }
+                )
+                _append_progress(
+                    progress_path,
+                    {
+                        "event": "intent_case_quarantined",
+                        "case_id": case_id,
+                        "completed": index,
+                        "total": len(selected_assignments),
+                        "reason_code": error.reason_code.value,
+                        "graph_sha256": graph.graph_sha256,
+                    },
+                )
+                continue
+            failed_report = _write_intent_audit(
+                artifacts_dir=artifacts_dir,
+                records=intent_response_records,
+                decision="REFUSE",
+                expected_case_count=len(selected_assignments),
+                failure_reason=f"{type(error).__name__}:{error}",
+            )
+            _append_progress(
+                progress_path,
+                {
+                    "event": "intent_gate_refused",
+                    "case_id": case_id,
+                    "reason": failed_report["failure_reason"],
+                    "report_sha256": failed_report["report_sha256"],
+                },
+            )
+            raise
         except Exception as error:
             failed_report = _write_intent_audit(
                 artifacts_dir=artifacts_dir,
@@ -1614,6 +1699,81 @@ def prepare_live_cases(
                 "graph_sha256": graph.graph_sha256,
             },
         )
+
+    if quarantine_rows:
+        intent_proposal_report = _write_intent_audit(
+            artifacts_dir=artifacts_dir,
+            records=intent_response_records,
+            decision="REFUSE",
+            expected_case_count=len(selected_assignments),
+            failure_reason=f"quarantined_intent_cases:{len(quarantine_rows)}",
+        )
+        partial_prepared_path = artifacts_dir / "prepared_cases.partial.jsonl"
+        partial_intents_path = artifacts_dir / "intent_proposals.partial.jsonl"
+        quarantine_path = artifacts_dir / "intent_quarantine.jsonl"
+        _atomic_jsonl(artifacts_dir / "graphs.jsonl", graph_rows)
+        _atomic_jsonl(partial_intents_path, intent_rows)
+        _atomic_jsonl(partial_prepared_path, prepared_rows)
+        _atomic_jsonl(quarantine_path, quarantine_rows)
+        attempt_body: dict[str, object] = {
+            "schema_version": PREPARATION_ATTEMPT_SCHEMA_VERSION,
+            "build_status": "repair_required",
+            "dataset_sha256": dataset_sha256,
+            "selected_case_count": len(selected_case_ids),
+            "prepared_case_count": len(prepared_rows),
+            "quarantined_case_count": len(quarantine_rows),
+            "prepared_case_ids": [str(row["case_id"]) for row in prepared_rows],
+            "quarantined_case_ids": [
+                str(row["case_id"]) for row in quarantine_rows
+            ],
+            "candidate_budget": candidate_budget,
+            "proposer_version": INTENT_PROPOSER_VERSION,
+            "proposer_model_sha256": proposer_model_hash,
+            "proposer_prompt_template_sha256": INTENT_PROMPT_TEMPLATE_SHA256,
+            "proposer_model_call_count": intent_proposal_report[
+                "model_call_count"
+            ],
+            "proposer_reason_counts": intent_proposal_report["reason_counts"],
+            "graph_stream_sha256": _file_sha256(
+                artifacts_dir / "graphs.jsonl"
+            ),
+            "intent_partial_stream_sha256": _file_sha256(partial_intents_path),
+            "prepared_partial_stream_sha256": _file_sha256(
+                partial_prepared_path
+            ),
+            "quarantine_stream_sha256": _file_sha256(quarantine_path),
+            "intent_response_stream_sha256": _file_sha256(
+                artifacts_dir / "intent_responses.jsonl"
+            ),
+            "intent_proposal_report_sha256": _file_sha256(
+                artifacts_dir / "intent_proposal_report.json"
+            ),
+            "runtime_uses_gold": False,
+            "relation_instrument_uses_gold": False,
+            "intent_proposer_uses_gold": False,
+            "gpu_input_authorized": False,
+        }
+        attempt_manifest = {
+            **attempt_body,
+            "attempt_manifest_sha256": canonical_sha256(attempt_body),
+        }
+        _atomic_json(
+            artifacts_dir / "preparation_attempt_manifest.json",
+            attempt_manifest,
+        )
+        _append_progress(
+            progress_path,
+            {
+                "event": "preparation_repair_required",
+                "selected_cases": len(selected_case_ids),
+                "prepared_cases": len(prepared_rows),
+                "quarantined_cases": len(quarantine_rows),
+                "attempt_manifest_sha256": attempt_manifest[
+                    "attempt_manifest_sha256"
+                ],
+            },
+        )
+        return attempt_manifest
 
     intent_proposal_report = _write_intent_audit(
         artifacts_dir=artifacts_dir,
@@ -1762,6 +1922,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--max-proposer-retries", type=int, default=DEFAULT_PROPOSER_RETRIES
     )
+    parser.add_argument(
+        "--collect-proposer-failures",
+        action="store_true",
+        help=(
+            "quarantine exhausted proposer cases, continue the batch, and emit "
+            "repair-required partial artifacts without authorizing GPU input"
+        ),
+    )
     parser.add_argument("--instrument-model-hash")
     parser.add_argument("--proposer-model-hash")
     args = parser.parse_args(argv)
@@ -1791,6 +1959,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_proposer_retries=args.max_proposer_retries,
             limit=args.limit,
             progress_path=args.progress,
+            collect_proposer_failures=args.collect_proposer_failures,
         )
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
         print(f"REFUSE: {type(error).__name__}: {error}")

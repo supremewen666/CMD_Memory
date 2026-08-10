@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -325,6 +326,30 @@ class FamilyContentIntentJudge(CompleteIntentJudge):
             )
         )
         response["proposals"]["candidate_2"]["strategy_id"] = "family_game_nights"
+        return json.dumps(response)
+
+
+class FirstCaseQuarantinedIntentJudge(CompleteIntentJudge):
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        response = json.loads(
+            super().generate_json(
+                prompt,
+                schema=schema,
+                schema_name=schema_name,
+                system=system,
+            )
+        )
+        if self.calls <= 3:
+            response["proposals"]["candidate_1"]["strategy_id"] = (
+                "target_specific_strategy_v1"
+            )
         return json.dumps(response)
 
 
@@ -848,6 +873,130 @@ def test_runtime_family_content_is_not_mistaken_for_hidden_family_leakage(
 
     assert manifest["build_status"] == "gpu_input_ready"
     assert manifest["proposer_reason_counts"] == {"accepted": 2}
+
+
+def test_collect_all_mode_quarantines_one_case_and_prepares_later_cases(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    artifacts = tmp_path / "artifacts"
+    output = tmp_path / "prepared.jsonl"
+    progress = tmp_path / "progress.jsonl"
+    proposer = FirstCaseQuarantinedIntentJudge()
+
+    result = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=output,
+        artifacts_dir=artifacts,
+        cache_path=tmp_path / "cache.sqlite",
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=proposer,
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v5",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        max_proposer_retries=2,
+        limit=2,
+        progress_path=progress,
+        collect_proposer_failures=True,
+    )
+
+    assert result["build_status"] == "repair_required"
+    assert result["selected_case_count"] == 2
+    assert result["prepared_case_count"] == 1
+    assert result["quarantined_case_count"] == 1
+    assert proposer.calls == 4
+    assert not output.exists()
+    assert not (artifacts / "preparation_manifest.json").exists()
+    assert len(_rows(artifacts / "prepared_cases.partial.jsonl")) == 1
+    quarantine = _rows(artifacts / "intent_quarantine.jsonl")
+    assert len(quarantine) == 1
+    assert quarantine[0]["reason_code"] == "compiler_rejected"
+    assert quarantine[0]["quarantine_row_sha256"]
+    report = json.loads(
+        (artifacts / "intent_proposal_report.json").read_text(encoding="utf-8")
+    )
+    assert report["decision"] == "REFUSE"
+    events = [row["event"] for row in _rows(progress)]
+    assert "intent_case_quarantined" in events
+    assert events.index("intent_case_quarantined") < events.index("case_prepared")
+    assert events[-1] == "preparation_repair_required"
+
+
+def test_collect_all_mode_quarantines_cached_response_rejected_by_compiler(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    cache = tmp_path / "cache.sqlite"
+    prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=tmp_path / "initial.jsonl",
+        artifacts_dir=tmp_path / "initial-artifacts",
+        cache_path=cache,
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=CompleteIntentJudge(),
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v5",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        limit=2,
+    )
+    with sqlite3.connect(cache) as connection:
+        cache_key, response_json = connection.execute(
+            "SELECT cache_key, response_json FROM v4_intent_proposals "
+            "ORDER BY cache_key LIMIT 1"
+        ).fetchone()
+        response = json.loads(response_json)
+        response["proposals"]["candidate_1"]["strategy_id"] = (
+            "target_specific_strategy_v1"
+        )
+        connection.execute(
+            "UPDATE v4_intent_proposals SET response_json = ?, "
+            "response_sha256 = ? WHERE cache_key = ?",
+            (
+                json.dumps(response, sort_keys=True, separators=(",", ":")),
+                canonical_sha256(response),
+                cache_key,
+            ),
+        )
+
+    proposer = CompleteIntentJudge()
+    result = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=tmp_path / "replay.jsonl",
+        artifacts_dir=tmp_path / "replay-artifacts",
+        cache_path=cache,
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=proposer,
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v5",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        limit=2,
+        collect_proposer_failures=True,
+    )
+
+    assert result["build_status"] == "repair_required"
+    assert result["prepared_case_count"] == 1
+    assert result["quarantined_case_count"] == 1
+    assert proposer.calls == 0
+    quarantine = _rows(
+        tmp_path / "replay-artifacts" / "intent_quarantine.jsonl"
+    )
+    assert quarantine[0]["error_type"] == "IntentProposalError"
+    assert quarantine[0]["attempt_count"] == 0
+    responses = _rows(
+        tmp_path / "replay-artifacts" / "intent_responses.jsonl"
+    )
+    assert any(
+        row["attempt_index"] == 0
+        and row["reason_code"] == "compiler_rejected"
+        and row["raw_response"] is not None
+        for row in responses
+    )
 
 
 def test_strategy_renaming_cannot_disguise_duplicate_concrete_actions(

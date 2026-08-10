@@ -258,6 +258,27 @@ repository hash, and an overall report hash.
 The command SHALL make zero model calls.  Model/LLM proposers are adapters that
 produce the complete input intents before this seam.
 
+### 8.1 Collect-all input preparation
+
+The live-input preparation adapter MAY run in an explicit collect-all mode.
+Exhausting the closed-schema retries for one case SHALL quarantine that case
+and SHALL NOT stop proposal attempts for later cases.  The attempt SHALL emit:
+
+- a content-hashed quarantine row for every exhausted case;
+- partial prepared-case and intent streams containing only compiler-accepted
+  cases;
+- the complete raw-response audit stream and aggregate refusal report; and
+- a `repair_required` attempt manifest with exact successful/quarantined counts
+  and stream hashes.
+
+Collect-all changes batching, not authorization.  A non-empty quarantine SHALL
+NOT create the normative `prepared_cases.jsonl` or preparation manifest, SHALL
+NOT be accepted by the prepared-case validator, and SHALL NOT authorize either
+GPU lane.  After the proposer/compiler issue is repaired, a new attempt MAY
+reuse content-addressed accepted responses; quarantined cases, which were never
+deposited in the accepted-response cache, SHALL be proposed again.  Only a
+zero-quarantine attempt may publish `build_status=gpu_input_ready`.
+
 Reference command:
 
 ```bash

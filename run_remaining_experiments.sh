@@ -1083,12 +1083,14 @@ main_v4_prepare_inputs() {
   local prepared="${V4_ARTIFACTS}/prepared_cases.jsonl"
   local preparation_dir="${V4_ARTIFACTS}/preparation/full"
   local validation="${V4_ARTIFACTS}/prepared_cases.validation.json"
+  local attempt_manifest="${V4_ARTIFACTS}/preparation/full/preparation_attempt_manifest.json"
   local limit_args=()
   if $SMOKE; then
     flavor="smoke"
     prepared="${V4_ARTIFACTS}/prepared_cases.smoke.jsonl"
     preparation_dir="${V4_ARTIFACTS}/preparation/smoke"
     validation="${V4_ARTIFACTS}/prepared_cases.smoke.validation.json"
+    attempt_manifest="${V4_ARTIFACTS}/preparation/smoke/preparation_attempt_manifest.json"
     limit_args=(--limit "${CMD_V4_SMOKE_CASES:-20}")
   fi
   local manifest="${preparation_dir}/preparation_manifest.json"
@@ -1125,12 +1127,26 @@ main_v4_prepare_inputs() {
     --max-uncertain-rate "${CMD_V4_MAX_UNCERTAIN_RATE:-0.05}" \
     --max-relation-attempts "${CMD_V4_MAX_RELATION_ATTEMPTS:-3}" \
     --max-proposer-retries "${CMD_V4_MAX_PROPOSER_RETRIES:-2}" \
+    --collect-proposer-failures \
     "${limit_args[@]}" || code=$?
   if $started_vllm; then
     stop_llama_dual_vllm
   fi
   if [[ $code -ne 0 ]]; then
     return "$code"
+  fi
+  if [[ ! -f "$prepared" || ! -f "$manifest" ]]; then
+    if [[ -f "$attempt_manifest" ]]; then
+      local attempt_status
+      attempt_status="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["build_status"])' "$attempt_manifest")"
+      if [[ "$attempt_status" == "repair_required" ]]; then
+        python -c 'import json,sys; value=json.load(open(sys.argv[1], encoding="utf-8")); print(json.dumps({key:value[key] for key in ("build_status","selected_case_count","prepared_case_count","quarantined_case_count","quarantined_case_ids","attempt_manifest_sha256")}, ensure_ascii=False, sort_keys=True))' "$attempt_manifest"
+        echo "===== V4 ${flavor} INPUT COLLECTION COMPLETE; REPAIR REQUIRED: ${attempt_manifest} ====="
+        return 0
+      fi
+    fi
+    echo "ERROR: V4 input preparation returned without an authorized final bundle" >&2
+    return 1
   fi
   python -m experiments.validate_v4_prepared_cases \
     --dataset-dir "$V4_DATASET_DIR" \
