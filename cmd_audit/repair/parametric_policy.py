@@ -41,7 +41,7 @@ _DENYLIST = re.compile(
     re.IGNORECASE,
 )
 _STRATEGY_LEAK = re.compile(
-    r"(?:^|[_:/.-])(gold|label|case|target|eval(?:uation)?|family|test|"
+    r"(?:^|[_:/.-])(gold|label|case|target|eval(?:uation)?|test|"
     r"inject(?:or|ion)?)(?:$|[_:/.-])",
     re.IGNORECASE,
 )
@@ -374,10 +374,37 @@ def niche_path(context: PolicyContext) -> tuple[str, ...]:
     return ("global", surface, semantic, f"{semantic}/signals:{context.signal_signature}")
 
 
+def _strategy_embeds_graph_identifier(
+    strategy_id: str,
+    graph: FrozenRelationGraph,
+) -> bool:
+    identifiers = {
+        graph.case_id,
+        graph.graph_sha256,
+        *(
+            identifier
+            for edge in graph.edges
+            for identifier in (
+                edge.edge_id,
+                edge.pair_id,
+                edge.left_item_id,
+                edge.right_item_id,
+            )
+        ),
+    }
+    normalized_strategy = strategy_id.casefold()
+    return any(
+        len(identifier) >= 7 and identifier.casefold() in normalized_strategy
+        for identifier in identifiers
+    )
+
+
 def compile_intent(intent: RepairIntent, *, graph: FrozenRelationGraph) -> Program:
     """Compile one already-complete intent; this never enumerates programs."""
     if graph.graph_sha256 == "":  # placate structural readers; graph validates itself.
         raise ValueError("unreachable invalid graph")
+    if _strategy_embeds_graph_identifier(intent.strategy_id, graph):
+        raise ValueError("strategy_id carries frozen graph identifier leakage")
     edge = next((item for item in graph.edges if item.edge_id == intent.relation_edge_id), None)
     if edge is None:
         raise ValueError("intent relation edge is absent from frozen graph")

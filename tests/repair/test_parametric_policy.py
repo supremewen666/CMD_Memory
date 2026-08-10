@@ -83,6 +83,9 @@ def test_strategy_and_feature_leakage_are_rejected() -> None:
     graph = _graph()
     with pytest.raises(ValueError, match="leakage"):
         _intent(graph, "case_runtime_1_strategy")
+    graph_bound = _intent(graph, f"semantic_motif_{graph.case_id}")
+    with pytest.raises(ValueError, match="frozen graph identifier leakage"):
+        compile_intent(graph_bound, graph=graph)
     with pytest.raises(ValueError, match="forbidden"):
         PolicyContext("runtime-1", 1, graph.graph_sha256, "mem0", "d", "s", "sig", {"gold_label": 1.0})
     with pytest.raises(ValueError, match="positive"):

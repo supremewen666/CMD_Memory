@@ -922,11 +922,12 @@ def parse_intent_proposals(
             )
             compile_intent(intent, graph=graph)
         except (KeyError, TypeError, ValueError) as error:
+            error_message = str(error)
             rejection_detail = (
                 "strategy_identifier_uses_forbidden_token_"
                 "use_neutral_semantic_motif_name"
-                if str(error)
-                == "strategy_id carries case/target/gold/evaluation leakage"
+                if error_message.startswith("strategy_id carries ")
+                and error_message.endswith(" leakage")
                 else "typed_compilation_invariant_failed"
             )
             raise IntentProposalError(

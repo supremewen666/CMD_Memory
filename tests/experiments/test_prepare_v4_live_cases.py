@@ -307,6 +307,27 @@ class CompilerLeakUntilCorrectedIntentJudge(CompleteIntentJudge):
         return json.dumps(response)
 
 
+class FamilyContentIntentJudge(CompleteIntentJudge):
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        response = json.loads(
+            super().generate_json(
+                prompt,
+                schema=schema,
+                schema_name=schema_name,
+                system=system,
+            )
+        )
+        response["proposals"]["candidate_2"]["strategy_id"] = "family_game_nights"
+        return json.dumps(response)
+
+
 class MalformedIntentJudge:
     def __init__(self) -> None:
         self.calls = 0
@@ -800,6 +821,33 @@ def test_compiler_rejection_reason_drives_audited_correction_retry(
     assert report["decision"] == "PASS"
     assert report["reason_counts"] == {"accepted": 2, "compiler_rejected": 2}
     assert report["model_call_count"] == proposer.calls == 4
+
+
+def test_runtime_family_content_is_not_mistaken_for_hidden_family_leakage(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+    artifacts = tmp_path / "artifacts"
+    proposer = FamilyContentIntentJudge()
+
+    manifest = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=tmp_path / "prepared.jsonl",
+        artifacts_dir=artifacts,
+        cache_path=tmp_path / "cache.sqlite",
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=proposer,
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v5",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        max_proposer_retries=2,
+        limit=2,
+    )
+
+    assert manifest["build_status"] == "gpu_input_ready"
+    assert manifest["proposer_reason_counts"] == {"accepted": 2}
 
 
 def test_strategy_renaming_cannot_disguise_duplicate_concrete_actions(
