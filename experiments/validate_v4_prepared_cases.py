@@ -788,7 +788,9 @@ def validate_prepared_cases(
             or response_row.get("proposer_version") != manifest.get("proposer_version")
         ):
             reasons.append("intent_response_proposer_binding")
-        if (attempt_index == 0) != (reason_code == "cache_replay"):
+        if (attempt_index == 0) != (
+            reason_code in {"cache_replay", "cache_rejected"}
+        ):
             reasons.append("intent_response_cache_replay_contract")
         case_id = response_row.get("case_id")
         if not isinstance(case_id, str) or case_id not in selected_ids:
@@ -923,8 +925,12 @@ def validate_prepared_cases(
                     key=lambda audit_row: int(audit_row["attempt_index"]),
                 )
                 audit_indexes = [audit_row["attempt_index"] for audit_row in audit_rows]
-                if audit_indexes == [0]:
+                if audit_indexes == [0] and audit_rows[0].get(
+                    "reason_code"
+                ) == "cache_replay":
                     expected_current_attempts = 0
+                elif audit_indexes == list(range(0, len(audit_rows))):
+                    expected_current_attempts = len(audit_rows) - 1
                 elif audit_indexes == list(range(1, len(audit_rows) + 1)):
                     expected_current_attempts = len(audit_rows)
                 else:

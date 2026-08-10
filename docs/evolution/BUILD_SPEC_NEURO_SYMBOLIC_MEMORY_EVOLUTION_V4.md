@@ -83,6 +83,12 @@ case IDs, target IDs, gold labels, and evaluation-family markers.  Species are
 deduplicated by `(strategy_id, effect, compiler_version, proposer_model_hash)`;
 concrete `intent_id` remains case- and graph-bound.
 
+Identifier leakage SHALL be checked against exact frozen graph identifiers and
+explicit reserved metadata markers, not against ordinary vocabulary.  Words
+such as `case`, `family`, `target`, and `test` MAY appear as semantic content;
+strings such as `case_id`, `target_item_id`, `family_id`, gold/evaluation
+markers, or a concrete case/edge/item identifier SHALL be rejected.
+
 The compiler SHALL map destructive intents only to
 `SUPERSEDED_ITEM -> {DEMOTE,SUPPRESS,REPLACE}`.  A non-destructive divergent
 intent may map only to annotate, verify, or abstain.  Invalid intents SHALL be
@@ -278,6 +284,15 @@ GPU lane.  After the proposer/compiler issue is repaired, a new attempt MAY
 reuse content-addressed accepted responses; quarantined cases, which were never
 deposited in the accepted-response cache, SHALL be proposed again.  Only a
 zero-quarantine attempt may publish `build_status=gpu_input_ready`.
+
+The V6 proposer cache migration SHALL preserve the V5 investment without
+weakening current validation.  On a V6 miss, the adapter MAY load the matching
+V5 response and compile it under the complete V6 graph-bound contract.  A
+passing response SHALL be deposited under the V6 cache key with zero model
+calls.  A rejected legacy response SHALL emit a content-bound
+`cache_rejected` audit row and trigger a normal V6 proposer attempt; it SHALL
+NOT be promoted under the V6 key.  Thus a validation-policy upgrade reuses all
+still-legal responses and re-queries only the incompatible cases.
 
 Reference command:
 

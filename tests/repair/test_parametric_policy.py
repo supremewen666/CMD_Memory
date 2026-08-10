@@ -82,7 +82,7 @@ def test_complete_intent_compiles_to_exact_graph_bound_ir() -> None:
 def test_strategy_and_feature_leakage_are_rejected() -> None:
     graph = _graph()
     with pytest.raises(ValueError, match="leakage"):
-        _intent(graph, "case_runtime_1_strategy")
+        _intent(graph, "case_id_runtime_1_strategy")
     graph_bound = _intent(graph, f"semantic_motif_{graph.case_id}")
     with pytest.raises(ValueError, match="frozen graph identifier leakage"):
         compile_intent(graph_bound, graph=graph)

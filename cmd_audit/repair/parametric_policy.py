@@ -41,8 +41,8 @@ _DENYLIST = re.compile(
     re.IGNORECASE,
 )
 _STRATEGY_LEAK = re.compile(
-    r"(?:^|[_:/.-])(gold|label|case|target|eval(?:uation)?|test|"
-    r"inject(?:or|ion)?)(?:$|[_:/.-])",
+    r"(?:^|[_:/.-])(gold(?:_answer|_evidence)?|label|eval(?:uation)?|"
+    r"case_id|target_item_id|family_id)(?:$|[_:/.-])",
     re.IGNORECASE,
 )
 
@@ -116,7 +116,7 @@ class RepairIntent:
         for name in ("strategy_id", "relation_edge_id", "proposer_id"):
             _require_identifier(getattr(self, name), name)
         if _STRATEGY_LEAK.search(self.strategy_id):
-            raise ValueError("strategy_id carries case/target/gold/evaluation leakage")
+            raise ValueError("strategy_id carries reserved evaluation marker leakage")
         if self.effect not in _EFFECTS:
             raise ValueError("unregistered repair effect")
         if self.target_item_id is not None:

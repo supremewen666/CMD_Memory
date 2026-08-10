@@ -303,9 +303,27 @@ class CompilerLeakUntilCorrectedIntentJudge(CompleteIntentJudge):
         )
         if "strategy_identifier_uses_forbidden_token" not in prompt:
             response["proposals"]["candidate_1"]["strategy_id"] = (
-                "target_specific_strategy_v1"
+                "gold_specific_strategy_v1"
             )
         return json.dumps(response)
+
+
+class LegacyCacheCorrectionIntentJudge(CompleteIntentJudge):
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        assert "strategy_identifier_uses_forbidden_token" in prompt
+        return super().generate_json(
+            prompt,
+            schema=schema,
+            schema_name=schema_name,
+            system=system,
+        )
 
 
 class FamilyContentIntentJudge(CompleteIntentJudge):
@@ -329,6 +347,32 @@ class FamilyContentIntentJudge(CompleteIntentJudge):
         return json.dumps(response)
 
 
+class NaturalSemanticVocabularyIntentJudge(CompleteIntentJudge):
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: object,
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        response = json.loads(
+            super().generate_json(
+                prompt,
+                schema=schema,
+                schema_name=schema_name,
+                system=system,
+            )
+        )
+        for slot, strategy_id in zip(
+            response["proposals"],
+            ("inspect_board", "test_board", "collaborate_on_case"),
+            strict=True,
+        ):
+            response["proposals"][slot]["strategy_id"] = strategy_id
+        return json.dumps(response)
+
+
 class FirstCaseQuarantinedIntentJudge(CompleteIntentJudge):
     def generate_json(
         self,
@@ -348,7 +392,7 @@ class FirstCaseQuarantinedIntentJudge(CompleteIntentJudge):
         )
         if self.calls <= 3:
             response["proposals"]["candidate_1"]["strategy_id"] = (
-                "target_specific_strategy_v1"
+                "gold_specific_strategy_v1"
             )
         return json.dumps(response)
 
@@ -875,6 +919,31 @@ def test_runtime_family_content_is_not_mistaken_for_hidden_family_leakage(
     assert manifest["proposer_reason_counts"] == {"accepted": 2}
 
 
+def test_runtime_test_and_case_vocabulary_is_not_mistaken_for_id_leakage(
+    tmp_path: Path,
+) -> None:
+    dataset = _dataset(tmp_path)
+
+    manifest = prepare_live_cases(
+        dataset_dir=dataset,
+        output_path=tmp_path / "prepared.jsonl",
+        artifacts_dir=tmp_path / "artifacts",
+        cache_path=tmp_path / "cache.sqlite",
+        relation_judge=PositiveRelationJudge(),
+        intent_judge=NaturalSemanticVocabularyIntentJudge(),
+        instrument_model_id="relation-model-v2",
+        instrument_model_hash="a" * 64,
+        proposer_model_id="intent-model-v6",
+        proposer_model_hash="b" * 64,
+        candidate_budget=4,
+        max_proposer_retries=0,
+        limit=2,
+    )
+
+    assert manifest["build_status"] == "gpu_input_ready"
+    assert manifest["proposer_reason_counts"] == {"accepted": 2}
+
+
 def test_collect_all_mode_quarantines_one_case_and_prepares_later_cases(
     tmp_path: Path,
 ) -> None:
@@ -924,7 +993,7 @@ def test_collect_all_mode_quarantines_one_case_and_prepares_later_cases(
     assert events[-1] == "preparation_repair_required"
 
 
-def test_collect_all_mode_quarantines_cached_response_rejected_by_compiler(
+def test_v6_migrates_valid_v5_cache_and_requeries_only_rejected_response(
     tmp_path: Path,
 ) -> None:
     dataset = _dataset(tmp_path)
@@ -939,30 +1008,60 @@ def test_collect_all_mode_quarantines_cached_response_rejected_by_compiler(
         instrument_model_id="relation-model-v2",
         instrument_model_hash="a" * 64,
         proposer_model_id="intent-model-v5",
-        proposer_model_hash="b" * 64,
+        proposer_model_hash="c" * 64,
         candidate_budget=4,
         limit=2,
     )
+    case_by_current_key = {
+        row["proposer_cache_key"]: row["case_id"]
+        for row in _rows(tmp_path / "initial-artifacts" / "intent_proposals.jsonl")
+    }
+    legacy_version = "cmd-v4-llm-intent-proposer-v5-disjoint-slots"
     with sqlite3.connect(cache) as connection:
-        cache_key, response_json = connection.execute(
-            "SELECT cache_key, response_json FROM v4_intent_proposals "
-            "ORDER BY cache_key LIMIT 1"
-        ).fetchone()
-        response = json.loads(response_json)
-        response["proposals"]["candidate_1"]["strategy_id"] = (
-            "target_specific_strategy_v1"
-        )
-        connection.execute(
-            "UPDATE v4_intent_proposals SET response_json = ?, "
-            "response_sha256 = ? WHERE cache_key = ?",
+        rows = connection.execute(
+            "SELECT cache_key, proposer_input_sha256, prompt_template_sha256, "
+            "proposer_model_sha256, proposals_needed, response_json "
+            "FROM v4_intent_proposals ORDER BY cache_key"
+        ).fetchall()
+        connection.execute("DELETE FROM v4_intent_proposals")
+        for index, row in enumerate(rows):
             (
-                json.dumps(response, sort_keys=True, separators=(",", ":")),
-                canonical_sha256(response),
-                cache_key,
-            ),
-        )
+                current_key,
+                input_sha256,
+                prompt_sha256,
+                model_sha256,
+                proposals_needed,
+                response_json,
+            ) = row
+            response = json.loads(response_json)
+            if index == 0:
+                response["proposals"]["candidate_1"]["strategy_id"] = (
+                    f"semantic_{case_by_current_key[current_key]}"
+                )
+            legacy_key = canonical_sha256(
+                {
+                    "proposer_input_sha256": input_sha256,
+                    "prompt_template_sha256": prompt_sha256,
+                    "proposer_version": legacy_version,
+                    "proposer_model_sha256": model_sha256,
+                    "proposals_needed": proposals_needed,
+                }
+            )
+            connection.execute(
+                "INSERT INTO v4_intent_proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    legacy_key,
+                    input_sha256,
+                    prompt_sha256,
+                    legacy_version,
+                    model_sha256,
+                    proposals_needed,
+                    json.dumps(response, sort_keys=True, separators=(",", ":")),
+                    canonical_sha256(response),
+                ),
+            )
 
-    proposer = CompleteIntentJudge()
+    proposer = LegacyCacheCorrectionIntentJudge()
     result = prepare_live_cases(
         dataset_dir=dataset,
         output_path=tmp_path / "replay.jsonl",
@@ -972,31 +1071,39 @@ def test_collect_all_mode_quarantines_cached_response_rejected_by_compiler(
         intent_judge=proposer,
         instrument_model_id="relation-model-v2",
         instrument_model_hash="a" * 64,
-        proposer_model_id="intent-model-v5",
+        proposer_model_id="intent-model-v6",
         proposer_model_hash="b" * 64,
+        legacy_proposer_model_hashes={legacy_version: "c" * 64},
         candidate_budget=4,
         limit=2,
         collect_proposer_failures=True,
     )
 
-    assert result["build_status"] == "repair_required"
-    assert result["prepared_case_count"] == 1
-    assert result["quarantined_case_count"] == 1
-    assert proposer.calls == 0
-    quarantine = _rows(
-        tmp_path / "replay-artifacts" / "intent_quarantine.jsonl"
+    assert result["build_status"] == "gpu_input_ready"
+    assert result["proposer_version"] == (
+        "cmd-v4-llm-intent-proposer-v6-semantic-id-validation"
     )
-    assert quarantine[0]["error_type"] == "IntentProposalError"
-    assert quarantine[0]["attempt_count"] == 0
+    assert result["proposer_model_call_count"] == proposer.calls == 1
+    assert result["proposer_cache_hit_count"] == 1
     responses = _rows(
         tmp_path / "replay-artifacts" / "intent_responses.jsonl"
     )
-    assert any(
-        row["attempt_index"] == 0
-        and row["reason_code"] == "compiler_rejected"
-        and row["raw_response"] is not None
-        for row in responses
+    assert sorted(row["reason_code"] for row in responses) == [
+        "accepted",
+        "cache_rejected",
+        "cache_replay",
+    ]
+    with sqlite3.connect(cache) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM v4_intent_proposals WHERE proposer_version = ?",
+            (result["proposer_version"],),
+        ).fetchone()[0] == 2
+    validation = validate_prepared_cases(
+        dataset_dir=dataset,
+        prepared_path=tmp_path / "replay.jsonl",
+        manifest_path=tmp_path / "replay-artifacts" / "preparation_manifest.json",
     )
+    assert validation["decision"] == "PASS"
 
 
 def test_strategy_renaming_cannot_disguise_duplicate_concrete_actions(

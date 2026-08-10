@@ -72,7 +72,12 @@ INSTRUMENT_MANIFEST_SCHEMA_VERSION = "cmd-v4-relation-instrument-manifest-v2"
 CACHE_RECORDS_SCHEMA_VERSION = "cmd-v4-relation-cache-records-v2"
 RELATION_RESPONSE_ROW_VERSION = "cmd-v4-relation-response-row-v1"
 RELATION_MEASUREMENT_REPORT_VERSION = "cmd-v4-relation-measurement-report-v1"
-INTENT_PROPOSER_VERSION = "cmd-v4-llm-intent-proposer-v5-disjoint-slots"
+INTENT_PROPOSER_VERSION = (
+    "cmd-v4-llm-intent-proposer-v6-semantic-id-validation"
+)
+LEGACY_INTENT_PROPOSER_VERSIONS = (
+    "cmd-v4-llm-intent-proposer-v5-disjoint-slots",
+)
 INTENT_PROPOSAL_ROW_VERSION = "cmd-v4-intent-proposal-row-v1"
 INTENT_RESPONSE_ROW_VERSION = "cmd-v4-intent-response-row-v1"
 INTENT_PROPOSAL_REPORT_VERSION = "cmd-v4-intent-proposal-report-v1"
@@ -132,6 +137,7 @@ class IntentProposalReason(str, Enum):
     ACCEPTED = "accepted"
     ACCEPTED_FENCED_JSON = "accepted_fenced_json"
     CACHE_REPLAY = "cache_replay"
+    CACHE_REJECTED = "cache_rejected"
     MALFORMED_JSON = "malformed_json"
     INVALID_SCHEMA = "invalid_schema"
     COMPILER_REJECTED = "compiler_rejected"
@@ -858,12 +864,13 @@ def intent_proposal_cache_key(
     *,
     proposer_model_hash: str,
     proposals_needed: int,
+    proposer_version: str = INTENT_PROPOSER_VERSION,
 ) -> str:
     return canonical_sha256(
         {
             "proposer_input_sha256": canonical_sha256(surface),
             "prompt_template_sha256": INTENT_PROMPT_TEMPLATE_SHA256,
-            "proposer_version": INTENT_PROPOSER_VERSION,
+            "proposer_version": proposer_version,
             "proposer_model_sha256": proposer_model_hash,
             "proposals_needed": proposals_needed,
         }
@@ -1027,6 +1034,7 @@ def _propose_intents(
     judge: TextGenerator,
     candidate_budget: int,
     proposer_model_hash: str,
+    legacy_proposer_model_hashes: Mapping[str, str],
     max_retries: int,
     cache_path: Path,
     attempt_records: list[dict[str, object]],
@@ -1061,8 +1069,24 @@ def _propose_intents(
         proposer_model_hash=proposer_model_hash,
         proposals_needed=proposals_needed,
     )
+    cached_source_version = INTENT_PROPOSER_VERSION
+    cached_rejection_feedback: str | None = None
     with IntentProposalCache(cache_path) as cache:
         cached_response = cache.get(cache_key)
+        if cached_response is None:
+            for legacy_version in LEGACY_INTENT_PROPOSER_VERSIONS:
+                legacy_model_hash = legacy_proposer_model_hashes[legacy_version]
+                legacy_key = intent_proposal_cache_key(
+                    surface,
+                    proposer_model_hash=legacy_model_hash,
+                    proposals_needed=proposals_needed,
+                    proposer_version=legacy_version,
+                )
+                legacy_response = cache.get(legacy_key)
+                if legacy_response is not None:
+                    cached_response = legacy_response
+                    cached_source_version = legacy_version
+                    break
     if cached_response is not None:
         cached_raw = _canonical_bytes(cached_response).decode("utf-8")
         try:
@@ -1079,44 +1103,60 @@ def _propose_intents(
                     case_id=graph.case_id,
                     cache_key=cache_key,
                     attempt_index=0,
-                    reason_code=error.reason_code,
+                    reason_code=IntentProposalReason.CACHE_REJECTED,
                     raw_response=cached_raw,
                     structured_output_used=True,
                     response_schema_sha256=response_schema_sha256,
                 )
             )
-            raise
-        intents = (baseline, *proposed)
-        if len({intent.intent_id for intent in intents}) != candidate_budget:
-            raise ValueError("cached baseline and proposer intents are not unique")
-        attempt_records.append(
-            _intent_response_record(
-                case_id=graph.case_id,
-                cache_key=cache_key,
-                attempt_index=0,
-                reason_code=IntentProposalReason.CACHE_REPLAY,
-                raw_response=cached_raw,
-                structured_output_used=True,
-                response_schema_sha256=response_schema_sha256,
+            if cached_source_version == INTENT_PROPOSER_VERSION:
+                raise
+            cached_response = None
+            cached_rejection_feedback = INTENT_CORRECTION_TEMPLATE.format(
+                reason_code=IntentProposalReason.CACHE_REJECTED.value,
+                reason=str(error),
             )
-        )
-        return (
-            intents,
-            {
-                "proposer_input_sha256": input_sha256,
-                "proposer_response_sha256": canonical_sha256(cached_response),
-                "proposer_response": dict(cached_response),
-                "attempts": 0,
-                "proposer_cache_key": cache_key,
-                "proposer_cache_hit": True,
-            },
-            0,
-        )
+        if cached_response is not None:
+            intents = (baseline, *proposed)
+            if len({intent.intent_id for intent in intents}) != candidate_budget:
+                raise ValueError("cached baseline and proposer intents are not unique")
+            if cached_source_version != INTENT_PROPOSER_VERSION:
+                with IntentProposalCache(cache_path) as cache:
+                    cache.put(
+                        cache_key=cache_key,
+                        proposer_input_sha256=input_sha256,
+                        proposer_model_sha256=proposer_model_hash,
+                        proposals_needed=proposals_needed,
+                        response=cached_response,
+                    )
+            attempt_records.append(
+                _intent_response_record(
+                    case_id=graph.case_id,
+                    cache_key=cache_key,
+                    attempt_index=0,
+                    reason_code=IntentProposalReason.CACHE_REPLAY,
+                    raw_response=cached_raw,
+                    structured_output_used=True,
+                    response_schema_sha256=response_schema_sha256,
+                )
+            )
+            return (
+                intents,
+                {
+                    "proposer_input_sha256": input_sha256,
+                    "proposer_response_sha256": canonical_sha256(cached_response),
+                    "proposer_response": dict(cached_response),
+                    "attempts": 0,
+                    "proposer_cache_key": cache_key,
+                    "proposer_cache_hit": True,
+                },
+                0,
+            )
     structured_generate = getattr(judge, "generate_json", None)
     if not callable(structured_generate):
         raise ValueError("V4 intent proposer must support strict JSON Schema output")
     surface_json = _canonical_bytes(surface).decode("utf-8")
-    correction_feedback: str | None = None
+    correction_feedback = cached_rejection_feedback
     last_reason = IntentProposalReason.TRANSPORT_ERROR
     for attempt in range(1, max_retries + 2):
         attempt_prompt = "\n".join(
@@ -1331,6 +1371,7 @@ def prepare_live_cases(
     instrument_model_hash: str,
     proposer_model_id: str,
     proposer_model_hash: str,
+    legacy_proposer_model_hashes: Mapping[str, str] | None = None,
     candidate_budget: int = 4,
     max_uncertain_rate: float = DEFAULT_MAX_UNCERTAIN_RATE,
     max_relation_attempts: int = DEFAULT_RELATION_ATTEMPTS,
@@ -1346,6 +1387,17 @@ def prepare_live_cases(
     cache_path = Path(cache_path)
     _require_hash(instrument_model_hash, "instrument_model_hash")
     _require_hash(proposer_model_hash, "proposer_model_hash")
+    if legacy_proposer_model_hashes is None:
+        legacy_hashes = {
+            version: proposer_model_hash
+            for version in LEGACY_INTENT_PROPOSER_VERSIONS
+        }
+    else:
+        legacy_hashes = dict(legacy_proposer_model_hashes)
+    if set(legacy_hashes) != set(LEGACY_INTENT_PROPOSER_VERSIONS):
+        raise ValueError("legacy proposer model hashes must bind every legacy version")
+    for version, model_hash in legacy_hashes.items():
+        _require_hash(model_hash, f"legacy proposer model hash for {version}")
     if not instrument_model_id or not proposer_model_id:
         raise ValueError("instrument and proposer model IDs are required")
     if candidate_budget < 1:
@@ -1567,6 +1619,7 @@ def prepare_live_cases(
                 judge=intent_judge,
                 candidate_budget=candidate_budget,
                 proposer_model_hash=proposer_model_hash,
+                legacy_proposer_model_hashes=legacy_hashes,
                 max_retries=max_proposer_retries,
                 cache_path=cache_path,
                 attempt_records=intent_response_records,
@@ -1942,6 +1995,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         proposer_hash = args.proposer_model_hash or _model_config_hash(
             proposer_config, INTENT_PROPOSER_VERSION
         )
+        legacy_proposer_hashes = {
+            version: (
+                args.proposer_model_hash
+                or _model_config_hash(proposer_config, version)
+            )
+            for version in LEGACY_INTENT_PROPOSER_VERSIONS
+        }
         manifest = prepare_live_cases(
             dataset_dir=args.dataset_dir,
             output_path=args.output,
@@ -1953,6 +2013,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             instrument_model_hash=instrument_hash,
             proposer_model_id=proposer_config.model,
             proposer_model_hash=proposer_hash,
+            legacy_proposer_model_hashes=legacy_proposer_hashes,
             candidate_budget=args.candidate_budget,
             max_uncertain_rate=args.max_uncertain_rate,
             max_relation_attempts=args.max_relation_attempts,
