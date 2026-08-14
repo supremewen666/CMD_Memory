@@ -123,10 +123,11 @@ python -m experiments.ghost_live_protocol authorize-test \
 授权绑定唯一 `RUN_ID`；不能复制给下一次运行。代码、数据、四分区、模型、evaluator
 或候选预算任一改变，都必须生成全新的协议和授权。
 
-## 4. nohup 启动需调用实验
+## 4. 单张 A100：nohup 启动需调用实验
 
-两张 GPU 在同机时，使用不同端口。下面命令同时使用 `nohup` 和仓库内 supervisor；
-外层 shell 退出后，状态仍写入不可复用的 JSONL 控制目录。
+`v4_single_gpu` 会在一张 A100 上处理全部冻结 case，不做双卡 hash 分片。下面命令
+同时使用 `nohup` 和仓库内 supervisor；外层 shell 退出后，状态仍写入不可复用的
+JSONL 控制目录。
 
 ```bash
 export CMD_V4_SOURCE_CASES="$LIVE_ROOT/fresh_prepared_cases.jsonl"
@@ -138,19 +139,11 @@ export CMD_V4_GHOST_ACCESS_LEDGER="$LIVE_ROOT/access.jsonl"
 export CMD_V4_MODEL_MANIFEST="$LIVE_ROOT/model_manifest.json"
 export CMD_V4_CANDIDATE_BUDGET=4
 export CMD_GPU0_PORT_BASE=8000
-export CMD_GPU1_PORT_BASE=8100
 
 nohup ./run_remaining_experiments.sh \
-  --role v4_gpu0 --run-id "$RUN_ID" --detach \
-  >"$LIVE_ROOT/${RUN_ID}.gpu0.launch.log" 2>&1 &
-
-nohup ./run_remaining_experiments.sh \
-  --role v4_gpu1 --run-id "$RUN_ID" --detach \
-  >"$LIVE_ROOT/${RUN_ID}.gpu1.launch.log" 2>&1 &
+  --role v4_single_gpu --run-id "$RUN_ID" --detach \
+  >"$LIVE_ROOT/${RUN_ID}.single-gpu.launch.log" 2>&1 &
 ```
-
-若两张 GPU 在不同主机，两台机器必须使用相同协议、授权、模型哈希、case stream 和
-`RUN_ID`；完成后将 GPU1 shard 与 `.manifest.json` 原样复制到汇聚主机。
 
 JSONL 流式监控：
 
@@ -161,7 +154,7 @@ JSONL 流式监控：
 ./run_remaining_experiments.sh --role monitor --run-id "$RUN_ID" --once
 ```
 
-GPU 两路均为 `completed` 后启动 merge/eight-arm prequential：
+`v4_single_gpu` 为 `completed` 后启动 merge/eight-arm prequential：
 
 ```bash
 nohup ./run_remaining_experiments.sh \

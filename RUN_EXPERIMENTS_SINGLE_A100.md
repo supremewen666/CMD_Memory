@@ -1,60 +1,49 @@
-# CMD 双 GPU 实验运行手册
+# CMD 单张 A100 实验运行手册
 
 状态：V4 neuro-symbolic memory evolution 实验控制面已实现。本文对应
 `run_remaining_experiments.sh`，同时保留旧 arena/Phase 1/SIGIL 角色。
 
-## 1. 实验不是“两张卡各学一半策略”
+## 1. 单卡只负责 materialization，学习仍严格串行
 
-V4 必须保持严格 prequential 顺序，因此双卡只并行最耗时、但彼此独立的
-typed-intent 执行与 shadow scoring；policy update 只在合并后的冻结顺序上执行一次。
+V4 必须保持严格 prequential 顺序。单张 A100 依次完成全部 typed-intent 执行与
+shadow scoring；policy update 只在 materialization 完成后的冻结顺序上执行一次。
 
 ```mermaid
 flowchart LR
   D["data/evolution_v4\n3,939 runtime + sealed shadow rows"]
   I["frozen relation instrument\ncomplete intent proposer"]
   S["prepared_cases.jsonl\n完整 intent + frozen graph"]
-  G0["GPU0\nSHA256(case_id) mod 2 = 0\nports 8000/8001"]
-  G1["GPU1\nSHA256(case_id) mod 2 = 1\nports 8000/8001"]
+  G0["单张 A100\n全部冻结 case\nports 8000/8001"]
   M["CPU merge\n去重、覆盖、hash、event order"]
   R["canonical prequential replay\nB0-B5 select-all then update"]
   E["report.json\nfamily-block bootstrap gate"]
   D --> I --> S
-  S --> G0
-  S --> G1
-  G0 --> M
-  G1 --> M
+  S --> G0 --> M
   M --> R --> E
 ```
 
-这样做的理由很硬：如果 GPU0/GPU1 各自更新 policy，最后得到的是两个不同历史的
-repository，不是一个可复现实验。双卡产出的 shard 只包含 post-outcome evidence，
-不携带学习状态。
+单卡产出的 shard 只包含 post-outcome evidence，不携带学习状态；因此耗时会增加，
+但不会改变实验统计口径或 prequential 更新顺序。
 
-## 2. GPU 分工与端口
+## 2. 单卡角色与端口
 
 | lane | 默认物理 GPU | Judge | Answerer | 工作 |
 |---|---:|---:|---:|---|
 | `v4_prepare_inputs` | `0` | `8000` | `8001` | relation cache、graph 与完整 intent 冻结 |
+| `v4_single_gpu` | `0` | `8000` | `8001` | 全部 case 的 typed execution/scoring |
 | `v4_gpu0` | `0` | `8000` | `8001` | hash bucket 0 的 typed execution/scoring |
 | `v4_gpu1` | `1` | `8000` | `8001` | hash bucket 1 的 typed execution/scoring |
-| `v4_merge` | CPU | — | — | 严格合并和六臂 replay |
+| `v4_merge` | CPU | — | — | 严格合并和八臂 replay |
 
-同一台双卡机器可直接使用默认值。若两台单卡机器都只暴露 local GPU 0，在第二台上
-设置 `CMD_GPU1_ID=0`；端口可以继续使用 8000/8001，也可以覆盖
-`CMD_GPU1_PORT_BASE`。
+当前推荐路径只设置 GPU 0：
 
 ```bash
-# 同一台双卡机器的默认绑定
-CMD_GPU0_ID=0 CMD_GPU0_PORT_BASE=8000
-CMD_GPU1_ID=1 CMD_GPU1_PORT_BASE=8000
-
-# 第二台单卡机器
-export CMD_GPU1_ID=0
-export CMD_GPU1_PORT_BASE=8000
+export CMD_GPU0_ID=0
+export CMD_GPU0_PORT_BASE=8000
 ```
 
-每个 lane 会在自己的物理卡上依次启动 frozen Qwen judge 和 Llama answerer，避免
-KV-cache 初始化竞争。`CUDA_VISIBLE_DEVICES`、PID、日志和端口均按 lane 隔离。
+role 会在这张卡上依次启动 frozen Qwen judge 和 Llama answerer，避免 KV-cache
+初始化竞争。原 `v4_gpu0`/`v4_gpu1` 双卡路径保留为兼容选项。
 
 ## 3. 统一数据构建与验证
 
@@ -151,7 +140,7 @@ probe_case              # 仅 live shadow evaluator 可读
 export CMD_V4_MATERIALIZER_BACKEND=experiments.v4_materialization:passthrough_backend
 ```
 
-每个 `v4_gpu0/v4_gpu1` role 都会在启动 endpoint 前，以零模型调用重新执行整包
+`v4_single_gpu`（以及兼容的 `v4_gpu0/v4_gpu1`）会在启动 endpoint 前，以零模型调用重新执行整包
 prepared-case validator。输入缺失、manifest 不匹配、hash/leakage 门禁失败、schema
 非闭合、graph/runtime hash 不一致、intent 不能编译或 endpoint 未配置时，lane 会
 fail closed，不会把失败伪装成负样本。
@@ -182,35 +171,29 @@ artifacts/neuro_symbolic_evolution_v4/
 
 ## 5. 一次正式运行
 
-两条 GPU 命令必须使用同一个明确的 run ID。不要依赖自动时间戳，否则两个 shard
-会落入不同实验目录。
+准备完成后，用一个新的明确 run ID 启动单卡全量 materialization：
 
 ```bash
 cd /path/to/CMD_Counterfactual_Memory_Debugger
 
 export CMD_V4_CANDIDATE_BUDGET=4
+export CMD_V4_ARTIFACTS="${CMD_V4_ARTIFACTS:-$PWD/artifacts/neuro_symbolic_evolution_v4}"
 RUN_ID=v4-confirm-001
+mkdir -p "$CMD_V4_ARTIFACTS"
 
-./run_remaining_experiments.sh --role v4_gpu0 --run-id "$RUN_ID" --detach
-./run_remaining_experiments.sh --role v4_gpu1 --run-id "$RUN_ID" --detach
+nohup ./run_remaining_experiments.sh \
+  --role v4_single_gpu --run-id "$RUN_ID" --detach \
+  >"$CMD_V4_ARTIFACTS/${RUN_ID}.single-gpu.launch.log" 2>&1 &
 ```
 
-两张卡完成后运行 CPU merge/replay：
+单卡 role 完成后运行 CPU merge/replay：
 
 ```bash
 ./run_remaining_experiments.sh --role v4_merge --run-id "$RUN_ID" --detach
 ```
 
-若 GPU 位于不同主机，先把 GPU1 的以下文件及 manifest 复制到汇聚主机的同一
-`RUN_ID` 目录：
-
-```text
-artifacts/neuro_symbolic_evolution_v4/runs/<RUN_ID>/materialized/gpu1.jsonl
-artifacts/neuro_symbolic_evolution_v4/runs/<RUN_ID>/materialized/gpu1.jsonl.manifest.json
-```
-
 正式 merge 会使用 `prepared_cases.jsonl` 的 case ID 集合检查无遗漏、无额外 case；
-然后校验 shard hash、重复 case、唯一 event index，并按
+然后校验单 shard hash、重复 case、唯一 event index，并按
 `context.event_index, case_id` 排序。
 
 ## 6. `--detach` 和 JSONL 流式监控
@@ -240,10 +223,10 @@ artifacts/run_control/<RUN_ID>/<ROLE>/
 
 ```bash
 ./run_remaining_experiments.sh \
-  --role status --run-id "$RUN_ID" --target-role v4_gpu0
+  --role status --run-id "$RUN_ID" --target-role v4_single_gpu
 
 ./run_remaining_experiments.sh \
-  --role stop --run-id "$RUN_ID" --target-role v4_gpu0
+  --role stop --run-id "$RUN_ID" --target-role v4_single_gpu
 ```
 
 停止使用进程组 `SIGTERM`，因此 supervisor 和它启动的 vLLM/worker 同属一个可控
@@ -251,17 +234,16 @@ artifacts/run_control/<RUN_ID>/<ROLE>/
 
 ## 7. 冒烟
 
-GPU 冒烟只取输入前 `CMD_V4_SMOKE_CASES` 行再按 hash lane 分片，默认 20：
+GPU 冒烟只取输入前 `CMD_V4_SMOKE_CASES` 行，默认 20：
 
 ```bash
 # 若尚未生成 smoke prepared 输入，先运行 §3 的 v4_prepare_inputs --smoke
 RUN_ID=v4-smoke-001
-./run_remaining_experiments.sh --role v4_gpu0 --run-id "$RUN_ID" --smoke --detach
-./run_remaining_experiments.sh --role v4_gpu1 --run-id "$RUN_ID" --smoke --detach
+./run_remaining_experiments.sh --role v4_single_gpu --run-id "$RUN_ID" --smoke --detach
 ./run_remaining_experiments.sh --role monitor --run-id "$RUN_ID"
 ```
 
-`v4_merge --smoke` 不要求覆盖正式全集，但仍要求两个 shard 无重复、event index
+`v4_merge --smoke` 不要求覆盖正式全集，但仍要求 shard 无重复、event index
 唯一。冒烟输入必须同时含 represented 和 unseen families，否则统计 gate 会拒绝，
 这是数据不足而不是代码失败。
 
@@ -301,10 +283,8 @@ unseen family 只做 selection/scoring；其 outcome 不更新 policy、species 
 ```text
 artifacts/neuro_symbolic_evolution_v4/runs/<RUN_ID>/
 ├── materialized/
-│   ├── gpu0.jsonl
-│   ├── gpu0.jsonl.manifest.json
-│   ├── gpu1.jsonl
-│   └── gpu1.jsonl.manifest.json
+│   ├── single_gpu.jsonl
+│   └── single_gpu.jsonl.manifest.json
 ├── cases.merged.jsonl
 ├── cases.merged.jsonl.manifest.json
 └── prequential/
@@ -348,4 +328,4 @@ V4 不会改写旧 arena JSONL，也不会用新结果重新解释 v1-v3 表格�
 旧 GHOST V1 固定候选动作接线已经退役。新的开放世界
 `failure_memory → pattern → repair_skill` 协议见
 `BUILD_SPEC_GHOST_ECOLOGY_V2.md`。V2 的真实调用 runner 尚未授权；当前脚本只保留
-经过验证的 V4 六臂路径，避免误用 V1 结果启动不符合新目标的实验。
+经过验证的 V4 八臂路径，避免误用 V1 结果启动不符合新目标的实验。

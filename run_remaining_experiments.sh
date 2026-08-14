@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CMD experiments: legacy arenas plus V4 two-GPU materialization/canonical replay.
+# CMD experiments: legacy arenas plus V4 single/dual-GPU materialization and replay.
 
 set -euo pipefail
 export PYTHONUNBUFFERED=1
@@ -67,20 +67,22 @@ while [[ $# -gt 0 ]]; do
       echo "V4 roles:"
       echo "  v4_prepare:    build if absent, then validate the CPU dataset package"
       echo "  v4_prepare_inputs: freeze relation cache/graphs/intents on GPU 0"
+      echo "  v4_single_gpu: materialize all frozen cases on one A100 (recommended)"
       echo "  v4_gpu0:       materialize SHA256(case_id)%2 == 0 on GPU 0"
       echo "  v4_gpu1:       materialize SHA256(case_id)%2 == 1 on GPU 1"
-      echo "  v4_merge:      preflight, verify/merge shards, then canonical eight-arm replay"
+      echo "  v4_merge:      preflight, verify single/dual shards, then canonical eight-arm replay"
       echo "  monitor:       stream lifecycle + experiment JSONL for --run-id"
       echo "  status|stop:   inspect/terminate --target-role under --run-id"
       echo ""
       echo "GPU 0: physical id 0, ports 8000/8001 (override CMD_GPU0_ID/CMD_GPU0_PORT_BASE)"
       echo "GPU 1: physical id 1, ports 8000/8001 (override CMD_GPU1_ID/CMD_GPU1_PORT_BASE)"
+      echo "single A100: physical id 0, ports 8000/8001 (uses v4_single_gpu)"
       echo ""
       echo "Legacy roles: gpu0, gpu1, analyze, phase1_gpu0, phase1_gpu1,"
       echo "              phase1_analyze, sigil_gpu0, sigil_gpu1, sigil_analyze, route_a"
       echo ""
       echo "--detach creates launch.json, run.pid, run.log, and status.jsonl."
-      echo "Use the same explicit --run-id for v4_gpu0, v4_gpu1, monitor, and v4_merge."
+      echo "Use the same explicit --run-id for v4_single_gpu/dual lanes, monitor, and v4_merge."
       echo ""
       echo "  GPU 0 legacy: MemTrace-B seeds 24+124 → MemFail"
       echo "  GPU 1 legacy: MemTrace-B seed 224 → STALE → replicate seed 24"
@@ -126,7 +128,7 @@ LANE_GPU_ID=""
 LANE_LABEL="cpu"
 LANE_PORT_BASE=8000
 case "$ROLE" in
-  gpu0|phase1_gpu0|sigil_gpu0|v4_prepare_inputs|v4_gpu0)
+  gpu0|phase1_gpu0|sigil_gpu0|v4_prepare_inputs|v4_single_gpu|v4_gpu0)
     LANE_GPU_ID="${CMD_GPU0_ID:-0}"
     LANE_LABEL="gpu0"
     LANE_PORT_BASE="${CMD_GPU0_PORT_BASE:-8000}"
@@ -1259,6 +1261,14 @@ main_v4_gpu0() {
   main_v4_materialize gpu0
 }
 
+main_v4_single_gpu() {
+  if [[ "$LANE_GPU_ID" != "${CMD_GPU0_ID:-0}" ]]; then
+    echo "ERROR: v4_single_gpu lane was not bound to CMD_GPU0_ID" >&2
+    return 1
+  fi
+  main_v4_materialize single_gpu
+}
+
 main_v4_gpu1() {
   if [[ "$LANE_GPU_ID" != "${CMD_GPU1_ID:-1}" ]]; then
     echo "ERROR: v4_gpu1 lane was not bound to CMD_GPU1_ID" >&2
@@ -1275,12 +1285,26 @@ main_v4_merge() {
   local expected_args=(--expected-source "$V4_SOURCE_CASES")
   $SMOKE && bootstrap_samples=100
   $SMOKE && expected_args=()
-  for lane in gpu0 gpu1; do
-    if [[ ! -f "${materialized}/${lane}.jsonl" ]]; then
-      echo "ERROR: missing ${lane} shard: ${materialized}/${lane}.jsonl" >&2
+  local single_shard="${materialized}/single_gpu.jsonl"
+  local gpu0_shard="${materialized}/gpu0.jsonl"
+  local gpu1_shard="${materialized}/gpu1.jsonl"
+  local shard_args=()
+  if [[ -f "$single_shard" ]]; then
+    if [[ -f "$gpu0_shard" || -f "$gpu1_shard" ]]; then
+      echo "ERROR: refusing ambiguous single/dual materialization shards" >&2
       return 1
     fi
-  done
+    shard_args=(--shard "$single_shard")
+  else
+    for shard in "$gpu0_shard" "$gpu1_shard"; do
+      if [[ ! -f "$shard" ]]; then
+        echo "ERROR: missing materialization shard: ${shard}" >&2
+        echo "Run v4_single_gpu on one A100, or both v4_gpu0 and v4_gpu1." >&2
+        return 1
+      fi
+    done
+    shard_args=(--shard "$gpu0_shard" --shard "$gpu1_shard")
+  fi
   for required in "$V4_GHOST_PROTOCOL" "$V4_GHOST_AUTHORIZATION" \
                   "$V4_GHOST_ACCESS_LEDGER" \
                   "$V4_MODEL_MANIFEST" "$V4_GHOST_EVALUATOR"; do
@@ -1302,8 +1326,7 @@ main_v4_merge() {
     --run-id "$RUN_ID" \
     --output "${CMD_RUN_DIR}/ghost_live_preflight.json"
   python -m experiments.v4_materialization merge \
-    --shard "${materialized}/gpu0.jsonl" \
-    --shard "${materialized}/gpu1.jsonl" \
+    "${shard_args[@]}" \
     "${expected_args[@]}" \
     --output "$merged"
   python -m experiments.v4_prequential_runner \
@@ -1366,6 +1389,7 @@ case "$ROLE" in
   route_a)        main_route_a ;;
   v4_prepare)     main_v4_prepare ;;
   v4_prepare_inputs) main_v4_prepare_inputs ;;
+  v4_single_gpu)    main_v4_single_gpu ;;
   v4_gpu0)        main_v4_gpu0 ;;
   v4_gpu1)        main_v4_gpu1 ;;
   v4_merge)       main_v4_merge ;;

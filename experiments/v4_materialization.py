@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic two-lane materialization and strict V4 shard merging."""
+"""Deterministic single/dual-lane materialization and strict V4 shard merging."""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ from typing import Callable, Mapping, Sequence
 from experiments.v4_prequential_runner import V4PrequentialCase
 
 
-LANES = ("gpu0", "gpu1")
+DUAL_GPU_LANES = ("gpu0", "gpu1")
+SINGLE_GPU_LANE = "single_gpu"
+LANES = (*DUAL_GPU_LANES, SINGLE_GPU_LANE)
 MATERIALIZATION_SCHEMA_VERSION = "cmd-v4-materialized-shard-v1"
 MERGE_SCHEMA_VERSION = "cmd-v4-materialized-merge-v1"
 Backend = Callable[[Mapping[str, object], str], object]
@@ -66,7 +68,15 @@ def lane_for_case(case_id: str) -> str:
     if not isinstance(case_id, str) or not case_id:
         raise ValueError("case_id must be a non-empty string")
     bucket = int(hashlib.sha256(case_id.encode("utf-8")).hexdigest(), 16) % 2
-    return LANES[bucket]
+    return DUAL_GPU_LANES[bucket]
+
+
+def _rows_for_lane(
+    rows: Sequence[Mapping[str, object]], lane: str
+) -> tuple[Mapping[str, object], ...]:
+    if lane == SINGLE_GPU_LANE:
+        return tuple(rows)
+    return tuple(row for row in rows if lane_for_case(_case_id(row)) == lane)
 
 
 def passthrough_backend(row: Mapping[str, object], lane: str) -> Mapping[str, object]:
@@ -114,10 +124,10 @@ def materialize_shard(
     model_call_accounting: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     if lane not in LANES:
-        raise ValueError("lane must be gpu0 or gpu1")
+        raise ValueError("lane must be gpu0, gpu1, or single_gpu")
     if output.exists() or progress.exists():
         raise ValueError("refusing to overwrite materialization artifacts")
-    selected = tuple(row for row in rows if lane_for_case(_case_id(row)) == lane)
+    selected = _rows_for_lane(rows, lane)
     _append_jsonl(
         progress,
         {"event": "started", "lane": lane, "completed": 0, "total": len(selected)},
@@ -132,7 +142,7 @@ def materialize_shard(
             )
             if _case_id(materialized) != raw_case_id:
                 raise ValueError("materialization backend changed case_id")
-            if lane_for_case(raw_case_id) != lane:
+            if lane != SINGLE_GPU_LANE and lane_for_case(raw_case_id) != lane:
                 raise ValueError("materialized case escaped its deterministic lane")
             _append_jsonl(output, materialized)
             case_ids.append(raw_case_id)
@@ -164,7 +174,9 @@ def materialize_shard(
     manifest: dict[str, object] = {
         "schema_version": MATERIALIZATION_SCHEMA_VERSION,
         "lane": lane,
-        "partition_rule": "sha256(case_id)_mod_2",
+        "partition_rule": (
+            "all_cases" if lane == SINGLE_GPU_LANE else "sha256(case_id)_mod_2"
+        ),
         "input_case_count": len(rows),
         "case_count": len(case_ids),
         "case_ids": sorted(case_ids),
@@ -194,8 +206,8 @@ def merge_materialized_shards(
     validator: Validator,
     event_index: Callable[[Mapping[str, object]], object],
 ) -> dict[str, object]:
-    if len(shards) < 2:
-        raise ValueError("merge requires both GPU materialization shards")
+    if not shards:
+        raise ValueError("merge requires at least one materialization shard")
     if output.exists():
         raise ValueError("refusing to overwrite merged materialization artifact")
     by_case: dict[str, dict[str, object]] = {}
@@ -227,6 +239,8 @@ def merge_materialized_shards(
         str(path.resolve()): _file_sha256(path) for path in sorted(shards)
     }
     call_totals: dict[str, int] = {}
+    manifest_lanes: list[str] = []
+    partition_rules: list[str] = []
     for shard in shards:
         manifest_path = shard.with_suffix(shard.suffix + ".manifest.json")
         if not manifest_path.is_file():
@@ -237,6 +251,12 @@ def merge_materialized_shards(
         )
         if manifest_value.get("output_sha256") != shard_hashes[str(shard.resolve())]:
             raise ValueError(f"materialization shard manifest hash mismatch: {shard}")
+        lane = manifest_value.get("lane")
+        partition_rule = manifest_value.get("partition_rule")
+        if lane not in LANES or not isinstance(partition_rule, str):
+            raise ValueError("materialization shard lane/partition manifest is invalid")
+        manifest_lanes.append(lane)
+        partition_rules.append(partition_rule)
         accounting = _mapping(
             manifest_value.get("model_call_accounting", {}),
             "model call accounting",
@@ -250,8 +270,21 @@ def merge_materialized_shards(
             ):
                 raise ValueError("model call accounting is invalid")
             call_totals[role] = call_totals.get(role, 0) + count
+    if len(shards) == 1:
+        if manifest_lanes != [SINGLE_GPU_LANE] or partition_rules != ["all_cases"]:
+            raise ValueError(
+                "single-shard merge requires the single_gpu all_cases manifest"
+            )
+    elif (
+        len(shards) != 2
+        or set(manifest_lanes) != set(DUAL_GPU_LANES)
+        or set(partition_rules) != {"sha256(case_id)_mod_2"}
+    ):
+        raise ValueError("multi-shard merge requires exactly gpu0 and gpu1 manifests")
     manifest: dict[str, object] = {
         "schema_version": MERGE_SCHEMA_VERSION,
+        "materialization_mode": "single_gpu" if len(shards) == 1 else "multi_shard",
+        "shard_count": len(shards),
         "case_count": len(indexed),
         "case_ids_sha256": hashlib.sha256(
             "\n".join(sorted(actual)).encode("utf-8")
@@ -300,9 +333,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.limit < 1:
                 parser.error("--limit must be positive")
             rows = rows[: args.limit]
-        selected = tuple(
-            row for row in rows if lane_for_case(_case_id(row)) == args.lane
-        )
+        selected = _rows_for_lane(rows, args.lane)
         if args.backend == "experiments.v4_live_materialization:live_backend":
             scored_states = 0
             for row in selected:
@@ -346,7 +377,9 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "DUAL_GPU_LANES",
     "LANES",
+    "SINGLE_GPU_LANE",
     "lane_for_case",
     "load_backend",
     "materialize_shard",

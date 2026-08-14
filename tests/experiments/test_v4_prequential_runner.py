@@ -410,7 +410,10 @@ def test_prospective_mode_streams_pending_selections_without_proxy_updates(
     assert all(row.policy_snapshot_after == row.policy_snapshot_before for row in ghost_rows)
 
 
-def test_live_materializer_executes_typed_intents_before_shadow_scoring() -> None:
+@pytest.mark.parametrize("lane", ["gpu0", "single_gpu"])
+def test_live_materializer_executes_typed_intents_before_shadow_scoring(
+    lane: str,
+) -> None:
     case = _case(0, probe_set="represented", family="f0")
     second_intent = RepairIntent.build(
         strategy_id="suppress-trusted-earlier@v1",
@@ -514,7 +517,7 @@ def test_live_materializer_executes_typed_intents_before_shadow_scoring() -> Non
     result = V4LiveMaterializer(
         answer_client=answerer,
         answer_verifier=lambda _answer, _gold: 1.0,
-    ).materialize(source, "gpu0")
+    ).materialize(source, lane)
     parsed = V4PrequentialCase.from_mapping(result)
 
     assert len(parsed.candidate_outcomes) == len(live_intents)

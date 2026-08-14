@@ -91,3 +91,61 @@ def test_merge_rejects_duplicate_or_missing_cases(tmp_path: Path) -> None:
             validator=lambda value: value,
             event_index=lambda value: value["event_index"],
         )
+
+
+def test_single_gpu_lane_materializes_and_merges_every_case(tmp_path: Path) -> None:
+    raw = tuple(_raw(f"case-{index}", 5 - index) for index in range(5))
+    shard = tmp_path / "single_gpu.jsonl"
+    result = materialize_shard(
+        raw,
+        lane="single_gpu",
+        output=shard,
+        progress=tmp_path / "progress.jsonl",
+        backend=lambda row, lane: {
+            "case_id": row["case_id"],
+            "event_index": row["context"]["event_index"],
+            "lane": lane,
+        },
+        validator=lambda row: row,
+        model_call_accounting={"answer_generation": 5, "shadow_judge": 5},
+    )
+    assert result["partition_rule"] == "all_cases"
+    assert result["case_ids"] == sorted(row["case_id"] for row in raw)
+
+    merged = tmp_path / "merged.jsonl"
+    manifest = merge_materialized_shards(
+        (shard,),
+        output=merged,
+        expected_case_ids={row["case_id"] for row in raw},
+        validator=lambda row: row,
+        event_index=lambda row: row["event_index"],
+    )
+    rows = [json.loads(line) for line in merged.read_text(encoding="utf-8").splitlines()]
+    assert [row["event_index"] for row in rows] == [1, 2, 3, 4, 5]
+    assert manifest["materialization_mode"] == "single_gpu"
+    assert manifest["shard_count"] == 1
+    assert manifest["materialization_model_calls"] == 10
+
+
+def test_single_gpu_merge_rejects_one_dual_gpu_half_shard(tmp_path: Path) -> None:
+    raw = tuple(_raw(f"case-{index}", index) for index in range(5))
+    shard = tmp_path / "gpu0.jsonl"
+    materialize_shard(
+        raw,
+        lane="gpu0",
+        output=shard,
+        progress=tmp_path / "progress.jsonl",
+        backend=lambda row, _lane: {
+            "case_id": row["case_id"],
+            "event_index": row["context"]["event_index"],
+        },
+        validator=lambda row: row,
+    )
+    with pytest.raises(ValueError, match="single_gpu all_cases"):
+        merge_materialized_shards(
+            (shard,),
+            output=tmp_path / "merged.jsonl",
+            expected_case_ids=None,
+            validator=lambda row: row,
+            event_index=lambda row: row["event_index"],
+        )

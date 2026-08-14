@@ -19,6 +19,7 @@ def test_shell_help_exposes_v4_detach_and_explicit_gpu_lanes() -> None:
     output = completed.stdout
     assert "v4_prepare" in output
     assert "v4_prepare_inputs" in output
+    assert "v4_single_gpu" in output
     assert "v4_gpu0" in output
     assert "v4_gpu1" in output
     assert "v4_merge" in output
@@ -26,6 +27,7 @@ def test_shell_help_exposes_v4_detach_and_explicit_gpu_lanes() -> None:
     assert "status" in output
     assert "stop" in output
     assert "GPU 0: physical id 0, ports 8000/8001" in output
+    assert "single A100: physical id 0, ports 8000/8001" in output
     assert "GPU 1: physical id 1, ports 8000/8001" in output
     assert "launch.json" in output
     assert "status.jsonl" in output
@@ -53,6 +55,9 @@ def test_shell_is_syntax_valid_and_defaults_to_its_checkout() -> None:
     assert "CMD_V4_GHOST_ACCESS_LEDGER" in source
     assert "CMD_V4_MODEL_MANIFEST" in source
     assert '--run-id "$RUN_ID"' in source
+    assert "main_v4_single_gpu" in source
+    assert 'main_v4_materialize single_gpu' in source
+    assert 'single_shard="${materialized}/single_gpu.jsonl"' in source
 
 
 def test_v4_gpu_roles_validate_the_exact_prepared_bundle_before_model_start() -> None:

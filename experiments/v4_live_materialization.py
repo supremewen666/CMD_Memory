@@ -252,8 +252,10 @@ class V4LiveMaterializer:
             raise ValueError("live materializer penalties must be finite")
 
     def materialize(self, source: Mapping[str, object], lane: str) -> dict[str, object]:
-        if lane not in {"gpu0", "gpu1"}:
-            raise ValueError("live V4 materialization lane must be gpu0 or gpu1")
+        if lane not in {"gpu0", "gpu1", "single_gpu"}:
+            raise ValueError(
+                "live V4 materialization lane must be gpu0, gpu1, or single_gpu"
+            )
         frozen = validate_live_input(source)
         case_id = frozen.case_id
         graph = frozen.graph
