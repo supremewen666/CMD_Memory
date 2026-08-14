@@ -19,6 +19,11 @@ from cmd_audit.counterfactual.relation_graph import (
 )
 from cmd_audit.eval.state_intent import RuntimeMemoryItem, RuntimeRepairCase
 from cmd_audit.repair.parametric_policy import PolicyContext, RepairIntent
+from cmd_audit.repair.deployment_feedback_evaluator import (
+    EvaluatorTrainingRow,
+    FrozenDeploymentEvaluator,
+    observable_features,
+)
 from experiments.v4_live_materialization import V4LiveMaterializer
 from experiments.v4_prequential_runner import (
     V4_ARMS,
@@ -167,6 +172,27 @@ def _cases() -> tuple[V4PrequentialCase, ...]:
     )
 
 
+def _evaluator() -> FrozenDeploymentEvaluator:
+    case = _cases()[0]
+    features = observable_features(
+        context=case.context,
+        graph=case.graph,
+        intent=case.intents[0],
+        telemetry=case.candidate_outcomes[0],
+    )
+    return FrozenDeploymentEvaluator.fit(
+        (EvaluatorTrainingRow(features, 0.8),),
+        training_provenance="ghost_dev_shadow_labels_only",
+    )
+
+
+def _ghost_partitions() -> dict[str, str]:
+    return {
+        case.case_id: "ghost_dev" if case.probe_set == "represented" else "ghost_cal"
+        for case in _cases()
+    }
+
+
 def test_runner_is_arm_paired_test_then_update_and_sediments(tmp_path: Path) -> None:
     streamed: list[dict[str, object]] = []
     result = V4PrequentialRunner(
@@ -174,6 +200,8 @@ def test_runner_is_arm_paired_test_then_update_and_sediments(tmp_path: Path) -> 
         output_dir=tmp_path,
         candidate_budget=1,
         bootstrap_samples=100,
+        ghost_evaluator=_evaluator(),
+        ghost_partitions=_ghost_partitions(),
         on_arm_outcome=streamed.append,
     ).run()
 
@@ -195,6 +223,7 @@ def test_runner_is_arm_paired_test_then_update_and_sediments(tmp_path: Path) -> 
     ]
     assert stable
     assert result.report["selected_action_feedback_only"] is True
+    assert result.report["runner_model_calls"] == 0
     assert result.report["gate"]["primary_baseline"] == "global_policy"
     assert result.report["gate"]["passed"] is False
 
@@ -207,6 +236,8 @@ def test_unseen_families_are_scored_without_policy_or_species_updates(
         output_dir=tmp_path,
         candidate_budget=1,
         bootstrap_samples=100,
+        ghost_evaluator=_evaluator(),
+        ghost_partitions=_ghost_partitions(),
     ).run()
 
     unseen = [row for row in result.outcomes if row.probe_set == "unseen"]
@@ -217,6 +248,59 @@ def test_unseen_families_are_scored_without_policy_or_species_updates(
             assert row.update_effective_after_event_index is None
             assert row.species_transitions == ()
             assert row.chain_decisions == ()
+        if row.arm_id == "ghost_hierarchy_v1":
+            assert row.policy_snapshot_after == row.policy_snapshot_before
+            assert row.update_effective_after_event_index is None
+
+
+def test_ghost_arm_is_registered_and_report_binds_frozen_evaluator(
+    tmp_path: Path,
+) -> None:
+    evaluator = _evaluator()
+    result = V4PrequentialRunner(
+        _cases(),
+        output_dir=tmp_path,
+        candidate_budget=1,
+        bootstrap_samples=100,
+        ghost_evaluator=evaluator,
+        ghost_partitions=_ghost_partitions(),
+    ).run()
+    assert V4_ARMS[-2:] == ("full_v4_observable", "ghost_hierarchy_v1")
+    assert result.report["ghost_feedback_gold_derived"] is False
+    assert result.report["ghost_evaluator_snapshot_sha256"] == evaluator.snapshot_sha256
+    assert result.report["ghost_cal_gate"]["updates_allowed"] is False
+    assert result.report["ghost_feedback_mode"] == (
+        "development_proxy"
+    )
+    assert result.report["arm_roles"]["full_v4"] == "shadow_gold_oracle_ceiling"
+    assert result.report["arm_roles"]["full_v4_observable"] == (
+        "same_feedback_online_residual_baseline"
+    )
+    assert result.report["feature_timing"]["selection"] == "pre_action_only"
+    assert result.report["ghost_residual_diagnostics"]["nonzero_count"] > 0
+    represented = [
+        row for row in result.outcomes
+        if row.probe_set == "represented" and row.arm_id == "ghost_hierarchy_v1"
+    ]
+    assert represented
+    assert all(row.policy_snapshot_after != row.policy_snapshot_before for row in represented)
+
+
+def test_ghost_parameter_binding_prefers_actionability_compatible_intent() -> None:
+    case = _case(0, probe_set="represented", family="f0")
+    compatible = case.intents[0]
+    incompatible = RepairIntent.build(
+        strategy_id=compatible.strategy_id,
+        relation_edge_id=compatible.relation_edge_id,
+        target_item_id="new",
+        effect=compatible.effect,
+        proposer_id=compatible.proposer_id,
+        proposer_model_hash=compatible.proposer_model_hash,
+        evidence_ids=compatible.evidence_ids,
+    )
+    assert V4PrequentialRunner._ghost_parameter_rank(
+        case, compatible
+    ) < V4PrequentialRunner._ghost_parameter_rank(case, incompatible)
 
 
 def test_closed_case_schema_rejects_budget_and_outcome_mismatch(tmp_path: Path) -> None:
@@ -227,6 +311,8 @@ def test_closed_case_schema_rejects_budget_and_outcome_mismatch(tmp_path: Path) 
             output_dir=tmp_path,
             candidate_budget=2,
             bootstrap_samples=100,
+            ghost_evaluator=_evaluator(),
+            ghost_partitions={case.case_id: "ghost_dev"},
         )
     broken = case.to_mapping()
     broken["candidate_outcomes"] = []
@@ -241,6 +327,20 @@ def test_cli_streams_case_results_and_progress_jsonl(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     output = tmp_path / "run"
+    evaluator_path = tmp_path / "evaluator.json"
+    evaluator_path.write_text(json.dumps(_evaluator().to_mapping()), encoding="utf-8")
+    protocol_path = tmp_path / "ghost-protocol.json"
+    protocol_path.write_text(
+        json.dumps(
+            {
+                "assignments": [
+                    {"case_id": case_id, "partition": partition}
+                    for case_id, partition in _ghost_partitions().items()
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
 
     assert main(
         (
@@ -250,6 +350,10 @@ def test_cli_streams_case_results_and_progress_jsonl(tmp_path: Path) -> None:
             str(output),
             "--candidate-budget",
             "1",
+            "--ghost-evaluator",
+            str(evaluator_path),
+            "--ghost-protocol",
+            str(protocol_path),
             "--bootstrap-samples",
             "100",
         )
@@ -272,6 +376,38 @@ def test_cli_streams_case_results_and_progress_jsonl(tmp_path: Path) -> None:
     assert json.loads((output / "report.json").read_text(encoding="utf-8"))[
         "case_count"
     ] == len(_cases())
+    ghost_selections = [
+        json.loads(line)
+        for line in (output / "ghost_selections.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(ghost_selections) == len(_cases())
+    assert all(row["schema_version"] == "cmd-ghost-live-selection-v1" for row in ghost_selections)
+
+
+def test_prospective_mode_streams_pending_selections_without_proxy_updates(
+    tmp_path: Path,
+) -> None:
+    streamed: list[dict[str, object]] = []
+    result = V4PrequentialRunner(
+        _cases(),
+        output_dir=tmp_path,
+        candidate_budget=1,
+        bootstrap_samples=100,
+        ghost_evaluator=_evaluator(),
+        ghost_partitions=_ghost_partitions(),
+        ghost_feedback_mode="prospective_deployment",
+        on_ghost_selection=streamed.append,
+    ).run()
+    assert len(streamed) == len(_cases())
+    assert all(row["development_proxy"] is False for row in streamed)
+    assert result.report["ghost_feedback_mode"] == "prospective_deployment"
+    assert result.report["ghost_pending_feedback_count"] == len(_cases())
+    ghost_rows = [
+        row for row in result.outcomes if row.arm_id == "ghost_hierarchy_v1"
+    ]
+    assert all(row.policy_snapshot_after == row.policy_snapshot_before for row in ghost_rows)
 
 
 def test_live_materializer_executes_typed_intents_before_shadow_scoring() -> None:

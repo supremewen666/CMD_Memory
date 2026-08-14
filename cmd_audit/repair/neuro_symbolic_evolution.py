@@ -163,6 +163,7 @@ class NeuroSymbolicEvolutionEngine:
         *,
         graph: FrozenRelationGraph,
         intents: Sequence[RepairIntent],
+        score_offsets: Mapping[str, float] | None = None,
     ) -> EvolutionSelection:
         if context.case_id != graph.case_id:
             raise ValueError("policy context and graph belong to different cases")
@@ -173,7 +174,9 @@ class NeuroSymbolicEvolutionEngine:
             (intent.intent_id, compile_intent(intent, graph=graph))
             for intent in candidates
         )
-        decision = self.policy.select(context, candidates)
+        decision = self.policy.select(
+            context, candidates, score_offsets=score_offsets
+        )
         self.repository.append_selection(decision.to_mapping())
         self._selection_records[decision.selection_id] = (
             context,

@@ -1,220 +1,125 @@
-# Data Validation
+# Data Validation — GHOST Public Four-Partition Dataset
 
 ## Dataset Identity
 
-- dataset:
-  - MemTrace-B protocol-reproduction arena:
-    `data/probe_cases/memtrace_kp_cases.json`
-  - MemFail external-validity arena:
-    `data/probe_cases/memfail_cases.json`
-  - STALE item-layer arena:
-    `data/probe_cases/stale_item_cases.json`
-- source:
-  - MemTrace-B contains 2,047 cases derived from public HaluMem data. It is a
-    protocol reimplementation because the MemTrace-B authors did not release
-    their artifact; it must not be described as the authors' dataset.
-  - MemFail contains 692 cases converted from the upstream MemFail repository
-    at revision `61ab3028a6dc4a67b222f0d3a37a62e1d479ade9`.
-  - STALE contains 1,200 deliberately constructed item-stale/item-conflict
-    perturbations over queries from the repository's approved raw sources.
-- expected split:
-  - The legacy arena reads these as immutable observational streams. It has no
-    gradient-training split; `--seed` and `--limit` freeze the selected stream.
-  - The V4 evolution protocol is different: it must use family/dependency-group
-    blocked prequential splits even though it still performs no gradient
-    training. Earlier members may update the repair policy only after their
-    outcomes close; later and unseen-family members remain evaluation-only.
+- dataset: `data/ghost_live_v2`
+- upstream sources:
+  - LoCoMo `data/locomo10.json`, fixed Git revision
+    `3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376`.
+  - Mem2ActBench `Mem2ActBench/qa_dataset.jsonl`, fixed Git revision
+    `b00726940b5abbe9bd324bdd7a2cb272f5c62a29`.
+- transformation: public benchmark content plus one deterministic, explicitly
+  disclosed stale/conflicting memory per case. This is a benchmark adaptation,
+  not a sample of naturally observed production failures.
+- expected split: `ghost_dev`, `ghost_cal`, `ghost_test_rep`, and
+  `ghost_test_new`, frozen before relation measurement or intent proposal.
 
 ## Reality Check
 
-- files present: yes; all three default arena inputs load successfully.
+- files present: yes. The byte-preserved source files, selected ProbeCase
+  streams, V4 CPU bundle, partition files, source provenance, build report and
+  validation report are all present.
 - real or mock:
-  - MemFail is an external released benchmark conversion.
-  - MemTrace-B is benchmark-derived real source data under a reproduced
-    protocol, not an author-artifact replication.
-  - STALE uses real source queries with synthetic, balanced defect injection.
-    The injected labels are constructed and must be disclosed; they are not
-    naturally observed production failures.
+  - upstream conversations, questions and tool tasks are real public benchmark
+    records;
+  - the competing memory is synthetic and is declared by
+    `synthetic_conflict_injection=true`;
+  - no row is claimed to be a delayed deployment observation;
+  - `source_provenance.json` sets `independent_source=false` and
+    `confirmatory_attestation_eligible=false`.
 - evidence:
-  - JSON row counts are 2,047 (MemTrace-B), 692 (MemFail), and 1,200 (STALE).
-  - Every file has one consistent top-level case schema, unique `case_id`
-    values, non-empty queries and gold answers, at least one baseline, at least
-    one memory item, and object-valued scoring metadata.
-  - Exact source SHA-256:
-    - MemTrace-B:
-      `df655c77b3626f9a2cb5b6c4783e2db06c1bba6d12e9ee2192206cd1b2b44eda`
-    - MemFail:
-      `f30bcd2c47b6ec2d28502654d7d2936843ed4c052827835ec4a05d8b65161864`
-    - STALE:
-      `1068e8185530aabd0e799eb633b81cf3bc197543d6c1e2e01ddf12613f914612`
-  - The checked-in `CHECKSUMS.sha256` agrees for MemTrace-B and STALE, and
-    `MEMFAIL_CHECKSUMS.sha256` agrees for the combined MemFail probe file.
-
-## V4 Evolution Construction Audit
-
-- source suitability: all three files are valid V4 source datasets; they are
-  not interchangeable strata.
-- audited hidden-intent construction:
-  - MemTrace-B: 2,047/2,047 cases, 182 recurrence families, 100% constructible.
-  - STALE: 1,200/1,200 cases, 400 source families, 100% constructible.
-  - MemFail: 692/692 cases, 492 source/task families, 100% constructible.
-- materialized CPU package:
-  - `data/evolution_v4/` contains all 3,939 cases, 1,074 evaluation families,
-    912 dependency groups, and 14,164 runtime-only relation requests.
-  - dataset manifest SHA-256:
-    `9d7c67bf3058407f1cb3fde2fdfad21f2ad83670c9a466c484cad0ca2fedbc84`.
-  - validation report decision: `PASS`; report SHA-256:
-    `d8a9b670c6fb5f411b4a6c181ef4fb161d348b78e77f17fd0ad5075dffc53e2e`.
-- intended ecological roles:
-  - MemTrace-B is the primary recurrent evolution stream. Its existing family
-    builder groups by user and knowledge point, keeps 32 families unseen, and
-    yields 473 earlier update cases plus 1,196 later held-out cases from 150
-    represented families.
-  - STALE is the direct typed supersession/actionability stratum. Every case
-    has one state perturbation and deployment-visible old/new timestamps.
-  - MemFail is primarily external transfer and safety coverage. Its retrieval,
-    granularity, and safety cases must remain separate niches rather than being
-    mislabeled as supersession. Only its 100 item-conflict cases currently have
-    one explicit competing-item state target.
-- V4 graph-eligibility audit:
-  - 3,100/3,939 cases have at least two retrieved items and therefore at least
-    one measured relation pair; these are eligible for graph-bound V4 intents.
-  - 839/3,939 cases have one retrieved item and no legal relation edge. They are
-    excluded from prepared GPU input, never assigned a synthetic edge or a
-    label-derived no-op.
-  - the deterministic 20-case preparation smoke selects 10 represented and 10
-    unseen cases and passes the zero-model-call prepared validator.
-- action-shape audit:
-  - MemTrace-B: 253 item-stale, 253 item-conflict, and 253 granularity cases
-    have one explicit state perturbation; 253 retrieval cases need a retrieval
-    action; 496 safety cases and 539 clean cases are null/abstention controls.
-  - STALE: all 1,200 cases have one competing-item state target.
-  - MemFail: 100 item-conflict cases have one competing-item state target; the
-    remaining 592 cases exercise retrieval, granularity, or safety behavior.
-- resolved preprocessing issue:
-  - All 1,200 source STALE rows contain literal `M_old:`/`M_new:` injector
-    markers. The frozen symmetric normalizer removes them from runtime,
-    relation-request, and normalized shadow text while retaining the original
-    source-case and source-file hashes. Full validation found zero surviving
-    runtime template markers.
-- final-package status:
-  - Runtime rows, sealed shadow intents, dependency split, relation requests,
-    source manifest, dataset manifest, and validation report are materialized.
-  - `artifacts/neuro_symbolic_evolution_v4/prepared_cases.jsonl` is a later GPU
-    materialization input and remains intentionally absent from the CPU commit:
-    `v4_prepare_inputs` now creates it from live frozen text-only relation
-    verdicts and complete intent proposals. The builder refuses to fabricate
-    either from `perturbation_label` or gold.
+  - LoCoMo raw SHA-256:
+    `79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4`.
+  - Mem2ActBench QA raw SHA-256:
+    `24fc8692567e5fc16457a7e6c9ec12d68ba06245d53b315c7ced5f76a84fd039`.
+  - dataset SHA-256:
+    `5603d48f40f7f03b2b100a79a9ec220eeb4981fe7ca64392dc917b38927564b5`.
+  - 543 unique cases, 131 families and 543 runtime relation requests.
+  - builder model/API calls: 0.
+- licensing:
+  - LoCoMo is recorded as CC-BY-NC-4.0.
+  - the pinned Mem2ActBench repository contains no license file. Its rows must
+    remain research-only until the upstream author supplies explicit terms.
 
 ## Split Integrity
 
-- gradient-train split: not applicable; neither the arena nor V4 edits model
-  parameters.
-- V4 update split: earlier members of represented recurrence families only;
-  outcomes become effective strictly after the producing event closes.
-- V4 validation split: later members of represented families, blocked from
-  their update siblings by event order and never used to retroactively select
-  the producing action.
-- V4 external/safety split: unseen MemTrace users/families plus frozen MemFail
-  transfer strata. STALE remains synthetic calibration/controlled evaluation,
-  not an external-validity claim.
-- `--limit 50` remains an execution smoke, never a model/threshold validation
-  population.
+- `ghost_dev`: 181 cases / 36 families.
+- `ghost_cal`: 134 cases / 25 families.
+- `ghost_test_rep`: 68 cases / the same 36 represented dev families, with
+  distinct case IDs and source records.
+- `ghost_test_new`: 160 cases / 70 families absent from every other partition.
+- case overlap: 0.
+- dev/cal family overlap: 0.
+- test-represented families outside dev: 0.
+- test-new family overlap: 0.
+- dependency-group split violations: 0.
+- exact normalized-query recurrence: one group, intentionally confined to one
+  dev/test-rep family. The two rows bind different user IDs, source evidence
+  and gold tool arguments, so the repeated wording does not reveal the answer.
 - leakage risk:
-  - MemTrace splitting must remain user-keyed, not merely case- or family-keyed,
-    because one user spans multiple knowledge-point families.
-  - STALE `-dimN` siblings and MemFail `-qN` siblings must remain in one split.
-  - Family/case order must be deterministic, and selected case IDs must be
-    serialized in order through a manifest hash.
-  - Gold answers and evidence exist for shadow evaluation, but runtime
-    construction and selection declare `runtime_uses_gold = false`; analysis
-    rejects any manifest that does not.
-  - Injector labels, gold target IDs, and STALE old/new prefixes may construct
-    sealed evaluator intents, but may not enter runtime policy inputs.
-  - The main remaining leakage risk is procedural: tuning prompts, thresholds,
-    or result wording after reading full shadow outcomes. Freeze those choices
-    before the full run.
+  - family IDs and partition membership are evaluation-only and do not enter
+    runtime selection features;
+  - runtime rows contain no gold/label/family fields;
+  - shadow rows retain gold and the synthetic label for post-selection scoring;
+  - the data were selected by this project, so they cannot satisfy the live
+    protocol's independent-curator attestation.
 
 ## Label / Target Health
 
-- label format: nullable `perturbation_label` strings mapped to the zero-call
-  hook's explicit `Fill` or `Fix` runtime branch.
-- distribution or range:
-  - MemTrace-B 50-case seed-24 smoke: 37 null, 8 safety, 2 item-conflict,
-    1 item-stale, 1 retrieval, 1 granularity; 8 Fill / 42 Fix.
-  - MemFail full stream: 235 retrieval, 200 granularity, 157 safety,
-    100 item-conflict; 114 Fill / 578 Fix.
-  - STALE full stream: 600 item-stale and 600 item-conflict;
-    103 Fill / 1,097 Fix.
-- obvious anomalies:
-  - No duplicate case IDs, empty required text fields, missing baselines,
-    missing memory arrays, or schema variants were observed.
-  - Fill is non-trivial in every arena and must remain an explicit routed
-    abstention rather than enter Fix-arm denominators.
+- label format: closed CMD `ProbeCase` with one `item_conflict` perturbation,
+  a current protected memory, a prior conflicting memory, gold evidence, and a
+  recorded zero-score conflict baseline.
+- distribution: 543 `item_conflict` cases. This is deliberate specialization,
+  not a balanced estimate over all GHOST repair effects.
+- domains:
+  - `locomo_factual`: 260 cases;
+  - `locomo_inferential`: 100 cases;
+  - `mem2act_action`: 183 cases.
+- shape health:
+  - 543/543 unique case IDs;
+  - 543/543 constructible hidden intents;
+  - every case has two retrieved memories and exactly one relation request;
+  - no empty required text, missing evidence, missing baseline, NaN, or schema
+    variant was accepted.
+- claim limitation: the dataset can evaluate conflict routing and repair. It
+  cannot by itself support claims about retrieval misses, safety blocking,
+  annotation consumption, natural recurrence or delayed deployment utility.
 
 ## Preprocessing Check
 
 - expected preprocessing:
-  - Load immutable probe cases and bind exact source hashes.
-  - Derive dependency-safe families and deterministic prequential order.
-  - Normalize only preregistered surface markers, build gold-free runtime
-    cases, and serialize gold/labels/targets into a separately sealed shadow
-    manifest.
-  - Build and freeze typed semantic relation graphs from runtime-visible text
-    and ordering evidence; never infer a destructive edge from gold labels.
-- observed preprocessing:
-  - The three `--validate-only` entry points load successfully and emit source,
-    ordered-case-ID, and full-selected-stream hashes.
-  - `arena_manifest` now stores fingerprint schema version, resolved source
-    path, source byte size and SHA-256, ordered case-ID SHA-256, and derived
-    selected-case SHA-256.
-  - Analysis rejects missing/unsupported fingerprints, non-file sources,
-    malformed hashes, case-count/case-ID mismatches, and changed source bytes
-    when the recorded source path remains mounted.
-  - Existing code already declares `memtrace_kp`, `stale_item`, and `memfail`
-    as the default domains for hidden-intent construction and closed-grammar
-    evaluation; the audited constructibility rate is 1.00 in every domain.
-  - `experiments.build_v4_evolution_dataset` emits five content-bound files;
-    `experiments.validate_v4_evolution_dataset` re-reads all three sources,
-    verifies every source/case/output hash, replays every hidden intent, checks
-    exact retrieved-pair coverage, and rejects runtime gold/template leakage.
-- mismatch:
-  - No source, runtime, shadow, or family-split mismatch remains in the CPU
-    dataset package.
-  - Frozen semantic verdicts, graph/cache bindings, and model-proposed complete
-    intents remain a separate pre-materialization gate, not a data-quality PASS.
-  - Live `budget_aligned` behavior cannot be established by `--validate-only`;
-    it requires the real answerer and selection-judge endpoints. Unit coverage
-    now exercises the production backend-counter branch rather than only the
-    fixture's logical-budget fallback.
+  - fix upstream revisions and source hashes;
+  - convert source records into closed ProbeCase rows;
+  - inject and disclose one deterministic conflict;
+  - group before splitting and keep dev/cal/new family boundaries closed;
+  - project gold-free runtime rows and sealed shadow rows;
+  - stop before any semantic relation or intent model call.
+- observed preprocessing: matches the expected pipeline.
+- V4 validation:
+  - decision: `PASS`;
+  - reasons: none;
+  - intent constructibility: 1.00;
+  - runtime template marker count: 0;
+  - validation report SHA-256:
+    `96b09ea21955dcd9ba7f916b0cd056194baeae23b1763d0f9b0d05bd2267a744`.
+- old cache cleanup:
+  - removed `data/raw_cases` (approximately 296 MB of obsolete downloads);
+  - retained tracked `data/probe_cases` and `data/evolution_v4` because current
+    tests and CLI defaults still depend on them; they are regression fixtures,
+    not disposable caches.
 
 ## Verdict
 
-- PASS for the three immutable source datasets and the V4 CPU dataset package.
-- NEEDS_REVISION for GPU-ready `prepared_cases.jsonl` until the frozen relation
-  instrument and intent proposer role completes successfully on the experiment
-  GPU. The production command and zero-call validator now exist, but no live
-  verdict/proposal artifact is fabricated or checked into the CPU dataset.
+- `NEEDS_REVISION` for a confirmatory live/deployment experiment.
+- The public benchmark CPU package itself is valid and reproducible (`PASS`),
+  but it is not independently collected, contains synthetic conflicts, has one
+  repair label only, and Mem2ActBench redistribution terms are unresolved.
 
 ## Next Step
 
-- Reproduce or validate the CPU package with:
-  `python -m experiments.validate_v4_evolution_dataset --dataset-dir data/evolution_v4 --output data/evolution_v4/validation_report.json`.
-- Run the frozen text-only relation instrument over
-  `data/evolution_v4/relation_requests.jsonl.gz`, bind the resulting cache and
-  complete proposer intents into `prepared_cases.jsonl` with:
-  `./run_remaining_experiments.sh --role v4_prepare_inputs --run-id <ID> --detach`.
-  Relation measurements use strict JSON Schema, versioned bounded retry, and a
-  content-addressed raw-response/reason ledger. Exhausted uncertain verdicts are
-  not persisted as reusable cache facts; a refused run retains its measurement
-  report for diagnosis while still producing no GPU-ready manifest.
-  The complete-intent proposer uses a graph-bound dynamic JSON Schema and a
-  separately hashed attempt ledger/report; malformed JSON, schema violations,
-  typed-compiler rejection, and transport failures remain distinguishable.
-  `v4_gpu0` and `v4_gpu1` invoke `experiments.validate_v4_prepared_cases`
-  themselves before starting model endpoints; an absent/mismatched preparation
-  manifest therefore cannot enter GPU execution. Gold/labels may never fill that gap.
-  The validator requires exact source/runtime/shadow replay, instrument/cache/
-  graph/intent hashes, closed schemas, compiler acceptance, and no evaluation
-  family or shadow keys on runtime/proposer surfaces. Cases with fewer than two
-  retrieved items are recorded as ineligible rather than receiving fake edges.
+- For a public model-calling benchmark, run the frozen relation instrument and
+  intent proposer over `data/ghost_live_v2/cpu_dataset`; use
+  `data/ghost_live_v2/partitions` unchanged.
+- For a confirmatory deployment claim, obtain a separate post-freeze curator
+  stream with source attestation, genuine baseline failures, and matured
+  delayed outcomes. Do not set `independent_source=true` for this public bundle.

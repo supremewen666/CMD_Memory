@@ -111,6 +111,7 @@ def materialize_shard(
     progress: Path,
     backend: Backend,
     validator: Validator,
+    model_call_accounting: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     if lane not in LANES:
         raise ValueError("lane must be gpu0 or gpu1")
@@ -169,6 +170,7 @@ def materialize_shard(
         "case_ids": sorted(case_ids),
         "output": str(output.resolve()),
         "output_sha256": _file_sha256(output),
+        "model_call_accounting": dict(model_call_accounting or {}),
     }
     _atomic_json(output.with_suffix(output.suffix + ".manifest.json"), manifest)
     _append_jsonl(
@@ -224,6 +226,30 @@ def merge_materialized_shards(
     shard_hashes = {
         str(path.resolve()): _file_sha256(path) for path in sorted(shards)
     }
+    call_totals: dict[str, int] = {}
+    for shard in shards:
+        manifest_path = shard.with_suffix(shard.suffix + ".manifest.json")
+        if not manifest_path.is_file():
+            raise ValueError(f"materialization shard manifest is missing: {manifest_path}")
+        manifest_value = _mapping(
+            json.loads(manifest_path.read_text(encoding="utf-8")),
+            "materialization shard manifest",
+        )
+        if manifest_value.get("output_sha256") != shard_hashes[str(shard.resolve())]:
+            raise ValueError(f"materialization shard manifest hash mismatch: {shard}")
+        accounting = _mapping(
+            manifest_value.get("model_call_accounting", {}),
+            "model call accounting",
+        )
+        for role, count in accounting.items():
+            if (
+                not isinstance(role, str)
+                or isinstance(count, bool)
+                or not isinstance(count, int)
+                or count < 0
+            ):
+                raise ValueError("model call accounting is invalid")
+            call_totals[role] = call_totals.get(role, 0) + count
     manifest: dict[str, object] = {
         "schema_version": MERGE_SCHEMA_VERSION,
         "case_count": len(indexed),
@@ -234,6 +260,8 @@ def merge_materialized_shards(
         "output": str(output.resolve()),
         "output_sha256": _file_sha256(output),
         "ordering": "context.event_index_then_case_id",
+        "materialization_model_call_accounting": dict(sorted(call_totals.items())),
+        "materialization_model_calls": sum(call_totals.values()),
     }
     _atomic_json(output.with_suffix(output.suffix + ".manifest.json"), manifest)
     return manifest
@@ -272,6 +300,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.limit < 1:
                 parser.error("--limit must be positive")
             rows = rows[: args.limit]
+        selected = tuple(
+            row for row in rows if lane_for_case(_case_id(row)) == args.lane
+        )
+        if args.backend == "experiments.v4_live_materialization:live_backend":
+            scored_states = 0
+            for row in selected:
+                intents = row.get("intents")
+                chains = row.get("chain_pairs")
+                if not isinstance(intents, list) or not isinstance(chains, list):
+                    raise ValueError("live model-call accounting requires intents/chains")
+                scored_states += len(intents) + len(chains)
+            call_accounting = {
+                "answer_generation": scored_states,
+                "shadow_judge": scored_states,
+            }
+        else:
+            call_accounting = {}
         manifest = materialize_shard(
             rows,
             lane=args.lane,
@@ -279,6 +324,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             progress=args.progress,
             backend=load_backend(args.backend),
             validator=_validate_case,
+            model_call_accounting=call_accounting,
         )
     else:
         expected = None

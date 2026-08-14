@@ -25,6 +25,7 @@ def test_append_replay_and_reopen_are_content_bound(tmp_path) -> None:
             "valid": True, "rolled_back": False,
         })
         expected = repository.repository_hash()
+        assert expected == content_sha256(repository.rows())
     with EvolutionRepository(path) as reopened:
         assert reopened.repository_hash() == expected
         assert len(reopened.rows("outcome")) == 1

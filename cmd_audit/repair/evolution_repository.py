@@ -232,7 +232,22 @@ class EvolutionRepository:
 
     def repository_hash(self) -> str:
         """Hash logical records, never mutable SQLite pages or insertion order."""
-        return content_sha256(self.rows())
+        # Byte-identical to ``content_sha256(self.rows())`` without retaining
+        # the full append-only history as nested Python objects.
+        digest = hashlib.sha256()
+        digest.update(b"[")
+        statement = (
+            "SELECT event_type, event_id, payload_json, payload_sha256 "
+            "FROM events ORDER BY event_type, event_id"
+        )
+        first = True
+        for raw in self._connection.execute(statement):
+            if not first:
+                digest.update(b",")
+            first = False
+            digest.update(canonical_json(_row_to_public(raw)).encode("utf-8"))
+        digest.update(b"]")
+        return digest.hexdigest()
 
     @contextmanager
     def transaction(self) -> Iterator[None]:

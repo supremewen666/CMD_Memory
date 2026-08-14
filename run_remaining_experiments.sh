@@ -19,6 +19,11 @@ V4_SOURCE_CASES_OVERRIDE="${CMD_V4_SOURCE_CASES:-}"
 V4_SOURCE_CASES="${CMD_V4_SOURCE_CASES:-$V4_ARTIFACTS/prepared_cases.jsonl}"
 V4_MATERIALIZER_BACKEND="${CMD_V4_MATERIALIZER_BACKEND:-experiments.v4_live_materialization:live_backend}"
 V4_CANDIDATE_BUDGET="${CMD_V4_CANDIDATE_BUDGET:-4}"
+V4_GHOST_EVALUATOR="${CMD_V4_GHOST_EVALUATOR:-$V4_ARTIFACTS/ghost_ecology_v3/deployment-evaluator-preaction-v1-seed24.json}"
+V4_GHOST_PROTOCOL="${CMD_V4_GHOST_PROTOCOL:-$V4_ARTIFACTS/ghost_live_v2/protocol.json}"
+V4_GHOST_AUTHORIZATION="${CMD_V4_GHOST_AUTHORIZATION:-$V4_ARTIFACTS/ghost_live_v2/first_test_authorization.json}"
+V4_GHOST_ACCESS_LEDGER="${CMD_V4_GHOST_ACCESS_LEDGER:-$V4_ARTIFACTS/ghost_live_v2/access.jsonl}"
+V4_MODEL_MANIFEST="${CMD_V4_MODEL_MANIFEST:-$V4_ARTIFACTS/ghost_live_v2/model_manifest.json}"
 CROSSJUDGE_MODEL="${CROSSJUDGE_MODEL:-mistral-7b-instruct-v0.3}"
 CROSSJUDGE_MODEL_REPO="${CROSSJUDGE_MODEL_REPO:-mistralai/Mistral-7B-Instruct-v0.3}"
 CROSSJUDGE_MODEL_DIRNAME="${CROSSJUDGE_MODEL_DIRNAME:-Mistral-7B-Instruct-v0.3}"
@@ -64,12 +69,12 @@ while [[ $# -gt 0 ]]; do
       echo "  v4_prepare_inputs: freeze relation cache/graphs/intents on GPU 0"
       echo "  v4_gpu0:       materialize SHA256(case_id)%2 == 0 on GPU 0"
       echo "  v4_gpu1:       materialize SHA256(case_id)%2 == 1 on GPU 1"
-      echo "  v4_merge:      verify/merge shards, then canonical six-arm replay (CPU)"
+      echo "  v4_merge:      preflight, verify/merge shards, then canonical eight-arm replay"
       echo "  monitor:       stream lifecycle + experiment JSONL for --run-id"
       echo "  status|stop:   inspect/terminate --target-role under --run-id"
       echo ""
       echo "GPU 0: physical id 0, ports 8000/8001 (override CMD_GPU0_ID/CMD_GPU0_PORT_BASE)"
-      echo "GPU 1: physical id 1, ports 8100/8101 (override CMD_GPU1_ID/CMD_GPU1_PORT_BASE)"
+      echo "GPU 1: physical id 1, ports 8000/8001 (override CMD_GPU1_ID/CMD_GPU1_PORT_BASE)"
       echo ""
       echo "Legacy roles: gpu0, gpu1, analyze, phase1_gpu0, phase1_gpu1,"
       echo "              phase1_analyze, sigil_gpu0, sigil_gpu1, sigil_analyze, route_a"
@@ -129,7 +134,7 @@ case "$ROLE" in
   gpu1|phase1_gpu1|sigil_gpu1|v4_gpu1)
     LANE_GPU_ID="${CMD_GPU1_ID:-1}"
     LANE_LABEL="gpu1"
-    LANE_PORT_BASE="${CMD_GPU1_PORT_BASE:-8100}"
+    LANE_PORT_BASE="${CMD_GPU1_PORT_BASE:-8000}"
     ;;
 esac
 
@@ -1163,6 +1168,7 @@ main_v4_materialize() {
   local progress="${CMD_RUN_DIR}/progress.jsonl"
   local preparation_manifest="${CMD_V4_PREPARATION_MANIFEST:-$V4_ARTIFACTS/preparation/full/preparation_manifest.json}"
   local input_validation="${CMD_RUN_DIR}/prepared_input_validation.json"
+  local live_preflight="${CMD_RUN_DIR}/ghost_live_preflight.json"
   local limit_args=()
   if $SMOKE && [[ -z "${CMD_V4_PREPARATION_MANIFEST:-}" ]]; then
     preparation_manifest="$V4_ARTIFACTS/preparation/smoke/preparation_manifest.json"
@@ -1180,6 +1186,29 @@ main_v4_materialize() {
   if [[ ! -f "$preparation_manifest" ]]; then
     echo "ERROR: V4 preparation manifest not found: ${preparation_manifest}" >&2
     echo "Run --role v4_prepare_inputs before starting either V4 GPU lane." >&2
+    return 1
+  fi
+  for required in "$V4_GHOST_PROTOCOL" "$V4_GHOST_AUTHORIZATION" \
+                  "$V4_GHOST_ACCESS_LEDGER" \
+                  "$V4_MODEL_MANIFEST" "$V4_GHOST_EVALUATOR"; do
+    if [[ ! -f "$required" ]]; then
+      echo "ERROR: frozen GHOST live prerequisite not found: ${required}" >&2
+      return 1
+    fi
+  done
+  if ! python -m experiments.ghost_live_protocol validate-run \
+    --root "$CMD_ROOT" \
+    --cases "$V4_SOURCE_CASES" \
+    --protocol "$V4_GHOST_PROTOCOL" \
+    --authorization "$V4_GHOST_AUTHORIZATION" \
+    --access-ledger "$V4_GHOST_ACCESS_LEDGER" \
+    --model-manifest "$V4_MODEL_MANIFEST" \
+    --evaluator "$V4_GHOST_EVALUATOR" \
+    --preparation-manifest "$preparation_manifest" \
+    --candidate-budget "$V4_CANDIDATE_BUDGET" \
+    --run-id "$RUN_ID" \
+    --output "$live_preflight"; then
+    echo "ERROR: GHOST live freeze/access gate refused this run" >&2
     return 1
   fi
   if ! python -m experiments.validate_v4_prepared_cases \
@@ -1252,6 +1281,26 @@ main_v4_merge() {
       return 1
     fi
   done
+  for required in "$V4_GHOST_PROTOCOL" "$V4_GHOST_AUTHORIZATION" \
+                  "$V4_GHOST_ACCESS_LEDGER" \
+                  "$V4_MODEL_MANIFEST" "$V4_GHOST_EVALUATOR"; do
+    if [[ ! -f "$required" ]]; then
+      echo "ERROR: frozen GHOST live prerequisite not found: ${required}" >&2
+      return 1
+    fi
+  done
+  python -m experiments.ghost_live_protocol validate-run \
+    --root "$CMD_ROOT" \
+    --cases "$V4_SOURCE_CASES" \
+    --protocol "$V4_GHOST_PROTOCOL" \
+    --authorization "$V4_GHOST_AUTHORIZATION" \
+    --access-ledger "$V4_GHOST_ACCESS_LEDGER" \
+    --model-manifest "$V4_MODEL_MANIFEST" \
+    --evaluator "$V4_GHOST_EVALUATOR" \
+    --preparation-manifest "${CMD_V4_PREPARATION_MANIFEST:-$V4_ARTIFACTS/preparation/full/preparation_manifest.json}" \
+    --candidate-budget "$V4_CANDIDATE_BUDGET" \
+    --run-id "$RUN_ID" \
+    --output "${CMD_RUN_DIR}/ghost_live_preflight.json"
   python -m experiments.v4_materialization merge \
     --shard "${materialized}/gpu0.jsonl" \
     --shard "${materialized}/gpu1.jsonl" \
@@ -1259,8 +1308,12 @@ main_v4_merge() {
     --output "$merged"
   python -m experiments.v4_prequential_runner \
     --cases "$merged" \
+    --materialization-manifest "${merged}.manifest.json" \
     --output-dir "$replay" \
     --candidate-budget "$V4_CANDIDATE_BUDGET" \
+    --ghost-evaluator "$V4_GHOST_EVALUATOR" \
+    --ghost-protocol "$V4_GHOST_PROTOCOL" \
+    --ghost-feedback-mode prospective_deployment \
     --bootstrap-samples "$bootstrap_samples" \
     --bootstrap-seed "${CMD_V4_BOOTSTRAP_SEED:-24}" \
     --primary-baseline "${CMD_V4_PRIMARY_BASELINE:-global_policy}"

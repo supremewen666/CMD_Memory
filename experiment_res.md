@@ -1,5 +1,203 @@
 # Experiment Results — Counterfactual Memory Evolution Governance
 
+## Prospective live readiness gate (2026-08-14)
+
+Decision: **IMPLEMENTATION PASS; DATA/OUTCOME COLLECTION PENDING.**
+
+The model-calling path now has a four-way fresh-data freeze, independent-source
+attestation, code/config/model/evaluator/budget hashing, single-`RUN_ID` access
+authorization, `nohup`-compatible detached supervision, JSONL progress and selection
+ledgers, and upstream model-call accounting. In prospective mode, GHOST receives no
+development proxy or shadow-gold update. Delayed feedback is accepted only after its
+registered window matures and must bind the emitted selection, intent, skill, probe,
+effect, and pre-action prior.
+
+No model-calling result is reported here: new `ghost_test_rep` / `ghost_test_new`
+cases, independent-source attestation, and actual four-role model snapshot hashes have
+not been supplied. The command sequence is frozen in `GHOST_LIVE_EXPERIMENT.md` and
+will fail closed rather than reuse the old 3,100-case dev/cal stream.
+
+## Latest gate — GHOST Ecology V3 industry-aligned optimization (2026-08-14)
+
+Decision: **development-proxy zero-call PASS; sealed/live experiment still gated.**
+
+V3 removes post-action telemetry from selection, replaces the zero residual with
+`mature delayed utility proxy - pre-action evaluator prior`, adds the same-feedback
+`full_v4_observable` baseline, and changes the ecology from 1,058 fragmented dev
+species (662 singletons) to 12 preregistered parameterized repair types with
+support-gated global→pattern→local residual shrinkage.
+
+The pre-action evaluator passes identifiability: family correlation `0.6393220035`,
+bootstrap LB `0.5290066352`, pairwise concordance `0.7056096430`.
+
+Five zero-call seeds (24--28), each 3,100 cases × 8 arms and 10,000 bootstrap
+samples, all pass:
+
+- GHOST vs same-feedback Full V4: mean family delta `+0.0872389171`, worst-seed
+  one-sided 95% LB `+0.0542759323`;
+- GHOST vs shadow-gold Full V4 oracle: mean family delta `+0.0357592521`,
+  worst-seed LB `+0.0089756501` (context only, not the decision gate);
+- 2,518/2,518 dev residuals were nonzero in every seed;
+- both learning arms made zero updates on all 582 `ghost_cal` cases;
+- model/API/network calls: 0.
+
+Primary evidence:
+`artifacts/neuro_symbolic_evolution_v4/ghost_ecology_v3/industry-optimized-multiseed-summary.json`.
+Embedded summary hash:
+`050f4696f9c86e3410cc70e4b21f90bc3f4340d014e257997e9b3e0d73efc057`;
+file SHA-256:
+`cfa0e1521bbd2dde6c1878fd4de0b70a5b7c33df0e8db3236a6a6017818b950e`.
+
+This is a development-proxy replay over previously materialized future outcomes.
+It is not real delayed deployment feedback and does not replace the still-empty
+`ghost_test_rep` / `ghost_test_new` sealed splits.
+
+## Latest gate — GHOST Ecology V2 deployment feedback (2026-08-13)
+
+Final decision: **feedback identifiability PASS; end-to-end GHOST routing BLOCKED.**
+
+The original immediate-probe result below remains a valid negative ablation: action
+typing alone was insufficient. A frozen parameterized evaluator was then fitted on
+`ghost_dev` only and evaluated on family-disjoint `ghost_cal` without calibration
+updates. Identifiability passed with family correlation `0.6374268463`, bootstrap
+lower bound `0.5272669761`, and pairwise concordance `0.7032916087`.
+
+The final fair seven-arm replay restricts every online arm to `ghost_dev` updates.
+On evaluation-only `ghost_cal`, GHOST beat global policy (`+0.0628574068`, lower
+bound `+0.0327165307`) but did not beat Full V4 (`-0.0072636236`, lower bound
+`-0.0309097982`). All 582 calibration cases left the GHOST posterior unchanged.
+The runner now registers
+`ghost_hierarchy_v1`, binds the frozen evaluator hash, requires the GHOST protocol,
+and updates only `ghost_dev`.
+
+This does **not** authorize the model-calling experiment. The evaluator repair is
+accepted, but the integrated router remains blocked by the Full V4 confirmatory
+gate. In addition, `ghost_test_rep` and `ghost_test_new` remain empty.
+
+Repaired artifacts:
+`artifacts/neuro_symbolic_evolution_v4/ghost_ecology_v2/evaluator-identifiability-zero-call-20260813-seed24.json`
+and
+`artifacts/neuro_symbolic_evolution_v4/ghost_ecology_v2/prequential-zero-call-residual-final-seed24/report.json`.
+
+### Superseded immediate-probe gate
+
+Decision at this stage was **BLOCKED_FEEDBACK_NOT_IDENTIFIABLE**.
+
+The skill-conditioned zero-call audit used 3,100 cases, 796 families, 12,400
+candidate observations and 10,000 family-bootstrap draws. It made zero model/API
+calls. Pairwise concordance passed (`0.6249671485 >= 0.55`), showing that typed
+per-skill probes improve within-case action ranking. Family correlation failed
+(`0.0036162454 < 0.20`) and its one-sided 95% bootstrap lower bound failed
+(`-0.0662486454 < 0.10`).
+
+The source telemetry is degenerate for repair-success identification: all candidates
+are valid, none roll back, verify/abstain always make zero changes, and target-mutation
+probes always report immediate success. No delayed recurrence, target resolution,
+anchor non-regression, or annotation-consumption signal is present. The earlier
+shadow-gold router PASS therefore remains only a development screen.
+
+Primary artifact:
+`artifacts/neuro_symbolic_evolution_v4/ghost_ecology_v2/identifiability-zero-call-20260813.json`.
+Full analysis: `experiment_analysis/analysis_3.md`.
+
+## GHOST Router V1 final reviewed zero-call replay (2026-08-13)
+
+### Outcome
+
+The final review-fixed GHOST Router V1 implementation completed a fresh five-seed
+zero-model-call replay under new, non-overwriting
+`ghost-router-v1-reviewed-*` artifact names. The primary recursive GHOST arm passes
+the requested **development-screen** comparisons. This is previously materialized
+shadow-gold selected-action feedback, so it is explicitly **not** a sealed/live or
+end-to-end gold-free claim.
+
+```text
+[RESULT] claim_scope=selector_screen_not_end_to_end_gold_free
+[RESULT] cases=3100
+[RESULT] represented_families=640
+[RESULT] unseen_families=156
+[RESULT] seeds=24,25,26,27,28
+[RESULT] bootstrap_samples_per_seed=10000
+[RESULT] registered_arms=16
+[RESULT] rows_per_seed=49600
+[RESULT] model_calls=0
+[RESULT] ghost_mean_utility=0.235016578990796
+[RESULT] full_v4_mean_utility=0.18455403238812873
+[RESULT] ghost_represented_family_macro=0.25735190307647327
+[RESULT] full_v4_represented_family_macro=0.21142582055322517
+[RESULT] ghost_unseen_family_macro=0.21367131403410727
+[RESULT] full_v4_unseen_family_macro=0.20325017805920298
+[RESULT] ghost_harm_rate=0.16193548387096773
+[RESULT] full_v4_harm_rate=0.2135483870967742
+[RESULT] ghost_cvar_05=-0.7276707395590808
+[RESULT] full_v4_cvar_05=-0.7396455848317953
+[RESULT] summary_sha256=aa119b3c812dea18e19571b9869afb2ee5ad3a1ed8e88f5c29cf34980429c0f8
+[RESULT] summary_file_sha256=20d457fb1b75f236edbe52b5035836eae5d25f8d440bfe9edba2d0dde7a87185
+```
+
+### Primary and safety gates
+
+Family-macro utilities were reconstructed from the raw rows with families as the
+experimental unit and 10,000 local bootstrap draws over the five-seed aggregate.
+
+| Gate | Estimate | Lower bound / threshold | Result |
+|---|---:|---:|---|
+| GHOST − Full V4, represented | +0.0459260825 | one-sided 95% LB +0.0376301546 | PASS |
+| GHOST − diagonal Thompson, represented | +0.0123915806 | one-sided 95% LB +0.0080225958 | PASS |
+| GHOST − online linear SGD, represented | +0.0118651344 | one-sided 95% LB +0.0068532245 | PASS |
+| GHOST − Full V4, unseen non-inferiority | +0.0104211360 | two-sided 95% LB +0.0029024137 ≥ -0.005 | PASS |
+| Harm | 0.1619354839 vs 0.2135483871 | GHOST ≤ Full | PASS |
+| CVaR 0.05 | -0.7276707396 vs -0.7396455848 | GHOST ≥ Full - 0.01 | PASS |
+
+The strongest named learned comparator on represented family-macro utility is
+online linear SGD; GHOST exceeds it on the five-seed aggregation. The raw overall
+GHOST mean is 27.3449% above Full V4.
+
+### Ablations
+
+| Arm | Mean utility | Represented family-macro Δ vs Full | Unseen mean | Harm |
+|---|---:|---:|---:|---:|
+| GHOST recursive / `ghost_hierarchy_v1` | 0.2350165790 | +0.0459260825 | 0.1944057665 | 0.1619354839 |
+| `ghost_global_v1` | 0.2357088692 | +0.0445981047 | 0.1946168937 | 0.1578709677 |
+| `ghost_no_semantic_level` | 0.2345246272 | +0.0452438828 | 0.1943783896 | 0.1621290323 |
+| `ghost_no_signal_level` | 0.2356452636 | +0.0447203226 | 0.1944187793 | 0.1578064516 |
+| `ghost_no_typed_motif` | 0.2227517775 | +0.0393408476 | 0.1806205043 | 0.1704516129 |
+| `ghost_shuffled_feedback` | 0.1215968143 | -0.0174701005 | 0.0728207676 | 0.2481935484 |
+
+All other registered controls were retained. Typed-motif removal and shuffled
+feedback are clearly adverse, while global and no-signal variants are slightly
+higher on raw mean. Therefore this replay supports the frozen recursive arm's gate
+pass, but does not claim that every hierarchy component beats every ablation.
+
+### Provenance and integrity
+
+- Closed input case canonical hash:
+  `51d18796abfb8f1eeaecbbe2d621854a6755ee018132f16364d1b9b9a31ce8aa`.
+- Reference outcome file SHA-256:
+  `bb2a0acec091fa3acce39f549da009d5b82d3e06fc770ada905a1f7035d0dd29`.
+- Embedded multiseed summary hash:
+  `aa119b3c812dea18e19571b9869afb2ee5ad3a1ed8e88f5c29cf34980429c0f8`;
+  independent canonical recomputation matched.
+- Actual summary file SHA-256:
+  `20d457fb1b75f236edbe52b5035836eae5d25f8d440bfe9edba2d0dde7a87185`.
+- All five embedded report hashes matched independent canonical recomputation.
+- Every seed has exactly 3,100 rows for every one of the 16 arms and records
+  `model_calls=0`.
+
+Full commands, per-file hashes, and the two Novix-style analysis rounds are in
+`experiment_analysis/analysis_1.md` and
+`experiment_analysis/analysis_2.md`. The next claim-bearing step still requires
+an untouched frozen split plus deployment-observable feedback.
+
+Verification after the replay: focused GHOST/replay tests `22 passed`; broader
+repair/counterfactual/experiment tests `859 passed, 1 skipped, 1 warning, 58,232
+subtests passed`; ruff and `git diff --check` both passed. No core algorithm file
+was changed during this experiment run and no commit was created.
+
+The older governance report retained below is a separate historical experiment.
+Its statement that no `judge_v*.md` existed described that earlier run; the GHOST
+replay above independently verified the now-present `iterations/judge_v1.md` PASS.
+
 ## Executive verdict
 
 The completed confirmatory experiment is a **negative result**. Phase 0 found enough

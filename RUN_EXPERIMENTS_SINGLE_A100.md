@@ -14,7 +14,7 @@ flowchart LR
   I["frozen relation instrument\ncomplete intent proposer"]
   S["prepared_cases.jsonl\n完整 intent + frozen graph"]
   G0["GPU0\nSHA256(case_id) mod 2 = 0\nports 8000/8001"]
-  G1["GPU1\nSHA256(case_id) mod 2 = 1\nports 8100/8101"]
+  G1["GPU1\nSHA256(case_id) mod 2 = 1\nports 8000/8001"]
   M["CPU merge\n去重、覆盖、hash、event order"]
   R["canonical prequential replay\nB0-B5 select-all then update"]
   E["report.json\nfamily-block bootstrap gate"]
@@ -36,21 +36,21 @@ repository，不是一个可复现实验。双卡产出的 shard 只包含 post-
 |---|---:|---:|---:|---|
 | `v4_prepare_inputs` | `0` | `8000` | `8001` | relation cache、graph 与完整 intent 冻结 |
 | `v4_gpu0` | `0` | `8000` | `8001` | hash bucket 0 的 typed execution/scoring |
-| `v4_gpu1` | `1` | `8100` | `8101` | hash bucket 1 的 typed execution/scoring |
+| `v4_gpu1` | `1` | `8000` | `8001` | hash bucket 1 的 typed execution/scoring |
 | `v4_merge` | CPU | — | — | 严格合并和六臂 replay |
 
 同一台双卡机器可直接使用默认值。若两台单卡机器都只暴露 local GPU 0，在第二台上
-设置 `CMD_GPU1_ID=0`；端口可以继续使用 8100/8101，也可以覆盖
+设置 `CMD_GPU1_ID=0`；端口可以继续使用 8000/8001，也可以覆盖
 `CMD_GPU1_PORT_BASE`。
 
 ```bash
 # 同一台双卡机器的默认绑定
 CMD_GPU0_ID=0 CMD_GPU0_PORT_BASE=8000
-CMD_GPU1_ID=1 CMD_GPU1_PORT_BASE=8100
+CMD_GPU1_ID=1 CMD_GPU1_PORT_BASE=8000
 
 # 第二台单卡机器
 export CMD_GPU1_ID=0
-export CMD_GPU1_PORT_BASE=8100
+export CMD_GPU1_PORT_BASE=8000
 ```
 
 每个 lane 会在自己的物理卡上依次启动 frozen Qwen judge 和 Llama answerer，避免
@@ -265,7 +265,7 @@ RUN_ID=v4-smoke-001
 唯一。冒烟输入必须同时含 represented 和 unseen families，否则统计 gate 会拒绝，
 这是数据不足而不是代码失败。
 
-## 8. 六个实验臂与更新时序
+## 8. 八个实验臂与更新时序
 
 每个 case 使用相同 frozen candidates 和相同 candidate budget：
 
@@ -277,12 +277,14 @@ RUN_ID=v4-smoke-001
 | `global_policy` | 只有 global learned policy | 仅 represented |
 | `hierarchical_no_chain` | niche layering + species sediment | 仅 represented |
 | `full_v4` | 上述能力 + shadow repair-chain governance | 仅 represented |
+| `full_v4_observable` | 与 GHOST 同 feedback 的在线残差基线 | 仅 `ghost_dev`；正式 prospective 阶段等待延迟反馈 |
+| `ghost_hierarchy_v1` | pre-action evaluator + global→pattern→local GHOST | 仅 `ghost_dev`；sealed test 永不更新 |
 
 一个 case 内的执行顺序固定为：
 
 ```text
 读取 L_t
-→ 六臂全部完成 selection
+→ 八臂全部完成 selection
 → 读取各自 selected intent 的 post-outcome
 → 各臂只更新自己的 policy/repository
 → L_(t+1) 对下一 case 生效
@@ -340,3 +342,10 @@ family-block bootstrap gate。
 ```
 
 V4 不会改写旧 arena JSONL，也不会用新结果重新解释 v1-v3 表格。
+
+## 11. GHOST 后续实验
+
+旧 GHOST V1 固定候选动作接线已经退役。新的开放世界
+`failure_memory → pattern → repair_skill` 协议见
+`BUILD_SPEC_GHOST_ECOLOGY_V2.md`。V2 的真实调用 runner 尚未授权；当前脚本只保留
+经过验证的 V4 六臂路径，避免误用 V1 结果启动不符合新目标的实验。

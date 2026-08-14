@@ -26,9 +26,10 @@ def test_shell_help_exposes_v4_detach_and_explicit_gpu_lanes() -> None:
     assert "status" in output
     assert "stop" in output
     assert "GPU 0: physical id 0, ports 8000/8001" in output
-    assert "GPU 1: physical id 1, ports 8100/8101" in output
+    assert "GPU 1: physical id 1, ports 8000/8001" in output
     assert "launch.json" in output
     assert "status.jsonl" in output
+    assert "canonical eight-arm replay" in output
 
 
 def test_shell_is_syntax_valid_and_defaults_to_its_checkout() -> None:
@@ -44,6 +45,14 @@ def test_shell_is_syntax_valid_and_defaults_to_its_checkout() -> None:
     assert "--collect-proposer-failures" in source
     assert "preparation_attempt_manifest.json" in source
     assert "repair_required" in source
+    assert "python -m experiments.ghost_live_protocol validate-run" in source
+    assert '--ghost-evaluator "$V4_GHOST_EVALUATOR"' in source
+    assert '--ghost-protocol "$V4_GHOST_PROTOCOL"' in source
+    assert '--materialization-manifest "${merged}.manifest.json"' in source
+    assert "CMD_V4_GHOST_AUTHORIZATION" in source
+    assert "CMD_V4_GHOST_ACCESS_LEDGER" in source
+    assert "CMD_V4_MODEL_MANIFEST" in source
+    assert '--run-id "$RUN_ID"' in source
 
 
 def test_v4_gpu_roles_validate_the_exact_prepared_bundle_before_model_start() -> None:
@@ -57,6 +66,10 @@ def test_v4_gpu_roles_validate_the_exact_prepared_bundle_before_model_start() ->
     )
     model_start_offset = materialize.index("start_llama_dual_vllm")
     assert validation_offset < model_start_offset
+    live_gate_offset = materialize.index(
+        "python -m experiments.ghost_live_protocol validate-run"
+    )
+    assert live_gate_offset < model_start_offset
     assert '--manifest "$preparation_manifest"' in materialize
     assert '--prepared "$V4_SOURCE_CASES"' in materialize
     assert "CMD_V4_PREPARATION_MANIFEST" in materialize

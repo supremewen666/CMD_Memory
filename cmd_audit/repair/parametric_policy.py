@@ -549,7 +549,13 @@ class OnlineRepairPolicy:
         chosen = stable[-1] if stable else "global"
         return full[: full.index(chosen) + 1]
 
-    def select(self, context: PolicyContext, candidates: Sequence[RepairIntent]) -> SelectionDecision:
+    def select(
+        self,
+        context: PolicyContext,
+        candidates: Sequence[RepairIntent],
+        *,
+        score_offsets: Mapping[str, float] | None = None,
+    ) -> SelectionDecision:
         if context.event_index <= self._last_selection_event:
             raise ValueError("selection event indexes must be strictly increasing")
         if len({item.intent_id for item in candidates}) != len(candidates):
@@ -560,8 +566,25 @@ class OnlineRepairPolicy:
         for item in validated:
             # Dataclass validation above is intentionally repeated at this public seam.
             RepairIntent.from_mapping(item.as_mapping())
+        candidate_ids = {item.intent_id for item in validated}
+        offsets = (
+            {intent_id: 0.0 for intent_id in candidate_ids}
+            if score_offsets is None
+            else {
+                str(intent_id): _finite(value, f"score offset:{intent_id}")
+                for intent_id, value in score_offsets.items()
+            }
+        )
+        if set(offsets) != candidate_ids:
+            raise ValueError("score offsets must exactly cover candidates")
         scores = sorted(
-            ((item.intent_id, self._score(context, item, chosen_niche)) for item in validated),
+            (
+                (
+                    item.intent_id,
+                    self._score(context, item, chosen_niche) + offsets[item.intent_id],
+                )
+                for item in validated
+            ),
             key=lambda item: (-item[1], item[0]),
         )
         ranked = tuple(item[0] for item in scores)

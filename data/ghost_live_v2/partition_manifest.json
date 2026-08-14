@@ -1,0 +1,29 @@
+{
+  "counts": {
+    "ghost_cal": 134,
+    "ghost_dev": 181,
+    "ghost_test_new": 160,
+    "ghost_test_rep": 68
+  },
+  "family_counts": {
+    "ghost_cal": 25,
+    "ghost_dev": 36,
+    "ghost_test_new": 70,
+    "ghost_test_rep": 36
+  },
+  "file_sha256": {
+    "ghost_cal": "b4443f5d17b81d082c5ba47a6d91ea1c581aeaf54e468e33cd21510913365b19",
+    "ghost_dev": "db61c0c70b8ad2c8b36e9837d2f58ebd59073fa8b81e90759398b81a5019ffee",
+    "ghost_test_new": "807fc823a4b7a8b759bf8306712c839fd8f7d4d07fe43ec53052c479545e5461",
+    "ghost_test_rep": "7494362bab0f77efd8fb9bca7535446e7470c0d6b5027ebfbe3cb814329fea53"
+  },
+  "policy": {
+    "case_disjoint": true,
+    "dev_cal_family_disjoint": true,
+    "split_before_model_calls": true,
+    "test_new_family_disjoint": true,
+    "test_rep_reuses_dev_families_only": true
+  },
+  "schema_version": "cmd-ghost-four-partition-manifest-v1",
+  "seed": 20260814
+}

@@ -42,6 +42,7 @@ def test_gpu_lanes_are_disjoint_and_merge_restores_frozen_order(tmp_path: Path) 
             progress=progress,
             backend=backend,
             validator=lambda row: row,
+            model_call_accounting={"answer_generation": 3, "shadow_judge": 3},
         )
         shards.append(output)
         assert result["case_ids"] == sorted(
@@ -68,6 +69,11 @@ def test_gpu_lanes_are_disjoint_and_merge_restores_frozen_order(tmp_path: Path) 
     )
     assert manifest["case_count"] == len(raw)
     assert set(manifest["shard_sha256"]) == {str(path.resolve()) for path in shards}
+    assert manifest["materialization_model_calls"] == 12
+    assert manifest["materialization_model_call_accounting"] == {
+        "answer_generation": 6,
+        "shadow_judge": 6,
+    }
 
 
 def test_merge_rejects_duplicate_or_missing_cases(tmp_path: Path) -> None:

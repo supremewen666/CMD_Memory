@@ -40,6 +40,8 @@ def _load_paired(path: Path, arm_field="arm", key_field="case_id",
                  outcome_field="recovered", include_filter=None):
     """case_id -> {arm: bool recovered}, excluding unmeasured outcomes."""
     paired: dict[str, dict[str, bool]] = defaultdict(dict)
+    if not path.is_file():
+        return paired
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             if row.get("excluded", "false").strip().lower() == "true":
@@ -594,7 +596,12 @@ def _two_prop_z(k1: int, n1: int, k2: int, n2: int) -> tuple[float, float]:
 def _analyze_trend() -> None:
     """Exp18 self-evolution: trend of recovery/seed-hit over the stream."""
     path = OUT / "failure_memory_trajectory_detail.csv"
-    all_rows = list(csv.DictReader(open(path, newline="", encoding="utf-8")))
+    if not path.is_file():
+        print("\n=== C7 (Exp18) self-evolution trend (NOT arm-paired) ===")
+        print("  SKIP: failure_memory_trajectory_detail.csv is not available.")
+        return
+    with path.open(newline="", encoding="utf-8") as handle:
+        all_rows = list(csv.DictReader(handle))
     rows = [
         row for row in all_rows
         if row.get("excluded", "false") != "true"
