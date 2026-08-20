@@ -62,6 +62,30 @@ _SKILL_TRANSITIONS = frozenset(
         ("calibrated", "retired"), ("stable", "retired"),
     }
 )
+# Niches need their own table for the same reason patterns and skills do: without
+# one, ``lifecycle_transition`` accepted any pair of distinct NICHE_STATES, so a
+# ledger could record ``extinct -> latent`` and audit clean.  A niche is observed
+# rather than promoted, so the legal moves are the observable ones: occupation
+# rises, contention resolves either way, and extinction is terminal.
+_NICHE_TRANSITIONS = frozenset(
+    {
+        ("latent", "emerging"), ("emerging", "occupied"), ("emerging", "stable"),
+        ("emerging", "extinct"),
+        ("occupied", "stable"), ("occupied", "contested"), ("occupied", "collapsing"),
+        ("stable", "contested"), ("stable", "branching"), ("stable", "collapsing"),
+        ("contested", "occupied"), ("contested", "branching"),
+        ("contested", "collapsing"),
+        ("branching", "occupied"), ("branching", "stable"),
+        ("collapsing", "occupied"), ("collapsing", "extinct"),
+    }
+)
+
+
+def is_legal_niche_transition(from_state: str, to_state: str) -> bool:
+    """Return whether two observed niche states form a legal ledger step."""
+    if from_state not in NICHE_STATES or to_state not in NICHE_STATES:
+        raise ValueError("unknown niche lifecycle state")
+    return from_state == to_state or (from_state, to_state) in _NICHE_TRANSITIONS
 
 
 def _canonical(value: object) -> bytes:
@@ -854,6 +878,401 @@ class GHOSTEcologyRouter:
 
 
 @dataclass(frozen=True)
+class ObservableResidualSelection:
+    """A backbone decision plus any support-gated residual correction."""
+
+    selection_id: str
+    event_index: int
+    failure_id: str
+    registry_id: str
+    candidate_skill_revision_ids: tuple[str, ...]
+    selected_skill_revision_id: str | None
+    pattern_responsibilities: tuple[PatternResponsibility, ...]
+    scores: tuple[tuple[str, float], ...]
+    posterior_before_sha256: str
+    base_selected_skill_revision_id: str | None
+    selection_mode: str
+    exploration_activated: bool
+    active_levels: tuple[str, ...]
+
+
+class ObservableResidualGHOSTRouter:
+    """Keep the observable V4 winner until residual evidence can improve it."""
+
+    def __init__(
+        self,
+        *,
+        seed: int = 24,
+        exploration: float = 0.08,
+        min_global_support: float = 2.0,
+        min_pattern_support: float = 4.0,
+        min_local_support: float = 8.0,
+        min_exploration_support: float = 4.0,
+        allow_development_proxy: bool = False,
+    ) -> None:
+        if exploration < 0.0:
+            raise ValueError("exploration must be non-negative")
+        if not (
+            0.0 <= min_global_support <= min_pattern_support <= min_local_support
+        ):
+            raise ValueError("hierarchy support thresholds are invalid")
+        if min_exploration_support < min_global_support:
+            raise ValueError("exploration support cannot precede global support")
+        self.seed = int(seed)
+        self.exploration = float(exploration)
+        self.min_global_support = float(min_global_support)
+        self.min_pattern_support = float(min_pattern_support)
+        self.min_local_support = float(min_local_support)
+        self.min_exploration_support = float(min_exploration_support)
+        self.allow_development_proxy = bool(allow_development_proxy)
+        self._stats: dict[tuple[str, ...], tuple[float, float]] = {}
+        self._pending: dict[
+            str,
+            tuple[
+                ObservableResidualSelection,
+                FailureDeposit,
+                tuple[SkillRevision, ...],
+            ],
+        ] = {}
+        self._selection_count = 0
+        self._fallback_count = 0
+        self._exploration_count = 0
+        self._exploration_changed_count = 0
+        self._level_use_counts = {"global": 0, "pattern": 0, "local": 0}
+
+    @property
+    def snapshot(self) -> dict[str, object]:
+        payload = {
+            "schema_version": "cmd-observable-residual-ghost-posterior-v1",
+            "seed": self.seed,
+            "exploration": self.exploration,
+            "min_global_support": self.min_global_support,
+            "min_pattern_support": self.min_pattern_support,
+            "min_local_support": self.min_local_support,
+            "min_exploration_support": self.min_exploration_support,
+            "allow_development_proxy": self.allow_development_proxy,
+            "stats": [
+                [list(key), precision, natural]
+                for key, (precision, natural) in sorted(self._stats.items())
+            ],
+        }
+        return {**payload, "snapshot_sha256": content_sha256(payload)}
+
+    @classmethod
+    def from_snapshot(
+        cls, value: Mapping[str, object]
+    ) -> "ObservableResidualGHOSTRouter":
+        _closed(
+            value,
+            {
+                "schema_version",
+                "seed",
+                "exploration",
+                "min_global_support",
+                "min_pattern_support",
+                "min_local_support",
+                "min_exploration_support",
+                "allow_development_proxy",
+                "stats",
+                "snapshot_sha256",
+            },
+            "observable residual GHOST posterior snapshot",
+        )
+        payload = dict(value)
+        claimed = payload.pop("snapshot_sha256")
+        if (
+            value["schema_version"]
+            != "cmd-observable-residual-ghost-posterior-v1"
+            or content_sha256(payload) != claimed
+        ):
+            raise ValueError(
+                "observable residual GHOST posterior snapshot hash/schema mismatch"
+            )
+        result = cls(
+            seed=int(value["seed"]),
+            exploration=float(value["exploration"]),
+            min_global_support=float(value["min_global_support"]),
+            min_pattern_support=float(value["min_pattern_support"]),
+            min_local_support=float(value["min_local_support"]),
+            min_exploration_support=float(value["min_exploration_support"]),
+            allow_development_proxy=bool(value["allow_development_proxy"]),
+        )
+        stats: dict[tuple[str, ...], tuple[float, float]] = {}
+        for raw in value["stats"]:
+            key = tuple(str(item) for item in raw[0])
+            if key in stats:
+                raise ValueError("posterior snapshot repeats a key")
+            precision = _finite(raw[1], "posterior precision")
+            natural = _finite(raw[2], "posterior natural parameter")
+            if precision <= 0.0:
+                raise ValueError("posterior precision must be positive")
+            stats[key] = (precision, natural)
+        result._stats = stats
+        return result
+
+    @property
+    def diagnostics(self) -> dict[str, object]:
+        return {
+            "selection_count": self._selection_count,
+            "fallback_count": self._fallback_count,
+            "fallback_rate": (
+                0.0
+                if self._selection_count == 0
+                else self._fallback_count / self._selection_count
+            ),
+            "exploration_count": self._exploration_count,
+            "exploration_changed_count": self._exploration_changed_count,
+            "level_use_counts": dict(self._level_use_counts),
+        }
+
+    def select(
+        self,
+        failure: FailureDeposit,
+        *,
+        pattern_responsibilities: Sequence[PatternResponsibility],
+        skills: Sequence[SkillRevision],
+        registry: RegistrySnapshot,
+        event_index: int,
+        base_scores: Mapping[str, float],
+        base_selected_skill_revision_id: str | None,
+    ) -> ObservableResidualSelection:
+        responsibilities = tuple(pattern_responsibilities)
+        validate_responsibilities(responsibilities)
+        candidates = tuple(skills)
+        candidate_ids = {row.skill_revision_id for row in candidates}
+        scores = {
+            str(key): _finite(value, f"base score:{key}")
+            for key, value in base_scores.items()
+        }
+        if not registry.sealed:
+            raise PermissionError("serving requires a sealed registry snapshot")
+        if not candidates or len(candidate_ids) != len(candidates):
+            raise ValueError("candidate skills must be non-empty and unique")
+        if any(row.state != "stable" for row in candidates):
+            raise PermissionError("only stable skills may serve")
+        if candidate_ids - set(registry.stable_skill_revision_ids):
+            raise PermissionError("candidate skill is absent from frozen registry")
+        if set(scores) != candidate_ids:
+            raise ValueError("base scores must exactly cover the candidate skills")
+        if (
+            base_selected_skill_revision_id is not None
+            and base_selected_skill_revision_id not in candidate_ids
+        ):
+            raise ValueError("base selection is absent from candidate skills")
+
+        before = str(self.snapshot["snapshot_sha256"])
+        active_levels: set[str] = set()
+        routed_scores: list[tuple[str, float]] = []
+        exploration_supported_skill_ids = {
+            skill.skill_revision_id
+            for skill in candidates
+            if self._stats.get(
+                ("global", skill.skill_revision_id), (1.0, 0.0)
+            )[0]
+            - 1.0
+            >= self.min_exploration_support
+        }
+        exploration_activated = (
+            self.exploration > 0.0
+            and len(exploration_supported_skill_ids) >= 2
+        )
+        for skill in candidates:
+            score = scores[skill.skill_revision_id]
+            for key, weight in self._keys(
+                failure, responsibilities, skill
+            ):
+                precision, natural = self._stats.get(key, (1.0, 0.0))
+                support = precision - 1.0
+                threshold = {
+                    "global": self.min_global_support,
+                    "pattern": self.min_pattern_support,
+                    "local": self.min_local_support,
+                }[key[0]]
+                if support >= threshold:
+                    active_levels.add(key[0])
+                    score += weight * natural / precision
+                if (
+                    exploration_activated
+                    and skill.skill_revision_id
+                    in exploration_supported_skill_ids
+                    and (
+                    key[0] == "global" or support >= threshold
+                    )
+                ):
+                    address = content_sha256(
+                        {
+                            "seed": self.seed,
+                            "event_index": event_index,
+                            "key": key,
+                            "router": "observable-residual-ghost-v1",
+                        }
+                    )
+                    score += weight * random.Random(int(address, 16)).gauss(
+                        0.0, self.exploration / math.sqrt(precision)
+                    )
+            routed_scores.append((skill.skill_revision_id, score))
+        ranked = tuple(
+            sorted(routed_scores, key=lambda row: (-row[1], row[0]))
+        )
+        residual_active = bool(active_levels)
+        if base_selected_skill_revision_id is None:
+            selected_skill_revision_id = None
+        elif residual_active or exploration_activated:
+            selected_skill_revision_id = ranked[0][0]
+        else:
+            selected_skill_revision_id = base_selected_skill_revision_id
+        changed = selected_skill_revision_id != base_selected_skill_revision_id
+        if not residual_active and not exploration_activated:
+            selection_mode = "observable_fallback"
+        elif exploration_activated and changed:
+            selection_mode = "exploration_override"
+        elif changed:
+            selection_mode = "residual_override"
+        else:
+            selection_mode = "residual_supported"
+        ordered_levels = tuple(
+            level for level in ("global", "pattern", "local")
+            if level in active_levels
+        )
+        body = {
+            "event_index": event_index,
+            "failure_id": failure.failure_id,
+            "registry_id": registry.registry_id,
+            "candidate_skill_revision_ids": sorted(candidate_ids),
+            "selected_skill_revision_id": selected_skill_revision_id,
+            "base_selected_skill_revision_id": base_selected_skill_revision_id,
+            "pattern_responsibilities": [
+                [row.pattern_revision_id, row.responsibility]
+                for row in responsibilities
+            ],
+            "scores": [list(row) for row in ranked],
+            "posterior_before_sha256": before,
+            "selection_mode": selection_mode,
+            "exploration_activated": exploration_activated,
+            "active_levels": list(ordered_levels),
+        }
+        decision = ObservableResidualSelection(
+            f"selection-{content_sha256(body)}",
+            event_index,
+            failure.failure_id,
+            registry.registry_id,
+            tuple(body["candidate_skill_revision_ids"]),
+            selected_skill_revision_id,
+            responsibilities,
+            ranked,
+            before,
+            base_selected_skill_revision_id,
+            selection_mode,
+            exploration_activated,
+            ordered_levels,
+        )
+        self._selection_count += 1
+        self._fallback_count += selection_mode == "observable_fallback"
+        self._exploration_count += exploration_activated
+        self._exploration_changed_count += exploration_activated and changed
+        for level in ordered_levels:
+            self._level_use_counts[level] += 1
+        if decision.selected_skill_revision_id is not None:
+            self._pending[decision.selection_id] = (decision, failure, candidates)
+        return decision
+
+    def observe(
+        self,
+        decision: ObservableResidualSelection,
+        feedback: DelayedOutcomeFeedback,
+    ) -> dict[str, object]:
+        pending = self._pending.get(decision.selection_id)
+        if pending is None or pending[0] != decision:
+            raise ValueError("feedback refers to an unknown or consumed selection")
+        if not isinstance(feedback, DelayedOutcomeFeedback):
+            raise TypeError("observable residual routing requires delayed outcome feedback")
+        if feedback.selection_id != decision.selection_id:
+            raise ValueError("feedback selection binding mismatch")
+        if feedback.selected_skill_revision_id != decision.selected_skill_revision_id:
+            raise ValueError("unselected skill feedback is forbidden")
+        if feedback.development_proxy and not self.allow_development_proxy:
+            raise PermissionError("development delayed-outcome proxy is not enabled")
+        if feedback.selected_at_event_index != decision.event_index:
+            raise ValueError("delayed outcome selection event binding mismatch")
+        selected = next(
+            row
+            for row in pending[2]
+            if row.skill_revision_id == decision.selected_skill_revision_id
+        )
+        if feedback.probe_id != selected.success_probe["probe_id"]:
+            raise ValueError("feedback does not use the selected skill's registered probe")
+        self._pending.pop(decision.selection_id)
+        if feedback.evaluation_only:
+            return self.snapshot
+
+        pre_update = dict(self._stats)
+        global_key = ("global", selected.skill_revision_id)
+        global_precision, global_natural = pre_update.get(global_key, (1.0, 0.0))
+        global_mean = global_natural / global_precision
+        pattern_means: dict[str, float] = {}
+        for responsibility in decision.pattern_responsibilities:
+            key = (
+                "pattern",
+                responsibility.pattern_revision_id,
+                selected.skill_revision_id,
+            )
+            precision, natural = pre_update.get(key, (1.0, 0.0))
+            pattern_means[responsibility.pattern_revision_id] = natural / precision
+        for key, weight in self._keys(
+            pending[1], decision.pattern_responsibilities, selected
+        ):
+            precision, natural = self._stats.get(key, (1.0, 0.0))
+            target = feedback.reward
+            if key[0] == "pattern":
+                target -= global_mean
+            elif key[0] == "local":
+                target -= global_mean + pattern_means.get(key[1], 0.0)
+            self._stats[key] = (
+                precision + weight * weight,
+                natural + weight * target,
+            )
+        return self.snapshot
+
+    @staticmethod
+    def _keys(
+        failure: FailureDeposit,
+        responsibilities: Sequence[PatternResponsibility],
+        skill: SkillRevision,
+    ) -> tuple[tuple[tuple[str, ...], float], ...]:
+        rows: list[tuple[tuple[str, ...], float]] = [
+            (("global", skill.skill_revision_id), 1.0)
+        ]
+        scale = sum(abs(value) for _feature, value in failure.features if value)
+        for responsibility in responsibilities:
+            rows.append(
+                (
+                    (
+                        "pattern",
+                        responsibility.pattern_revision_id,
+                        skill.skill_revision_id,
+                    ),
+                    responsibility.responsibility,
+                )
+            )
+            if scale == 0.0:
+                continue
+            for feature, value in failure.features:
+                if value:
+                    rows.append(
+                        (
+                            (
+                                "local",
+                                responsibility.pattern_revision_id,
+                                feature,
+                                skill.skill_revision_id,
+                            ),
+                            responsibility.responsibility * value / scale,
+                        )
+                    )
+        return tuple(rows)
+
+
+@dataclass(frozen=True)
 class NicheObservation:
     failure_id: str
     pattern_revision_id: str
@@ -1486,6 +1905,8 @@ class GhostEcology:
             raise ValueError("niche transition snapshots disagree")
         if previous.state == current.state:
             return None
+        if not is_legal_niche_transition(previous.state, current.state):
+            raise ValueError("invalid niche transition")
         event = self.ledger.append(
             "niche_transition", event_index=event_index,
             payload={
@@ -1536,6 +1957,7 @@ class GhostEcology:
         allowed = (
             _PATTERN_TRANSITIONS if subject_kind == "pattern"
             else _SKILL_TRANSITIONS if subject_kind == "skill"
+            else _NICHE_TRANSITIONS if subject_kind == "niche"
             else None
         )
         if (
@@ -1678,9 +2100,11 @@ __all__ = [
     "EcologyLedger", "EcologySelection",
     "FailureDeposit", "GHOSTEcologyRouter", "GovernanceDecision",
     "GhostEcology", "NicheObservation", "NicheObserver", "NichePerturbationReport",
+    "ObservableResidualGHOSTRouter", "ObservableResidualSelection",
     "NicheSnapshot", "PatternResponsibility",
     "PatternRevision", "PromotionEvidence", "RegistrySnapshot", "SkillRevision",
     "content_sha256", "derive_discovery_pressure", "observe_niche_perturbation",
+    "is_legal_niche_transition",
     "propose_pattern_merge", "propose_pattern_split",
     "skill_promotion_decision",
     "validate_responsibilities",

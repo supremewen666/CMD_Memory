@@ -23,6 +23,26 @@ NICHE_ARMS = (
     "map_elites_edges",
     "random_niche",
 )
+HEADLINE_NICHE_KEYS = ("descriptor", "random", "unkeyed")
+
+
+def headline_niche_key(arm_id: str) -> str:
+    """Map legacy runner arms to the unique E4b headline keys."""
+    mapping = {
+        "map_elites_no_edges": "descriptor",
+        "map_elites_edges": "descriptor",
+        "random_niche": "random",
+        "unkeyed_pool": "unkeyed",
+        "all_frozen": "all_frozen",
+    }
+    try:
+        return mapping[arm_id]
+    except KeyError as exc:
+        raise ValueError(f"unknown niche arm: {arm_id}") from exc
+
+
+def canonical_headline_arms() -> tuple[str, ...]:
+    return HEADLINE_NICHE_KEYS
 _UPDATING_ARMS = frozenset(NICHE_ARMS) - {"all_frozen"}
 
 
@@ -68,6 +88,10 @@ class NicheArmOutcome:
     budget_aligned: bool
     abstained: bool
     update_effective_after_case_index: int | None
+
+    @property
+    def headline_key(self) -> str:
+        return headline_niche_key(self.arm_id)
 
 
 @dataclass(frozen=True)
@@ -330,7 +354,11 @@ class AuditedNicheEvolutionRunner:
             case_index=case.case_index,
         ):
             result = by_skill.get(record.revision_id)
-            if result is None or result.shadow_gain is None:
+            # Archive mutation is part of the runtime protocol.  It may only
+            # consume the pre-registered gold-free signal; shadow gain is an
+            # offline audit reference and must never decide validation or
+            # proposal admission.
+            if result is None or result.gold_free_gain is None:
                 continue
             if case.case_id == record.producing_case_id:
                 continue
@@ -341,7 +369,7 @@ class AuditedNicheEvolutionRunner:
                         case.case_id,
                         case.family_id,
                         case.case_index,
-                        float(result.shadow_gain),
+                        float(result.gold_free_gain),
                         result.execution_cost,
                     ),
                 )
@@ -356,16 +384,16 @@ class AuditedNicheEvolutionRunner:
             (candidate, by_skill[candidate.skill_id])
             for candidate in candidates
             if candidate.skill_id in by_skill
-            and by_skill[candidate.skill_id].shadow_gain is not None
-            and math.isfinite(float(by_skill[candidate.skill_id].shadow_gain))
-            and float(by_skill[candidate.skill_id].shadow_gain) >= 0.1
+            and by_skill[candidate.skill_id].gold_free_gain is not None
+            and math.isfinite(float(by_skill[candidate.skill_id].gold_free_gain))
+            and float(by_skill[candidate.skill_id].gold_free_gain) >= 0.1
         ]
         if not successful:
             return
         candidate, _result = min(
             successful,
             key=lambda row: (
-                -float(row[1].shadow_gain),
+                -float(row[1].gold_free_gain),
                 row[1].execution_cost,
                 row[0].skill_id,
             ),

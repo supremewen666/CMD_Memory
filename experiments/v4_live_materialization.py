@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 import math
 from typing import Any, Mapping
 
@@ -205,12 +207,27 @@ def validate_live_input(source: Mapping[str, object]) -> FrozenLiveInput:
     )
 
 
-def _changed_item_ids(state: object) -> set[str]:
-    changed: set[str] = set()
-    for event in state.trace:
-        if event.before_hash != event.after_hash:
-            changed.update(event.matched_item_ids)
-    return changed
+def _item_content_hash(item: object) -> str:
+    """Hash the executed item content, not the operator's matched IDs."""
+    payload = item.as_mapping()
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def _changed_item_ids(initial: object, executed: object) -> set[str]:
+    """Return IDs whose initial/executed item content hashes differ.
+
+    Trace matches are only operator intent and may include no-op matches; they
+    are not evidence that an item changed.  Added/removed IDs are changes too.
+    """
+    initial_hashes = {item.item_id: _item_content_hash(item) for item in initial.items}
+    executed_hashes = {item.item_id: _item_content_hash(item) for item in executed.items}
+    return {
+        item_id
+        for item_id in set(initial_hashes) | set(executed_hashes)
+        if initial_hashes.get(item_id) != executed_hashes.get(item_id)
+    }
 
 
 class V4LiveMaterializer:
@@ -280,7 +297,7 @@ class V4LiveMaterializer:
             )
             states[intent.intent_id] = result.state
             outcomes.append(
-                self._score_state(intent.intent_id, probe, runtime, result.state)
+                self._score_state(intent, probe, runtime, result.state, graph=graph, initial=initial)
             )
         chain_attempts = self._materialize_chains(
             source,
@@ -314,18 +331,21 @@ class V4LiveMaterializer:
 
     def _score_state(
         self,
-        intent_id: str,
+        intent: RepairIntent | str,
         probe: ProbeCase,
         runtime: RuntimeRepairCase,
         state: object,
+        *,
+        graph: FrozenRelationGraph | None = None,
+        initial: object | None = None,
     ) -> V4CandidateOutcome:
-        changed = _changed_item_ids(state)
+        intent_id = intent if isinstance(intent, str) else intent.intent_id
+        changed = _changed_item_ids(initial, state)
         locality = len(changed) / max(1, len(state.items))
         valid = state.token_count <= runtime.token_budget
         if not valid:
-            return V4CandidateOutcome(
-                intent_id, 0.0, locality, len(changed), False, True
-            )
+            return V4CandidateOutcome(intent_id, 0.0, locality, len(changed), False, True,
+                                     changed_item_ids=tuple(sorted(changed)))
         answer = self.answer_client.generate(
             f"Query: {runtime.query}\n\nRetrieved Memory:\n{state.rendered_context}\n\nAnswer the query from memory.",
             system="Use only the supplied retrieved memory. Give a concise answer.",
@@ -334,9 +354,27 @@ class V4LiveMaterializer:
             self.answer_verifier, answer, probe.gold_answer
         )
         recovery = float(score) - float(probe.primary_baseline.answer_score)
-        return V4CandidateOutcome(
-            intent_id, recovery, locality, len(changed), True, False
-        )
+        actionability_mode = target_binding = target_match = None
+        provenance = None
+        if not isinstance(intent, str) and graph is not None:
+            edge = next((row for row in graph.edges if row.edge_id == intent.relation_edge_id), None)
+            if edge is not None:
+                actionability_mode = edge.actionability.mode.value
+                if intent.effect in {"replace", "demote", "suppress"}:
+                    target_binding = intent.target_item_id == edge.actionability.target_item_id if intent.target_item_id is not None else None
+                    target_match = (target_binding and intent.target_item_id in changed) if target_binding is not None else None
+                provenance = {"event_schema_version": "cmd-v4-typed-evidence-v1",
+                              "graph_sha256": graph.graph_sha256,
+                              "state_hash": state.state_hash,
+                              "initial_state_hash": None if initial is None else initial.state_hash,
+                              "changed_item_ids_source": "initial_executed_item_content_hash_diff",
+                              "changed_item_hash_algorithm": "sha256(canonical_item_mapping)"}
+        return V4CandidateOutcome(intent_id, recovery, locality, len(changed), True, False,
+                                  target_binding_observed=target_binding,
+                                  target_match_observed=target_match,
+                                  changed_item_ids=tuple(sorted(changed)),
+                                  actionability_mode_observed=actionability_mode,
+                                  typed_evidence_provenance=provenance)
 
     def _materialize_chains(
         self,
@@ -386,7 +424,7 @@ class V4LiveMaterializer:
                 expected_protocol_manifest_sha256=graph.protocol_manifest_sha256,
             ).state
             chain_shadow = self._score_state(
-                f"chain:{first_id}:{second_id}", probe, runtime, chained
+                f"chain:{first_id}:{second_id}", probe, runtime, chained, graph=graph, initial=initial
             )
             first_outcome = outcome_by_id[first_id]
             second_outcome = outcome_by_id[second_id]

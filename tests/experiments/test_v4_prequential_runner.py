@@ -25,6 +25,7 @@ from cmd_audit.repair.deployment_feedback_evaluator import (
     observable_features,
 )
 from experiments.v4_live_materialization import V4LiveMaterializer
+from cmd_audit.adapters.session_lineage_cli import merge_followup_evidence_into_v4_case
 from experiments.v4_prequential_runner import (
     V4_ARMS,
     V4CandidateOutcome,
@@ -156,6 +157,8 @@ def _case(index: int, *, probe_set: str, family: str) -> V4PrequentialCase:
                 changed_item_count=1,
                 valid=True,
                 rolled_back=False,
+                target_binding_observed=True,
+                target_match_observed=True,
             ),
         ),
         chain_attempts=(),
@@ -184,6 +187,41 @@ def _evaluator() -> FrozenDeploymentEvaluator:
         (EvaluatorTrainingRow(features, 0.8),),
         training_provenance="ghost_dev_shadow_labels_only",
     )
+
+
+def test_session_lineage_merge_is_identity_bound_and_effective_after() -> None:
+    case = _case(0, probe_set="represented", family="f0")
+    selection = {
+        "schema_version": "cmd-session-lineage-selection-v1",
+        "session_id": case.case_id,
+        "family_id": case.family_id,
+        "branch_id": "branch-a",
+        "repair_intent_id": case.intents[0].intent_id,
+        "selected_event_index": case.context.event_index,
+        "effective_after_event_index": case.context.event_index + 1,
+        "annotation_ids": [],
+        "changed_item_ids": [],
+        "exposure_start_event_index": case.context.event_index + 2,
+        "exposure_end_event_index": case.context.event_index + 2,
+    }
+    record = {
+        "selection": selection,
+        "followup_evidence": {
+            "annotation_consumed": {"kind": "annotation_consumed", "confirmed": None, "reason": "unknown", "source_event_id": None, "observed_at_event_index": None, "state_sha256": None, "schema_version": "cmd-session-lineage-evidence-v2"},
+            "delayed_confirmation": {"kind": "delayed_confirmation", "confirmed": True, "reason": "typed signal", "source_event_id": "followup-1", "observed_at_event_index": case.context.event_index + 2, "state_sha256": "s-followup", "schema_version": "cmd-session-lineage-evidence-v2"},
+            "no_regression_observed": {"kind": "no_regression_observed", "confirmed": True, "reason": "guard passed", "source_event_id": "followup-1", "observed_at_event_index": case.context.event_index + 2, "state_sha256": "s-followup", "schema_version": "cmd-session-lineage-evidence-v2"},
+        },
+        "evidence_schema_version": "cmd-session-lineage-evidence-v2",
+    }
+    merged = merge_followup_evidence_into_v4_case(case.to_mapping(), record)
+    outcome = V4PrequentialCase.from_mapping(merged).candidate_outcomes[0]
+    assert outcome.delayed_confirmation is True
+    assert outcome.no_regression_observed is True
+    assert outcome.typed_evidence_provenance["session_lineage"]["branch_id"] == "branch-a"
+    future = dict(record)
+    future["selection"] = {**selection, "selected_event_index": case.context.event_index + 1}
+    with pytest.raises(ValueError, match="effective-after"):
+        merge_followup_evidence_into_v4_case(case.to_mapping(), future)
 
 
 def _ghost_partitions() -> dict[str, str]:
@@ -265,7 +303,11 @@ def test_ghost_arm_is_registered_and_report_binds_frozen_evaluator(
         ghost_evaluator=evaluator,
         ghost_partitions=_ghost_partitions(),
     ).run()
-    assert V4_ARMS[-2:] == ("full_v4_observable", "ghost_hierarchy_v1")
+    assert V4_ARMS[-3:] == (
+        "full_v4_observable",
+        "ghost_hierarchy_v1",
+        "v4_observable_ghost_residual_v1",
+    )
     assert result.report["ghost_feedback_gold_derived"] is False
     assert result.report["ghost_evaluator_snapshot_sha256"] == evaluator.snapshot_sha256
     assert result.report["ghost_cal_gate"]["updates_allowed"] is False
@@ -276,14 +318,49 @@ def test_ghost_arm_is_registered_and_report_binds_frozen_evaluator(
     assert result.report["arm_roles"]["full_v4_observable"] == (
         "same_feedback_online_residual_baseline"
     )
+    assert result.report["arm_roles"][
+        "v4_observable_ghost_residual_v1"
+    ] == "observable_backbone_support_gated_hierarchical_residual"
     assert result.report["feature_timing"]["selection"] == "pre_action_only"
     assert result.report["ghost_residual_diagnostics"]["nonzero_count"] > 0
+    assert result.report["observable_residual_ghost_diagnostics"][
+        "residual_nonzero_count"
+    ] > 0
+    assert result.report["observable_residual_ghost_diagnostics"][
+        "residual_mean"
+    ] == pytest.approx(result.report["ghost_residual_diagnostics"]["mean"])
     represented = [
         row for row in result.outcomes
         if row.probe_set == "represented" and row.arm_id == "ghost_hierarchy_v1"
     ]
     assert represented
     assert all(row.policy_snapshot_after != row.policy_snapshot_before for row in represented)
+
+
+def test_observable_residual_arm_cold_start_matches_observable_backbone(
+    tmp_path: Path,
+) -> None:
+    result = V4PrequentialRunner(
+        _cases(),
+        output_dir=tmp_path,
+        candidate_budget=1,
+        bootstrap_samples=100,
+        ghost_evaluator=_evaluator(),
+        ghost_partitions=_ghost_partitions(),
+        ghost_feedback_mode="prospective_deployment",
+    ).run()
+    by_key = {(row.case_id, row.arm_id): row for row in result.outcomes}
+
+    assert V4_ARMS[-1] == "v4_observable_ghost_residual_v1"
+    for case in _cases():
+        assert by_key[
+            (case.case_id, "v4_observable_ghost_residual_v1")
+        ].selected_intent_id == by_key[
+            (case.case_id, "full_v4_observable")
+        ].selected_intent_id
+    diagnostics = result.report["observable_residual_ghost_diagnostics"]
+    assert diagnostics["fallback_rate"] == 1.0
+    assert diagnostics["exploration_count"] == 0
 
 
 def test_ghost_parameter_binding_prefers_actionability_compatible_intent() -> None:

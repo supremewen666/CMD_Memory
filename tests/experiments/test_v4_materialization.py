@@ -43,6 +43,7 @@ def test_gpu_lanes_are_disjoint_and_merge_restores_frozen_order(tmp_path: Path) 
             backend=backend,
             validator=lambda row: row,
             model_call_accounting={"answer_generation": 3, "shadow_judge": 3},
+            backend_locator="experiments.v4_live_materialization:live_backend",
         )
         shards.append(output)
         assert result["case_ids"] == sorted(
@@ -74,6 +75,9 @@ def test_gpu_lanes_are_disjoint_and_merge_restores_frozen_order(tmp_path: Path) 
         "answer_generation": 6,
         "shadow_judge": 6,
     }
+    assert manifest["materialization_backend_locators"] == [
+        "experiments.v4_live_materialization:live_backend"
+    ]
 
 
 def test_merge_rejects_duplicate_or_missing_cases(tmp_path: Path) -> None:

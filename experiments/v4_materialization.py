@@ -17,7 +17,7 @@ from experiments.v4_prequential_runner import V4PrequentialCase
 DUAL_GPU_LANES = ("gpu0", "gpu1")
 SINGLE_GPU_LANE = "single_gpu"
 LANES = (*DUAL_GPU_LANES, SINGLE_GPU_LANE)
-MATERIALIZATION_SCHEMA_VERSION = "cmd-v4-materialized-shard-v1"
+MATERIALIZATION_SCHEMA_VERSION = "cmd-v4-materialized-shard-v2-typed-evidence"
 MERGE_SCHEMA_VERSION = "cmd-v4-materialized-merge-v1"
 Backend = Callable[[Mapping[str, object], str], object]
 Validator = Callable[[Mapping[str, object]], object]
@@ -122,6 +122,7 @@ def materialize_shard(
     backend: Backend,
     validator: Validator,
     model_call_accounting: Mapping[str, int] | None = None,
+    backend_locator: str | None = None,
 ) -> dict[str, object]:
     if lane not in LANES:
         raise ValueError("lane must be gpu0, gpu1, or single_gpu")
@@ -183,6 +184,7 @@ def materialize_shard(
         "output": str(output.resolve()),
         "output_sha256": _file_sha256(output),
         "model_call_accounting": dict(model_call_accounting or {}),
+        "backend_locator": backend_locator,
     }
     _atomic_json(output.with_suffix(output.suffix + ".manifest.json"), manifest)
     _append_jsonl(
@@ -239,6 +241,7 @@ def merge_materialized_shards(
         str(path.resolve()): _file_sha256(path) for path in sorted(shards)
     }
     call_totals: dict[str, int] = {}
+    backend_locators: set[str] = set()
     manifest_lanes: list[str] = []
     partition_rules: list[str] = []
     for shard in shards:
@@ -270,6 +273,11 @@ def merge_materialized_shards(
             ):
                 raise ValueError("model call accounting is invalid")
             call_totals[role] = call_totals.get(role, 0) + count
+        backend_locator = manifest_value.get("backend_locator")
+        if backend_locator is not None:
+            if not isinstance(backend_locator, str) or not backend_locator:
+                raise ValueError("materialization backend locator is invalid")
+            backend_locators.add(backend_locator)
     if len(shards) == 1:
         if manifest_lanes != [SINGLE_GPU_LANE] or partition_rules != ["all_cases"]:
             raise ValueError(
@@ -295,6 +303,14 @@ def merge_materialized_shards(
         "ordering": "context.event_index_then_case_id",
         "materialization_model_call_accounting": dict(sorted(call_totals.items())),
         "materialization_model_calls": sum(call_totals.values()),
+        "materialization_backend_locators": sorted(backend_locators),
+        # Explicit provenance, rather than an inference made downstream.  Old
+        # manifests lack this field and must never be promoted to fresh replay.
+        "reference_is_fresh_replay": (
+            sum(call_totals.values()) > 0
+            and backend_locators
+            == {"experiments.v4_live_materialization:live_backend"}
+        ),
     }
     _atomic_json(output.with_suffix(output.suffix + ".manifest.json"), manifest)
     return manifest
@@ -356,6 +372,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             backend=load_backend(args.backend),
             validator=_validate_case,
             model_call_accounting=call_accounting,
+            backend_locator=args.backend,
         )
     else:
         expected = None

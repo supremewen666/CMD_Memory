@@ -12,6 +12,7 @@ from cmd_audit.repair.ghost_ecology import (
     EcologyLedger,
     FailureDeposit,
     GHOSTEcologyRouter,
+    ObservableResidualGHOSTRouter,
     GhostEcology,
     NicheObservation,
     NicheObserver,
@@ -505,6 +506,301 @@ def test_deployment_observable_skill_prior_participates_in_routing() -> None:
         )
 
 
+def test_observable_residual_router_cold_start_exactly_falls_back_to_backbone() -> None:
+    failure = _failure()
+    pattern = _pattern()
+    skills = (_skill("left"), _skill("right"))
+    registry = RegistrySnapshot.create(
+        epoch=1,
+        stable_pattern_revision_ids=(pattern.pattern_revision_id,),
+        stable_skill_revision_ids=tuple(row.skill_revision_id for row in skills),
+        config_sha256="observable-residual-cold-start",
+    )
+    router = ObservableResidualGHOSTRouter(seed=24, exploration=0.08)
+    decision = router.select(
+        failure,
+        pattern_responsibilities=(
+            PatternResponsibility(pattern.pattern_revision_id, 1.0),
+        ),
+        skills=skills,
+        registry=registry,
+        event_index=10,
+        base_scores={
+            skills[0].skill_revision_id: 0.10,
+            skills[1].skill_revision_id: 0.11,
+        },
+        base_selected_skill_revision_id=skills[0].skill_revision_id,
+    )
+
+    assert decision.selected_skill_revision_id == skills[0].skill_revision_id
+    assert decision.selection_mode == "observable_fallback"
+    assert decision.exploration_activated is False
+    assert decision.active_levels == ()
+    assert router.diagnostics["fallback_count"] == 1
+
+
+def test_observable_residual_router_activates_only_supported_hierarchy_levels() -> None:
+    failure = _failure()
+    pattern = _pattern()
+    skills = (_skill("left"), _skill("right"))
+    registry = RegistrySnapshot.create(
+        epoch=1,
+        stable_pattern_revision_ids=(pattern.pattern_revision_id,),
+        stable_skill_revision_ids=tuple(row.skill_revision_id for row in skills),
+        config_sha256="observable-residual-support-gates",
+    )
+    router = ObservableResidualGHOSTRouter(
+        seed=24,
+        exploration=0.0,
+        min_global_support=1.0,
+        min_pattern_support=2.0,
+        min_local_support=3.0,
+        min_exploration_support=3.0,
+        allow_development_proxy=True,
+    )
+    responsibilities = (
+        PatternResponsibility(pattern.pattern_revision_id, 1.0),
+    )
+    first = router.select(
+        failure,
+        pattern_responsibilities=responsibilities,
+        skills=skills,
+        registry=registry,
+        event_index=10,
+        base_scores={
+            skills[0].skill_revision_id: 0.20,
+            skills[1].skill_revision_id: 0.10,
+        },
+        base_selected_skill_revision_id=skills[0].skill_revision_id,
+    )
+    router.observe(
+        first,
+        DelayedOutcomeFeedback(
+            selection_id=first.selection_id,
+            selected_skill_revision_id=skills[0].skill_revision_id,
+            probe_id=str(skills[0].success_probe["probe_id"]),
+            selected_at_event_index=10,
+            observed_after_event_index=11,
+            pre_action_prior=0.20,
+            delayed_utility=0.80,
+            valid=True,
+            rolled_back=False,
+            delayed_regression=False,
+            provenance="dev-delayed-outcome-proxy-v1",
+            development_proxy=True,
+        ),
+    )
+
+    second = router.select(
+        failure,
+        pattern_responsibilities=responsibilities,
+        skills=skills,
+        registry=registry,
+        event_index=12,
+        base_scores={
+            skills[0].skill_revision_id: 0.00,
+            skills[1].skill_revision_id: 0.10,
+        },
+        base_selected_skill_revision_id=skills[1].skill_revision_id,
+    )
+
+    assert second.selected_skill_revision_id == skills[0].skill_revision_id
+    assert second.selection_mode == "residual_override"
+    assert second.active_levels == ("global",)
+    assert second.exploration_activated is False
+
+
+def test_observable_residual_router_explores_only_after_mature_support() -> None:
+    failure = _failure()
+    pattern = _pattern()
+    skills = (_skill("left"), _skill("right"))
+    registry = RegistrySnapshot.create(
+        epoch=1,
+        stable_pattern_revision_ids=(pattern.pattern_revision_id,),
+        stable_skill_revision_ids=tuple(row.skill_revision_id for row in skills),
+        config_sha256="observable-residual-exploration-gate",
+    )
+    router = ObservableResidualGHOSTRouter(
+        seed=24,
+        exploration=0.08,
+        min_global_support=1.0,
+        min_pattern_support=1.0,
+        min_local_support=1.0,
+        min_exploration_support=1.0,
+        allow_development_proxy=True,
+    )
+    responsibilities = (
+        PatternResponsibility(pattern.pattern_revision_id, 1.0),
+    )
+
+    for position, event_index in enumerate((10, 12)):
+        expected = skills[position]
+        decision = router.select(
+            failure,
+            pattern_responsibilities=responsibilities,
+            skills=skills,
+            registry=registry,
+            event_index=event_index,
+            base_scores={
+                skills[0].skill_revision_id: 0.90 if position == 0 else -0.90,
+                skills[1].skill_revision_id: -0.90 if position == 0 else 0.90,
+            },
+            base_selected_skill_revision_id=expected.skill_revision_id,
+        )
+        assert decision.exploration_activated is False
+        selected = next(
+            row
+            for row in skills
+            if row.skill_revision_id == decision.selected_skill_revision_id
+        )
+        router.observe(
+            decision,
+            DelayedOutcomeFeedback(
+                selection_id=decision.selection_id,
+                selected_skill_revision_id=selected.skill_revision_id,
+                probe_id=str(selected.success_probe["probe_id"]),
+                selected_at_event_index=event_index,
+                observed_after_event_index=event_index + 1,
+                pre_action_prior=0.20,
+                delayed_utility=0.60,
+                valid=True,
+                rolled_back=False,
+                delayed_regression=False,
+                provenance="dev-delayed-outcome-proxy-v1",
+                development_proxy=True,
+            ),
+        )
+
+    supported = router.select(
+        failure,
+        pattern_responsibilities=responsibilities,
+        skills=skills,
+        registry=registry,
+        event_index=14,
+        base_scores={
+            skills[0].skill_revision_id: 0.20,
+            skills[1].skill_revision_id: 0.10,
+        },
+        base_selected_skill_revision_id=skills[0].skill_revision_id,
+    )
+    assert supported.exploration_activated is True
+    assert router.diagnostics["exploration_count"] == 1
+
+
+def test_observable_residual_router_snapshot_restores_replayable_routing() -> None:
+    failure = _failure()
+    pattern = _pattern()
+    skills = (_skill("left"), _skill("right"))
+    registry = RegistrySnapshot.create(
+        epoch=1,
+        stable_pattern_revision_ids=(pattern.pattern_revision_id,),
+        stable_skill_revision_ids=tuple(row.skill_revision_id for row in skills),
+        config_sha256="observable-residual-replay",
+    )
+    responsibilities = (
+        PatternResponsibility(pattern.pattern_revision_id, 1.0),
+    )
+    router = ObservableResidualGHOSTRouter(
+        seed=24,
+        min_global_support=1.0,
+        min_pattern_support=2.0,
+        min_local_support=3.0,
+        min_exploration_support=1.0,
+        allow_development_proxy=True,
+    )
+    first = router.select(
+        failure,
+        pattern_responsibilities=responsibilities,
+        skills=skills,
+        registry=registry,
+        event_index=10,
+        base_scores={
+            skills[0].skill_revision_id: 0.20,
+            skills[1].skill_revision_id: 0.10,
+        },
+        base_selected_skill_revision_id=skills[0].skill_revision_id,
+    )
+    router.observe(
+        first,
+        DelayedOutcomeFeedback(
+            selection_id=first.selection_id,
+            selected_skill_revision_id=skills[0].skill_revision_id,
+            probe_id=str(skills[0].success_probe["probe_id"]),
+            selected_at_event_index=10,
+            observed_after_event_index=11,
+            pre_action_prior=0.20,
+            delayed_utility=0.70,
+            valid=True,
+            rolled_back=False,
+            delayed_regression=False,
+            provenance="dev-delayed-outcome-proxy-v1",
+            development_proxy=True,
+        ),
+    )
+    restored = ObservableResidualGHOSTRouter.from_snapshot(router.snapshot)
+
+    select_kwargs = {
+        "pattern_responsibilities": responsibilities,
+        "skills": skills,
+        "registry": registry,
+        "event_index": 12,
+        "base_scores": {
+            skills[0].skill_revision_id: 0.20,
+            skills[1].skill_revision_id: 0.10,
+        },
+        "base_selected_skill_revision_id": skills[0].skill_revision_id,
+    }
+    assert router.select(failure, **select_kwargs) == restored.select(
+        failure, **select_kwargs
+    )
+
+
+def test_observable_residual_router_rejects_unselected_delayed_feedback() -> None:
+    failure = _failure()
+    pattern = _pattern()
+    skills = (_skill("left"), _skill("right"))
+    registry = RegistrySnapshot.create(
+        epoch=1,
+        stable_pattern_revision_ids=(pattern.pattern_revision_id,),
+        stable_skill_revision_ids=tuple(row.skill_revision_id for row in skills),
+        config_sha256="observable-residual-selected-only",
+    )
+    router = ObservableResidualGHOSTRouter(allow_development_proxy=True)
+    decision = router.select(
+        failure,
+        pattern_responsibilities=(
+            PatternResponsibility(pattern.pattern_revision_id, 1.0),
+        ),
+        skills=skills,
+        registry=registry,
+        event_index=10,
+        base_scores={
+            skills[0].skill_revision_id: 0.20,
+            skills[1].skill_revision_id: 0.10,
+        },
+        base_selected_skill_revision_id=skills[0].skill_revision_id,
+    )
+
+    with pytest.raises(ValueError, match="unselected"):
+        router.observe(
+            decision,
+            DelayedOutcomeFeedback(
+                selection_id=decision.selection_id,
+                selected_skill_revision_id=skills[1].skill_revision_id,
+                probe_id=str(skills[1].success_probe["probe_id"]),
+                selected_at_event_index=10,
+                observed_after_event_index=11,
+                pre_action_prior=0.20,
+                delayed_utility=0.60,
+                valid=True,
+                rolled_back=False,
+                delayed_regression=False,
+                provenance="dev-delayed-outcome-proxy-v1",
+                development_proxy=True,
+            ),
+        )
+
+
 def test_sealed_ecology_logs_evaluation_without_posterior_sedimentation(tmp_path: Path) -> None:
     builder, failure, pattern, skills, registry = _ready_ecology(tmp_path)
     _ = builder
@@ -677,3 +973,43 @@ def test_discovery_pressure_routes_unmatched_failure_to_governed_pattern_birth()
         abstentions=(False,),
         prediction_residuals=(0.1,),
     ) is None
+
+
+def test_niche_lifecycle_rejects_moves_outside_the_transition_table(
+    tmp_path: Path,
+) -> None:
+    """Niches need a transition table for the same reason patterns and skills do.
+
+    Without one the ``subject_kind == "niche"`` branch fell through to an empty
+    allow-list, so any two distinct ``NICHE_STATES`` were accepted and a ledger
+    could record a resurrection (``extinct -> latent``) while auditing clean.
+    """
+    ecology, _failure, pattern, _skills, _registry = _ready_ecology(tmp_path)
+
+    event_id = ecology.lifecycle_transition(
+        subject_kind="niche",
+        subject_revision_id=pattern.pattern_revision_id,
+        from_state="latent",
+        to_state="emerging",
+        reason="occupation rising",
+        supporting_event_ids=(),
+        event_index=6,
+    )
+    assert event_id
+
+    # Extinction is terminal, and occupation cannot skip straight past emergence.
+    for from_state, to_state in (
+        ("extinct", "latent"),
+        ("latent", "stable"),
+        ("extinct", "occupied"),
+    ):
+        with pytest.raises(ValueError, match="invalid lifecycle transition"):
+            ecology.lifecycle_transition(
+                subject_kind="niche",
+                subject_revision_id=pattern.pattern_revision_id,
+                from_state=from_state,
+                to_state=to_state,
+                reason="illegal",
+                supporting_event_ids=(),
+                event_index=7,
+            )

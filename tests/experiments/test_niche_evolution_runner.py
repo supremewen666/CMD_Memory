@@ -72,6 +72,19 @@ def test_runner_is_test_then_update_and_budget_aligned() -> None:
     )
     assert "all_frozen" not in result.archive_snapshots
 
+    # The shadow channel is an offline audit reference.  It must not be used
+    # to mutate the runtime archive when it disagrees with the gold-free signal.
+    descriptor_rows = result.archive_snapshots["map_elites_no_edges"]["candidates"]
+    assert descriptor_rows
+    evidence_gains = [
+        evidence["recovery_gain"]
+        for row in descriptor_rows
+        for evidence in row["evidence"]
+    ]
+    assert evidence_gains
+    assert all(gain == pytest.approx(0.2) for gain in evidence_gains)
+    assert all(gain != pytest.approx(0.8) for gain in evidence_gains)
+
 
 def test_fill_is_exact_abstention_across_arms() -> None:
     case = NicheEvolutionCase(

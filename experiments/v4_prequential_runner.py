@@ -34,6 +34,8 @@ from cmd_audit.repair.ghost_ecology import (
     EcologySelection,
     FailureDeposit,
     GHOSTEcologyRouter,
+    ObservableResidualGHOSTRouter,
+    ObservableResidualSelection,
     PatternResponsibility,
     PatternRevision,
     RegistrySnapshot,
@@ -54,7 +56,9 @@ from cmd_audit.repair.repair_chain_governance import (
 )
 
 
-CASE_SCHEMA_VERSION = "cmd-v4-prequential-case-v1"
+LEGACY_CASE_SCHEMA_VERSION = "cmd-v4-prequential-case-v1"
+CASE_SCHEMA_VERSION = "cmd-v4-prequential-case-v2-typed-evidence"
+OUTCOME_SCHEMA_VERSION = "cmd-v4-candidate-outcome-v2"
 REPORT_SCHEMA_VERSION = "cmd-v4-prequential-report-v1"
 V4_ARMS = (
     "identity",
@@ -65,6 +69,7 @@ V4_ARMS = (
     "full_v4",
     "full_v4_observable",
     "ghost_hierarchy_v1",
+    "v4_observable_ghost_residual_v1",
 )
 _UPDATING_ARMS = frozenset(
     {"global_policy", "hierarchical_no_chain", "full_v4"}
@@ -96,6 +101,18 @@ class V4CandidateOutcome:
     changed_item_count: int
     valid: bool
     rolled_back: bool
+    # v2 typed execution evidence.  ``None`` is an explicit unknown for old
+    # materializations; it is never reconstructed from changed_item_count.
+    actionability_mode: str | None = None
+    target_binding_observed: bool | None = None
+    target_match_observed: bool | None = None
+    annotation_consumed: bool | None = None
+    downstream_confirmation: bool | None = None
+    delayed_confirmation: bool | None = None
+    no_regression_observed: bool | None = None
+    changed_item_ids: tuple[str, ...] | None = None
+    actionability_mode_observed: str | None = None
+    typed_evidence_provenance: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if not self.intent_id:
@@ -114,13 +131,27 @@ class V4CandidateOutcome:
             raise ValueError("changed_item_count must be a non-negative integer")
         if not isinstance(self.valid, bool) or not isinstance(self.rolled_back, bool):
             raise ValueError("valid and rolled_back must be booleans")
+        for name in (
+            "target_binding_observed", "target_match_observed", "annotation_consumed",
+            "downstream_confirmation", "delayed_confirmation", "no_regression_observed",
+        ):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, bool):
+                raise ValueError(f"{name} must be bool or unknown")
+        if self.changed_item_ids is not None:
+            if tuple(sorted(set(self.changed_item_ids))) != tuple(self.changed_item_ids):
+                raise ValueError("changed_item_ids must be sorted and unique")
 
     def to_mapping(self) -> dict[str, object]:
         return asdict(self)
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> "V4CandidateOutcome":
-        if set(value) != set(cls.__dataclass_fields__):
+        legacy = {"intent_id", "recovery_gain", "locality_cost", "changed_item_count", "valid", "rolled_back"}
+        current = set(cls.__dataclass_fields__)
+        if set(value) == legacy:
+            return cls(**value)  # explicit v1 -> v2 unknown adaptation
+        if set(value) != current:
             raise ValueError("V4CandidateOutcome mapping is not closed")
         return cls(**value)
 
@@ -194,7 +225,7 @@ class V4PrequentialCase:
             "candidate_outcomes",
             "chain_attempts",
         }
-        if set(value) != expected or value.get("schema_version") != CASE_SCHEMA_VERSION:
+        if set(value) != expected or value.get("schema_version") not in {LEGACY_CASE_SCHEMA_VERSION, CASE_SCHEMA_VERSION}:
             raise ValueError("V4PrequentialCase mapping is not closed or versioned")
         raw_intents = value["intents"]
         raw_outcomes = value["candidate_outcomes"]
@@ -229,6 +260,40 @@ class V4PrequentialCase:
             ),
             chain_attempts=tuple(attempts),
         )
+
+
+def _typed_runtime_feedback(
+    case: V4PrequentialCase,
+    intent: RepairIntent,
+    outcome: V4CandidateOutcome,
+) -> float | None:
+    """Derive update feedback only from typed execution/follow-up evidence.
+
+    ``recovery_gain`` is a shadow scorer output and is intentionally not part
+    of this path.  Unknown delayed/target evidence abstains from updating.
+    """
+    if not outcome.valid or outcome.rolled_back:
+        return -1.0
+    edge = next(
+        (row for row in case.graph.edges if row.edge_id == intent.relation_edge_id),
+        None,
+    )
+    if edge is None:
+        return None
+    if intent.effect in {"replace", "demote", "suppress"}:
+        if outcome.target_binding_observed is not True or outcome.target_match_observed is not True:
+            return None
+        success = True
+    elif intent.effect == "annotate_conflict":
+        if outcome.annotation_consumed is not True and outcome.downstream_confirmation is not True:
+            return None
+        success = True
+    else:
+        if outcome.delayed_confirmation is not True and outcome.no_regression_observed is not True:
+            return None
+        success = True
+    changed = outcome.changed_item_count
+    return max(-1.0, min(1.0, float(success) - outcome.locality_cost - min(1.0, 0.05 * changed)))
 
 
 @dataclass(frozen=True)
@@ -275,7 +340,7 @@ class _ArmSelection:
     intent_id: str | None
     reason: str
     niche_path: tuple[str, ...]
-    decision: SelectionDecision | EcologySelection | None
+    decision: SelectionDecision | EcologySelection | ObservableResidualSelection | None
     policy_snapshot_before: str | None
 
 
@@ -371,8 +436,46 @@ class V4PrequentialRunner:
         )
         self._ghost_selected_priors: dict[str, float] = {}
         self._ghost_residuals: list[float] = []
+        self.observable_ghost_router = ObservableResidualGHOSTRouter(
+            seed=bootstrap_seed,
+            min_global_support=2.0,
+            min_pattern_support=4.0,
+            min_local_support=8.0,
+            min_exploration_support=4.0,
+            allow_development_proxy=ghost_feedback_mode == "development_proxy",
+        )
+        self._observable_ghost_selected_priors: dict[str, float] = {}
+        self._observable_ghost_residuals: list[float] = []
         self.ghost_patterns, self.ghost_skills, self.ghost_registry = (
             self._freeze_ghost_registry()
+        )
+        self.observable_ghost_registry = RegistrySnapshot.create(
+            epoch=self.ghost_registry.epoch,
+            stable_pattern_revision_ids=(
+                self.ghost_registry.stable_pattern_revision_ids
+            ),
+            stable_skill_revision_ids=self.ghost_registry.stable_skill_revision_ids,
+            config_sha256=content_sha256(
+                {
+                    "arm": "v4_observable_ghost_residual_v1",
+                    "evaluator_snapshot_sha256": (
+                        self.ghost_evaluator.snapshot_sha256
+                    ),
+                    "candidate_budget": self.candidate_budget,
+                    "min_global_support": (
+                        self.observable_ghost_router.min_global_support
+                    ),
+                    "min_pattern_support": (
+                        self.observable_ghost_router.min_pattern_support
+                    ),
+                    "min_local_support": (
+                        self.observable_ghost_router.min_local_support
+                    ),
+                    "min_exploration_support": (
+                        self.observable_ghost_router.min_exploration_support
+                    ),
+                }
+            ),
         )
         self.on_arm_outcome = on_arm_outcome
         self.on_case_completed = on_case_completed
@@ -539,6 +642,69 @@ class V4PrequentialRunner:
         self._ghost_selected_priors[ghost_decision.selection_id] = intent_priors[
             selected_intent.intent_id
         ]
+        observable_selected_skill_id = (
+            None
+            if observable_decision.selected_intent_id is None
+            else self.ghost_skills[
+                self._ghost_species_key(
+                    case,
+                    next(
+                        row
+                        for row in case.intents
+                        if row.intent_id == observable_decision.selected_intent_id
+                    ),
+                )
+            ].skill_revision_id
+        )
+        observable_ghost_before = str(
+            self.observable_ghost_router.snapshot["snapshot_sha256"]
+        )
+        observable_ghost_decision = self.observable_ghost_router.select(
+            failure,
+            pattern_responsibilities=(
+                PatternResponsibility(pattern.pattern_revision_id, 1.0),
+            ),
+            skills=candidates,
+            registry=self.observable_ghost_registry,
+            event_index=case.context.event_index,
+            base_scores=skill_priors,
+            base_selected_skill_revision_id=observable_selected_skill_id,
+        )
+        observable_ghost_intent: RepairIntent | None = None
+        if observable_ghost_decision.selected_skill_revision_id is not None:
+            if (
+                observable_ghost_decision.selection_mode
+                == "observable_fallback"
+                and observable_decision.selected_intent_id is not None
+            ):
+                observable_ghost_intent = next(
+                    row
+                    for row in case.intents
+                    if row.intent_id == observable_decision.selected_intent_id
+                )
+            else:
+                observable_ghost_intent = min(
+                    species_to_intents[
+                        observable_ghost_decision.selected_skill_revision_id
+                    ],
+                    key=lambda row: (-intent_priors[row.intent_id], row.intent_id),
+                )
+            self._observable_ghost_selected_priors[
+                observable_ghost_decision.selection_id
+            ] = intent_priors[observable_ghost_intent.intent_id]
+        selections["v4_observable_ghost_residual_v1"] = _ArmSelection(
+            None
+            if observable_ghost_intent is None
+            else observable_ghost_intent.intent_id,
+            observable_ghost_decision.selection_mode,
+            (
+                pattern.pattern_revision_id,
+                *(() if observable_ghost_decision.selected_skill_revision_id is None
+                  else (observable_ghost_decision.selected_skill_revision_id,)),
+            ),
+            observable_ghost_decision,
+            observable_ghost_before,
+        )
         if self.on_ghost_selection is not None:
             selected_skill = next(
                 row for row in candidates
@@ -589,6 +755,7 @@ class V4PrequentialRunner:
                 shadow[selection.intent_id] if selection.intent_id is not None else None
             )
             observation: OutcomeObservation | None = None
+            runtime_gain: float | None = None
             if (
                 selected is not None
                 and arm in _UPDATING_ARMS
@@ -596,18 +763,23 @@ class V4PrequentialRunner:
             ):
                 if selection.decision is None:
                     raise AssertionError("updating arm is missing its frozen decision")
-                observation = OutcomeObservation(
-                    selection.decision.selection_id,
-                    case.case_id,
-                    observed_after,
-                    case.family_id,
-                    selected.intent_id,
-                    selected.recovery_gain,
-                    selected.locality_cost,
-                    selected.changed_item_count,
-                    selected.valid,
-                    selected.rolled_back,
+                selected_intent = next(
+                    row for row in case.intents if row.intent_id == selected.intent_id
                 )
+                runtime_gain = _typed_runtime_feedback(case, selected_intent, selected)
+                if runtime_gain is not None:
+                    observation = OutcomeObservation(
+                        selection.decision.selection_id,
+                        case.case_id,
+                        observed_after,
+                        case.family_id,
+                        selected.intent_id,
+                        runtime_gain,
+                        selected.locality_cost,
+                        selected.changed_item_count,
+                        selected.valid,
+                        selected.rolled_back,
+                    )
             transitions: tuple[dict[str, object], ...] = ()
             chain_decisions: tuple[dict[str, object], ...] = ()
             after = selection.policy_snapshot_before
@@ -726,6 +898,53 @@ class V4PrequentialRunner:
                             ),
                         )["snapshot_sha256"]
                     )
+            elif arm == "v4_observable_ghost_residual_v1":
+                if not isinstance(selection.decision, ObservableResidualSelection):
+                    raise AssertionError(
+                        "observable residual GHOST arm is missing its decision"
+                    )
+                if selected is not None:
+                    selected_prior = self._observable_ghost_selected_priors.pop(
+                        selection.decision.selection_id
+                    )
+                    if self.ghost_feedback_mode == "development_proxy":
+                        delayed_utility = self._delayed_utility_proxy(selected)
+                        residual = max(
+                            -1.0, min(1.0, delayed_utility - selected_prior)
+                        )
+                        if self.ghost_partitions[case.case_id] == "ghost_dev":
+                            self._observable_ghost_residuals.append(residual)
+                        skill = next(
+                            row
+                            for row in self.ghost_skills.values()
+                            if row.skill_revision_id
+                            == selection.decision.selected_skill_revision_id
+                        )
+                        after = str(
+                            self.observable_ghost_router.observe(
+                                selection.decision,
+                                DelayedOutcomeFeedback(
+                                    selection_id=selection.decision.selection_id,
+                                    selected_skill_revision_id=(
+                                        skill.skill_revision_id
+                                    ),
+                                    probe_id=str(skill.success_probe["probe_id"]),
+                                    selected_at_event_index=case.context.event_index,
+                                    observed_after_event_index=observed_after,
+                                    pre_action_prior=selected_prior,
+                                    delayed_utility=delayed_utility,
+                                    valid=selected.valid,
+                                    rolled_back=selected.rolled_back,
+                                    delayed_regression=False,
+                                    provenance="dev-delayed-outcome-proxy-v1",
+                                    evaluation_only=(
+                                        self.ghost_partitions[case.case_id]
+                                        != "ghost_dev"
+                                    ),
+                                    development_proxy=True,
+                                ),
+                            )["snapshot_sha256"]
+                        )
             utility = self._utility(selected)
             rows.append(
                 V4ArmOutcome(
@@ -754,7 +973,11 @@ class V4PrequentialRunner:
                     update_effective_after_event_index=observed_after
                     if observation is not None
                     or (
-                        arm in {"ghost_hierarchy_v1", "full_v4_observable"}
+                        arm in {
+                            "ghost_hierarchy_v1",
+                            "full_v4_observable",
+                            "v4_observable_ghost_residual_v1",
+                        }
                         and self.ghost_partitions[case.case_id] == "ghost_dev"
                         and self.ghost_feedback_mode == "development_proxy"
                     )
@@ -960,6 +1183,13 @@ class V4PrequentialRunner:
             samples=self.bootstrap_samples,
             seed=self.bootstrap_seed,
         )
+        observable_residual_ghost_cal_gate = _ghost_cal_gate(
+            outcomes,
+            partitions=self.ghost_partitions,
+            samples=self.bootstrap_samples,
+            seed=self.bootstrap_seed,
+            treatment_arm="v4_observable_ghost_residual_v1",
+        )
         payload: dict[str, object] = {
             "schema_version": REPORT_SCHEMA_VERSION,
             "protocol": "cmd-neuro-symbolic-memory-evolution-v4-prequential",
@@ -985,6 +1215,15 @@ class V4PrequentialRunner:
                 )
                 for partition in sorted(set(self.ghost_partitions.values()))
             },
+            "observable_residual_ghost_partition_mean_utility": {
+                partition: fmean(
+                    row.utility
+                    for row in outcomes
+                    if row.arm_id == "v4_observable_ghost_residual_v1"
+                    and self.ghost_partitions[row.case_id] == partition
+                )
+                for partition in sorted(set(self.ghost_partitions.values()))
+            },
             "ghost_updates_only_partition": "ghost_dev",
             "ghost_feedback_mode": self.ghost_feedback_mode,
             "ghost_pending_feedback_count": (
@@ -992,10 +1231,22 @@ class V4PrequentialRunner:
                 if self.ghost_feedback_mode == "prospective_deployment"
                 else 0
             ),
+            "observable_residual_ghost_pending_feedback_count": (
+                sum(
+                    row.arm_id == "v4_observable_ghost_residual_v1"
+                    and row.selected_intent_id is not None
+                    for row in outcomes
+                )
+                if self.ghost_feedback_mode == "prospective_deployment"
+                else 0
+            ),
             "arm_roles": {
                 "full_v4": "shadow_gold_oracle_ceiling",
                 "full_v4_observable": "same_feedback_online_residual_baseline",
                 "ghost_hierarchy_v1": "hierarchical_residual_treatment",
+                "v4_observable_ghost_residual_v1": (
+                    "observable_backbone_support_gated_hierarchical_residual"
+                ),
             },
             "feature_timing": {
                 "selection": "pre_action_only",
@@ -1007,6 +1258,32 @@ class V4PrequentialRunner:
                 "nonzero_count": sum(abs(row) > 1e-12 for row in self._ghost_residuals),
                 "mean": _optional_mean(self._ghost_residuals),
                 "mean_absolute": _optional_mean(abs(row) for row in self._ghost_residuals),
+            },
+            "observable_residual_ghost_diagnostics": {
+                **self.observable_ghost_router.diagnostics,
+                "residual_count": len(self._observable_ghost_residuals),
+                "residual_nonzero_count": sum(
+                    abs(row) > 1e-12
+                    for row in self._observable_ghost_residuals
+                ),
+                "residual_mean": _optional_mean(
+                    self._observable_ghost_residuals
+                ),
+                "residual_mean_absolute": _optional_mean(
+                    abs(row) for row in self._observable_ghost_residuals
+                ),
+                "min_global_support": (
+                    self.observable_ghost_router.min_global_support
+                ),
+                "min_pattern_support": (
+                    self.observable_ghost_router.min_pattern_support
+                ),
+                "min_local_support": (
+                    self.observable_ghost_router.min_local_support
+                ),
+                "min_exploration_support": (
+                    self.observable_ghost_router.min_exploration_support
+                ),
             },
             "ghost_hierarchy": {
                 "species_identity": "effect+typed_motif",
@@ -1022,6 +1299,9 @@ class V4PrequentialRunner:
             "arm_summaries": summaries,
             "gate": gate,
             "ghost_cal_gate": ghost_cal_gate,
+            "observable_residual_ghost_cal_gate": (
+                observable_residual_ghost_cal_gate
+            ),
             "repository_sha256": {
                 arm: repository.repository_hash()
                 for arm, repository in sorted(repositories.items())
@@ -1154,12 +1434,13 @@ def _ghost_cal_gate(
     partitions: Mapping[str, str],
     samples: int,
     seed: int,
+    treatment_arm: str = "ghost_hierarchy_v1",
 ) -> dict[str, object]:
     by_key = {(row.case_id, row.arm_id): row for row in outcomes}
     families = {
         row.family_id
         for row in outcomes
-        if row.arm_id == "ghost_hierarchy_v1"
+        if row.arm_id == treatment_arm
         and partitions[row.case_id] == "ghost_cal"
     }
     comparisons: dict[str, object] = {}
@@ -1167,7 +1448,7 @@ def _ghost_cal_gate(
         by_family: dict[str, list[float]] = {family: [] for family in families}
         for row in outcomes:
             if (
-                row.arm_id == "ghost_hierarchy_v1"
+                row.arm_id == treatment_arm
                 and partitions[row.case_id] == "ghost_cal"
             ):
                 by_family[row.family_id].append(
@@ -1190,6 +1471,7 @@ def _ghost_cal_gate(
     primary = comparisons["full_v4_observable"]
     return {
         "partition": "ghost_cal",
+        "treatment_arm": treatment_arm,
         "updates_allowed": False,
         "primary_baseline": "full_v4_observable",
         "oracle_comparisons_affect_decision": False,

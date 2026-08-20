@@ -200,3 +200,82 @@ structural smoke scores into recovery claims.
 ## Legacy runners
 
 Older runners remain in the package for diagnostics and appendix evidence. They should not be cited as headline classification experiments unless `EXPERIMENT.md` explicitly promotes them back into the claim chain.
+
+## B-scheme staged entrypoints
+
+The complete B-plan experiment surface is:
+
+| Experiment | Entrypoint | Required input |
+|---|---|---|
+| E1 | `experiments.e1_sealed_confirmation` (`seal`, `verify`, `audit`) | closed anchor JSONL, frozen dataset, externally produced held-out scores |
+| E2 | `experiments.e2_typed_identifiability` | lineage-merged typed V4 cases and merge manifest |
+| E3 | `experiments.poison_density_sweep` | frozen sweep parameters (zero calls) |
+| E4 | `experiments.v4_prequential_runner` | typed V4 cases, frozen evaluator/protocol and merge manifest |
+| E4b | `experiments.e4b_descriptor_policy` | the same typed cases, budget and merge manifest |
+| E5 | `experiments.e5_competitor_matrix` | closed curator JSONL with source IDs for every system |
+
+The shell exposes `b_e1_seal`, `b_e1_verify`, `b_e1_audit`, `b_e2`, `b_e3`,
+`b_e4`, `b_e4b`, and `b_e5`. E1 seal/verify must happen before result access;
+E1 audit is one-shot and happens only after external held-out scores exist.
+
+The shell orchestrator exposes a fail-closed, user-triggered stage sequence for
+the governance/lineage follow-up path:
+
+```text
+v4_single_gpu (or v4_gpu0 + v4_gpu1)
+  -> b_materialization_merge
+  -> b_preflight
+  -> b_e1_seal -> b_e1_verify
+  -> v4_lineage_plan
+  -> v4_followup_capture
+  -> v4_lineage_project
+  -> v4_lineage_merge
+  -> b_e2 / b_e3 / b_e4 / b_e4b
+  -> b_e1_audit / b_e5
+```
+
+`b_materialization_merge` verifies and merges the live materialization shards
+into the canonical run-local cases file and manifest, but deliberately does not
+start the old pre-lineage replay. This keeps the source replay provenance intact
+while follow-up capture and lineage enrichment are still pending.
+
+Use `./run_remaining_experiments.sh --help` to inspect the roles. The shell
+declares one capture contract for all stages:
+
+```bash
+export CMD_B_CAPTURE_BACKEND=your_capture_module:capture
+export CMD_B_SOURCE_CASES=artifacts/neuro_symbolic_evolution_v4/runs/<run>/cases.merged.jsonl
+export CMD_B_ROOT=artifacts/neuro_symbolic_evolution_v4/runs/<run>/b_plan
+export CMD_B_SOURCE_MATERIALIZATION_MANIFEST=artifacts/neuro_symbolic_evolution_v4/runs/<run>/cases.merged.jsonl.manifest.json
+export CMD_B_SOURCE_EXPORT_SCHEMA=claude-tap-normalized-v1
+export CMD_B_SOURCE_EXPORT_SHA256=<sha256-of-source-export>
+```
+
+`b_preflight` reports module availability and paths only. It does not execute an
+experiment. Each named role must be invoked explicitly by the user and fails
+closed if its expected Python module entrypoint is unavailable. Capture input,
+output, backend, lineage root, and protocol manifest must remain bound to the
+same run; downstream analysis must not synthesize missing capture evidence.
+
+`CMD_B_CAPTURE_BACKEND` has no default: the experiment runner itself is not a
+capture backend. The callable must accept one frozen plan mapping and return
+the v2 result documented by `python -m experiments.v4_followup_capture --help`.
+The source schema/hash variables are available to that backend through the
+environment; the backend must copy their verified values into its closed
+result.
+
+The lineage projection receives the frozen selections file explicitly. The
+lineage merge then binds all three manifests:
+source-materialization → capture → projected lineage. A merge without these
+hash-chain inputs is rejected by the dataset module and must not feed E2/E4/E4b.
+Capture backend v2 must also provide the required `source_export_schema` and
+`source_export_sha256`. A `claude-tap` capture is `VERIFIED` only when it
+declares exactly `claude-tap-normalized-v1` and its source-export hash is a
+valid matching SHA-256; declaration without a valid hash is rejected. E2, E4,
+and E4b consume `b_plan/lineage/cases.typed.jsonl` plus its merge manifest,
+never the pre-lineage materialization directly.
+
+E4b additionally writes `ecology_ledger.jsonl` and `ecology_summary.json` with
+niche snapshot, transition, discovery-pressure, rejected-transition, and legal
+transition-rate counts. These are post-outcome descriptive appendix evidence;
+the manifest records `affects_headline_decision=false`.

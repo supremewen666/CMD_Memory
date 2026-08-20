@@ -204,6 +204,8 @@ def get_legal_actions(
             actions.append(PipelineAction.SAFETY_ERROR)
 
     if include_item_actions:
+        if isinstance(intervention_config, dict) and intervention_config.get("metadata_decoupling"):
+            raise ValueError("metadata-decoupling is a falsification arm, not a legal runtime action")
         actions.extend(_legal_item_actions(recall_set, intervention_config))
 
     return actions
@@ -659,9 +661,26 @@ def _legal_item_actions(
     recall_set: tuple[MemoryItem, ...],
     intervention_config: dict[str, Any] | None,
 ) -> list[PipelineAction]:
-    """Return gold-free item actions whose structural preconditions are visible."""
+    """Return gold-free item actions whose structural preconditions are visible.
+
+    ``ITEM_STALE`` reads its recency ordering out of ``MemoryItem.store`` (see
+    :func:`_item_timestamp`).  On a *constructed* substrate that field is a
+    construction marker rather than an observed write time, so proposing the
+    action there measures the fixture's authoring order, not memory staleness.
+    Callers on constructed substrates must therefore pass
+    ``intervention_config["store_timestamps_are_observed"] = False`` to withhold
+    it; the default stays permissive so recorded traces that carry real write
+    times are unaffected.
+    """
     actions: list[PipelineAction] = []
-    if len(_timestamped_items(recall_set)) >= 2:
+    stale_admissible = True
+    if isinstance(intervention_config, dict):
+        if intervention_config.get("zero_call_substrate"):
+            stale_admissible = False
+        stale_admissible = bool(
+            intervention_config.get("store_timestamps_are_observed", stale_admissible)
+        )
+    if stale_admissible and len(_timestamped_items(recall_set)) >= 2:
         actions.append(PipelineAction.ITEM_STALE)
     if len(recall_set) >= 2:
         actions.append(PipelineAction.ITEM_CONFLICT)

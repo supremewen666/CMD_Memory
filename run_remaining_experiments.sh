@@ -36,6 +36,13 @@ VLLM_QWEN_GPU_MEMORY_UTILIZATION="${VLLM_QWEN_GPU_MEMORY_UTILIZATION:-0.25}"
 VLLM_CROSSJUDGE_GPU_MEMORY_UTILIZATION="${VLLM_CROSSJUDGE_GPU_MEMORY_UTILIZATION:-0.22}"
 VLLM_LLAMA_GPU_MEMORY_UTILIZATION="${VLLM_LLAMA_GPU_MEMORY_UTILIZATION:-0.50}"
 
+# ── B-scheme lineage/capture wiring ─────────────────────────────────────────
+# The backend has no fake/default implementation.  It must be an actual
+# module:function callable that returns the closed v2 capture result.
+B_CAPTURE_BACKEND="${CMD_B_CAPTURE_BACKEND:-}"
+B_SOURCE_EXPORT_SCHEMA="${CMD_B_SOURCE_EXPORT_SCHEMA:-}"
+B_SOURCE_EXPORT_SHA256="${CMD_B_SOURCE_EXPORT_SHA256:-}"
+
 # ── Arguments ────────────────────────────────────────────────────────────────
 ROLE=""
 SMOKE=false
@@ -71,6 +78,30 @@ while [[ $# -gt 0 ]]; do
       echo "  v4_gpu0:       materialize SHA256(case_id)%2 == 0 on GPU 0"
       echo "  v4_gpu1:       materialize SHA256(case_id)%2 == 1 on GPU 1"
       echo "  v4_merge:      preflight, verify single/dual shards, then canonical eight-arm replay"
+      echo ""
+      echo "B-scheme roles (explicit user-triggered stages):"
+      echo "  b_materialization_merge: verify and merge live shards without running pre-lineage E4"
+      echo "  b_preflight:   validate B module availability, protocol, and capture paths"
+      echo "  b_e1_seal:     seal E1 dataset/anchors/arms/seeds before experiment access"
+      echo "  b_e1_verify:   verify the sealed E1 registration before execution"
+      echo "  b_e1_audit:    one-shot held-out E1 audit after scores exist"
+      echo "  v4_lineage_plan:       freeze lineage plan and capture contract"
+      echo "  v4_followup_capture:   capture follow-up evidence with the configured backend"
+      echo "  v4_lineage_project:    project captured lineage into the frozen plan"
+      echo "  v4_lineage_merge:      merge lineage shards and emit the B manifest"
+      echo "  b_e2:          typed E2 coverage-gated audit"
+      echo "  b_e3:          poison-density sweep"
+      echo "  b_e4:          Mix GHOST channel ablation"
+      echo "  b_e4b:         descriptor/random/unkeyed ecology audit"
+      echo "  b_e5:          source-bound competitor coverage matrix"
+      echo "  B stage order: v4_single_gpu (or v4_gpu0 + v4_gpu1) ->"
+      echo "                 b_materialization_merge -> b_preflight -> b_e1_seal -> b_e1_verify ->"
+      echo "                 v4_lineage_plan -> v4_followup_capture ->"
+      echo "                 v4_lineage_project -> v4_lineage_merge -> b_e2/b_e3/b_e4/b_e4b/b_e5"
+      echo "                 -> b_e1_audit/b_e5"
+      echo "  B env: CMD_B_CAPTURE_BACKEND (required), CMD_B_SOURCE_CASES, CMD_B_ROOT,"
+      echo "         CMD_B_SOURCE_MATERIALIZATION_MANIFEST"
+      echo "         CMD_B_SOURCE_EXPORT_SCHEMA, CMD_B_SOURCE_EXPORT_SHA256"
       echo "  monitor:       stream lifecycle + experiment JSONL for --run-id"
       echo "  status|stop:   inspect/terminate --target-role under --run-id"
       echo ""
@@ -149,6 +180,24 @@ LOG_FILE="${CMD_VLLM_LOG_FILE:-/tmp/vllm_shared_${LANE_LABEL}.log}"
 JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://localhost:${LLAMA_JUDGE_PORT}/v1}"
 V4_RUN_ROOT="${V4_ARTIFACTS}/runs/${RUN_ID}"
 CMD_RUN_DIR="${CMD_RUN_DIR:-${RUNS_ROOT}/${RUN_ID}/${ROLE}}"
+B_SOURCE_CASES="${CMD_B_SOURCE_CASES:-${V4_RUN_ROOT}/cases.merged.jsonl}"
+B_SOURCE_MATERIALIZATION_MANIFEST="${CMD_B_SOURCE_MATERIALIZATION_MANIFEST:-${B_SOURCE_CASES}.manifest.json}"
+B_ROOT="${CMD_B_ROOT:-${V4_RUN_ROOT}/b_plan}"
+B_CAPTURE_PLAN="${B_ROOT}/lineage/capture_plan.jsonl"
+B_SELECTIONS="${B_ROOT}/lineage/selections.jsonl"
+B_PLAN_MANIFEST="${B_ROOT}/lineage/plan.manifest.json"
+B_NORMALIZED="${B_ROOT}/lineage/normalized.jsonl"
+B_CAPTURE_MANIFEST="${B_ROOT}/lineage/capture.manifest.json"
+B_LINEAGE="${B_ROOT}/lineage/lineage.jsonl"
+B_LINEAGE_MANIFEST="${B_ROOT}/lineage/lineage.manifest.json"
+B_TYPED_CASES="${B_ROOT}/lineage/cases.typed.jsonl"
+B_TYPED_MANIFEST="${B_ROOT}/lineage/cases.typed.manifest.json"
+B_E1_ANCHORS="${CMD_B_E1_ANCHORS:-}"
+B_E1_REGISTRATION="${B_ROOT}/E1/registration.json"
+B_E1_PREFLIGHT="${B_ROOT}/E1/preflight.json"
+B_E1_SCORES="${CMD_B_E1_SCORES:-}"
+B_E1_AUDIT="${B_ROOT}/E1/audit.json"
+B_E5_INPUT="${CMD_B_E5_INPUT:-}"
 
 if $DETACH; then
   case "$ROLE" in
@@ -1343,6 +1392,272 @@ main_v4_merge() {
   echo "===== V4 CANONICAL REPLAY DONE: ${replay}/report.json ====="
 }
 
+# ══════════════════════════════════════════════════════════════════════════════
+# B scheme: lineage/capture plan and claim-bounded follow-up stages
+# ══════════════════════════════════════════════════════════════════════════════
+
+main_b_materialization_merge() {
+  local materialized="${V4_RUN_ROOT}/materialized"
+  local merged="$B_SOURCE_CASES"
+  local expected_args=(--expected-source "$V4_SOURCE_CASES")
+  local single_shard="${materialized}/single_gpu.jsonl"
+  local gpu0_shard="${materialized}/gpu0.jsonl"
+  local gpu1_shard="${materialized}/gpu1.jsonl"
+  local shard_args=()
+  $SMOKE && expected_args=()
+
+  if [[ "$merged" != "${V4_RUN_ROOT}/cases.merged.jsonl" ]]; then
+    echo "ERROR: b_materialization_merge writes the canonical run-local cases.merged.jsonl;" >&2
+    echo "       unset CMD_B_SOURCE_CASES for this stage, then override it only downstream if needed." >&2
+    return 1
+  fi
+  if [[ -f "$single_shard" ]]; then
+    if [[ -f "$gpu0_shard" || -f "$gpu1_shard" ]]; then
+      echo "ERROR: refusing ambiguous single/dual materialization shards" >&2
+      return 1
+    fi
+    shard_args=(--shard "$single_shard")
+  else
+    for shard in "$gpu0_shard" "$gpu1_shard"; do
+      if [[ ! -f "$shard" ]]; then
+        echo "ERROR: missing materialization shard: ${shard}" >&2
+        echo "Run v4_single_gpu on one A100, or both v4_gpu0 and v4_gpu1." >&2
+        return 1
+      fi
+    done
+    shard_args=(--shard "$gpu0_shard" --shard "$gpu1_shard")
+  fi
+
+  python -m experiments.v4_materialization merge \
+    "${shard_args[@]}" \
+    "${expected_args[@]}" \
+    --output "$merged"
+  echo "===== B LIVE MATERIALIZATION MERGED (no replay): ${merged} ====="
+}
+
+B_MODULES=(
+  experiments.b_plan_experiment_suite
+  experiments.e1_sealed_confirmation
+  experiments.v4_lineage_dataset
+  experiments.v4_followup_capture
+  cmd_audit.adapters.session_lineage_cli
+  experiments.e2_typed_identifiability
+  experiments.poison_density_sweep
+  experiments.v4_prequential_runner
+  experiments.e4b_descriptor_policy
+  experiments.e5_competitor_matrix
+)
+
+require_b_module() {
+  local module="$1"
+  python - "$module" <<'PY'
+import importlib.util
+import sys
+module = sys.argv[1]
+if importlib.util.find_spec(module) is None:
+    raise SystemExit(f"B role requires module entrypoint: {module}")
+PY
+}
+
+main_b_preflight() {
+  echo "===== B PREFLIGHT (no experiment execution) ====="
+  if [[ -z "$B_CAPTURE_BACKEND" ]]; then
+    echo "ERROR: set CMD_B_CAPTURE_BACKEND=module:function" >&2
+    return 1
+  fi
+  echo "capture_backend=${B_CAPTURE_BACKEND}"
+  echo "source_cases=${B_SOURCE_CASES}"
+  echo "b_root=${B_ROOT}"
+  local module
+  for module in "${B_MODULES[@]}"; do
+    if python - "$module" <<'PY'
+import importlib.util
+import sys
+raise SystemExit(0 if importlib.util.find_spec(sys.argv[1]) else 1)
+PY
+    then
+      echo "[module] available ${module}"
+    else
+      echo "ERROR: missing B module ${module}" >&2
+      return 1
+    fi
+  done
+  python - "$B_CAPTURE_BACKEND" "$V4_SOURCE_CASES" "$B_SOURCE_CASES" \
+    "$B_SOURCE_MATERIALIZATION_MANIFEST" "$V4_GHOST_EVALUATOR" \
+    "$V4_GHOST_PROTOCOL" "$V4_CANDIDATE_BUDGET" <<'PY'
+import hashlib
+import importlib
+import json
+from pathlib import Path
+import sys
+
+locator, *raw_paths, budget = sys.argv[1:]
+module, separator, name = locator.partition(":")
+if not separator or not callable(getattr(importlib.import_module(module), name, None)):
+    raise SystemExit("capture backend must be a callable module:function")
+prepared, cases, materialization, evaluator, protocol = map(Path, raw_paths)
+for path in (prepared, cases, materialization, evaluator, protocol):
+    if not path.is_file():
+        raise SystemExit(f"missing frozen B input: {path}")
+manifest = json.loads(materialization.read_text(encoding="utf-8"))
+digest = hashlib.sha256(cases.read_bytes()).hexdigest()
+if manifest.get("output_sha256") != digest:
+    raise SystemExit("source materialization manifest does not bind source cases")
+from experiments.v4_prequential_runner import load_cases
+rows = load_cases(cases)
+if any(len(row.intents) != int(budget) for row in rows):
+    raise SystemExit("candidate budget is not aligned across source cases")
+print(json.dumps({"case_count": len(rows), "candidate_budget": int(budget), "cases_sha256": digest}, sort_keys=True))
+PY
+  echo "B preflight passed; invoke each named B role explicitly."
+}
+
+run_b_module() {
+  local module="$1"
+  shift
+  require_b_module "$module"
+  python -m "$module" "$@"
+}
+
+main_b_stage() {
+  local role="$1"
+  case "$role" in
+    b_e1_seal)
+      if [[ -z "$B_E1_ANCHORS" ]]; then
+        echo "ERROR: set CMD_B_E1_ANCHORS to the closed anchor JSONL" >&2
+        return 1
+      fi
+      local e1_arm_args=()
+      local e1_arms=()
+      local e1_arm
+      read -r -a e1_arms <<< "${CMD_B_E1_ARMS:-full_v4_observable ghost_ecology}"
+      for e1_arm in "${e1_arms[@]}"; do
+        [[ -n "$e1_arm" ]] && e1_arm_args+=(--arm "$e1_arm")
+      done
+      local e1_seed_args=()
+      local e1_seeds=()
+      local e1_seed
+      read -r -a e1_seeds <<< "${CMD_B_E1_SEEDS:-24 25 26 27 28}"
+      for e1_seed in "${e1_seeds[@]}"; do
+        if [[ ! "$e1_seed" =~ ^-?[0-9]+$ ]]; then
+          echo "ERROR: invalid CMD_B_E1_SEEDS value: ${e1_seed}" >&2
+          return 1
+        fi
+        e1_seed_args+=(--seed "$e1_seed")
+      done
+      local e1_thresholds="${CMD_B_E1_THRESHOLDS_JSON:-}"
+      if [[ -z "$e1_thresholds" ]]; then
+        e1_thresholds='{"max_anchor_mean_absolute_deviation":0.1}'
+      fi
+      run_b_module experiments.e1_sealed_confirmation seal \
+        --dataset "$B_SOURCE_CASES" --anchors "$B_E1_ANCHORS" \
+        --output "$B_E1_REGISTRATION" \
+        --protocol-id "${CMD_B_E1_PROTOCOL_ID:-cmd-b-e1-${RUN_ID}}" \
+        --anchor-set-id "${CMD_B_E1_ANCHOR_SET_ID:-cmd-b-anchors-v1}" \
+        "${e1_arm_args[@]}" --primary-metric anchor_mean_absolute_deviation \
+        --thresholds-json "$e1_thresholds" "${e1_seed_args[@]}" ;;
+    b_e1_verify)
+      if [[ -z "$B_E1_ANCHORS" ]]; then
+        echo "ERROR: set CMD_B_E1_ANCHORS to the sealed anchor JSONL" >&2
+        return 1
+      fi
+      run_b_module experiments.e1_sealed_confirmation verify \
+        --registration "$B_E1_REGISTRATION" --dataset "$B_SOURCE_CASES" \
+        --anchors "$B_E1_ANCHORS" --output "$B_E1_PREFLIGHT" ;;
+    b_e1_audit)
+      if [[ -z "$B_E1_ANCHORS" || -z "$B_E1_SCORES" ]]; then
+        echo "ERROR: set CMD_B_E1_ANCHORS and CMD_B_E1_SCORES" >&2
+        return 1
+      fi
+      run_b_module experiments.e1_sealed_confirmation audit \
+        --registration "$B_E1_REGISTRATION" --dataset "$B_SOURCE_CASES" \
+        --anchors "$B_E1_ANCHORS" --scores "$B_E1_SCORES" \
+        --output "$B_E1_AUDIT" ;;
+    v4_lineage_plan)
+      run_b_module experiments.v4_lineage_dataset plan \
+        --prepared "$V4_SOURCE_CASES" --cases "$B_SOURCE_CASES" \
+        --capture-output "$B_CAPTURE_PLAN" \
+        --selections-output "$B_SELECTIONS" \
+        --manifest "$B_PLAN_MANIFEST" ;;
+    v4_followup_capture)
+      if [[ -z "$B_CAPTURE_BACKEND" ]]; then
+        echo "ERROR: set CMD_B_CAPTURE_BACKEND=module:function" >&2
+        return 1
+      fi
+      run_b_module experiments.v4_followup_capture \
+        --plan "$B_CAPTURE_PLAN" --backend "$B_CAPTURE_BACKEND" \
+        --output "$B_NORMALIZED" \
+        --manifest "$B_CAPTURE_MANIFEST" ;;
+    v4_lineage_project)
+      run_b_module cmd_audit.adapters.session_lineage_cli \
+        --source "$B_NORMALIZED" --selections "$B_SELECTIONS" \
+        --output "$B_LINEAGE" \
+        --manifest "$B_LINEAGE_MANIFEST" ;;
+    v4_lineage_merge)
+      run_b_module experiments.v4_lineage_dataset merge \
+        --cases "$B_SOURCE_CASES" --lineage "$B_LINEAGE" \
+        --output "$B_TYPED_CASES" \
+        --manifest "$B_TYPED_MANIFEST" \
+        --source-materialization-manifest "$B_SOURCE_MATERIALIZATION_MANIFEST" \
+        --capture-manifest "$B_CAPTURE_MANIFEST" \
+        --lineage-manifest "$B_LINEAGE_MANIFEST" ;;
+    b_e2)
+      local e2_seed_args=()
+      local e2_seeds=()
+      local e2_seed
+      read -r -a e2_seeds <<< "${CMD_B_E2_SEEDS:-24 25 26 27 28}"
+      for e2_seed in "${e2_seeds[@]}"; do
+        if [[ ! "$e2_seed" =~ ^-?[0-9]+$ ]]; then
+          echo "ERROR: invalid CMD_B_E2_SEEDS value: ${e2_seed}" >&2
+          return 1
+        fi
+        e2_seed_args+=(--seed "$e2_seed")
+      done
+      run_b_module experiments.e2_typed_identifiability \
+        --cases "$B_TYPED_CASES" --output-dir "$B_ROOT/E2" \
+        "${e2_seed_args[@]}" \
+        --bootstrap-samples "${CMD_B_BOOTSTRAP_SAMPLES:-10000}" \
+        --materialization-manifest "$B_TYPED_MANIFEST" ;;
+    b_e3)
+      run_b_module experiments.poison_density_sweep \
+        --output "$B_ROOT/E3/report.json" \
+        --recall-size "${CMD_B_E3_RECALL_SIZE:-10}" \
+        --max-density "${CMD_B_E3_MAX_DENSITY:-0.9}" \
+        --threshold "${CMD_B_E3_THRESHOLD:-0.6}" \
+        --cases-per-cell "${CMD_B_E3_CASES_PER_CELL:-5}" ;;
+    b_e4)
+      run_b_module experiments.v4_prequential_runner \
+        --cases "$B_TYPED_CASES" --output-dir "$B_ROOT/E4" \
+        --candidate-budget "$V4_CANDIDATE_BUDGET" \
+        --ghost-evaluator "$V4_GHOST_EVALUATOR" \
+        --ghost-protocol "$V4_GHOST_PROTOCOL" \
+        --materialization-manifest "$B_TYPED_MANIFEST" \
+        --ghost-feedback-mode prospective_deployment \
+        --bootstrap-samples "${CMD_B_BOOTSTRAP_SAMPLES:-10000}" \
+        --bootstrap-seed "${CMD_B_BOOTSTRAP_SEED:-24}" \
+        --primary-baseline "${CMD_V4_PRIMARY_BASELINE:-global_policy}" ;;
+    b_e4b)
+      run_b_module experiments.e4b_descriptor_policy \
+        --cases "$B_TYPED_CASES" --output-dir "$B_ROOT/E4b" \
+        --candidate-budget "$V4_CANDIDATE_BUDGET" \
+        --materialization-manifest "$B_TYPED_MANIFEST" \
+        --bootstrap-samples "${CMD_B_BOOTSTRAP_SAMPLES:-10000}" \
+        --bootstrap-seed "${CMD_B_BOOTSTRAP_SEED:-24}" \
+        --ecology-window-size "${CMD_B_E4B_ECOLOGY_WINDOW_SIZE:-50}" ;;
+    b_e5)
+      if [[ -z "$B_E5_INPUT" ]]; then
+        echo "ERROR: set CMD_B_E5_INPUT to the closed, cited competitor JSONL" >&2
+        return 1
+      fi
+      run_b_module experiments.e5_competitor_matrix \
+        --input "$B_E5_INPUT" --output-json "$B_ROOT/E5/report.json" \
+        --output-csv "$B_ROOT/E5/comparisons.csv" ;;
+    *)
+      echo "ERROR: unknown B stage: ${role}" >&2
+      return 1 ;;
+  esac
+}
+
 main_control_status() {
   if [[ -z "$TARGET_ROLE" ]]; then
     echo "ERROR: status/stop requires --target-role" >&2
@@ -1393,6 +1708,20 @@ case "$ROLE" in
   v4_gpu0)        main_v4_gpu0 ;;
   v4_gpu1)        main_v4_gpu1 ;;
   v4_merge)       main_v4_merge ;;
+  b_materialization_merge) main_b_materialization_merge ;;
+  b_preflight)    main_b_preflight ;;
+  b_e1_seal)      main_b_stage b_e1_seal ;;
+  b_e1_verify)    main_b_stage b_e1_verify ;;
+  b_e1_audit)     main_b_stage b_e1_audit ;;
+  v4_lineage_plan) main_b_stage v4_lineage_plan ;;
+  v4_followup_capture) main_b_stage v4_followup_capture ;;
+  v4_lineage_project) main_b_stage v4_lineage_project ;;
+  v4_lineage_merge) main_b_stage v4_lineage_merge ;;
+  b_e2)           main_b_stage b_e2 ;;
+  b_e3)           main_b_stage b_e3 ;;
+  b_e4)           main_b_stage b_e4 ;;
+  b_e4b)          main_b_stage b_e4b ;;
+  b_e5)           main_b_stage b_e5 ;;
   monitor)        main_monitor ;;
   status|stop)    main_control_status ;;
   *)

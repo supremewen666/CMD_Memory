@@ -1,5 +1,169 @@
 # Experiment Results — Counterfactual Memory Evolution Governance
 
+## Phase 6 v6 zero-call execution (2026-08-20)
+
+See `experiment_analysis/analysis_zero_call_e2_e4_v6.md` for the complete
+command, hash, and claim-boundary ledger. The frozen v6 gate was
+`PASS_ZERO_CALL_AUDIT_ONLY`; 103 directed tests passed, compileall and
+`git diff --check` passed, and there were zero network/model/API calls.
+
+- **E2:** New enrichment has 543 rows / 2,172 intents, zero mismatches, and
+  `model_calls_new=0`. Seeds 24–28 all return
+  `BLOCKED_TYPED_EVIDENCE_UNAVAILABLE`; observed candidate coverage is 0.1713,
+  below the frozen 0.50 gate. Claim statistics are JSON null and controls are
+  `NOT_RUN_COVERAGE_BLOCKED`.
+- **E3:** The new deterministic 10-cell sweep (recall-size 10, max density 0.9,
+  threshold 0.6, 5 cases/cell) uses zero model calls. Anchored contrast remains
+  F1=1.0 across positive densities; minority and LOO detectors invert at 0.6.
+- **E4:** Existing V4 runner completed with `prospective_deployment`, 543 cases,
+  candidate budget 4, bootstrap 10,000/seed 24, and zero calls. Development
+  gates failed; all real follow-up/actionability/delayed/no-regression/router
+  claims remain blocked because no normalized claude-tap lineage exists.
+
+## Phase 5 execution record (2026-08-20, B protocol)
+
+This section is the current Phase-5 ledger. All rows below distinguish real
+local execution from unavailable sealed/live or external comparisons. No smoke
+or fixture value is used as a headline metric. The protocol anchor is
+`task.md` + `plan_res.md`; `iterations/judge_v3.md` was verified as
+`verdict: PASS` before execution.
+
+### Protocol / provenance audit
+
+- Review gate: `[RESULT] judge=iterations/judge_v3.md verdict=PASS`.
+- Main zero-call case stream:
+  `artifacts/neuro_symbolic_evolution_v4/neuro_symbolic_evolution_v4/runs/v7-001/cases.merged.jsonl`;
+  3,100 cases; SHA-256
+  `52569b23e71fe1750a0b3e037670587b0f485df2fa250bd04a24537d61f3d522`.
+- E4 V4 case stream recorded in the existing run manifest as the same hash;
+  candidate budget 4, bootstrap 10,000, bootstrap seed 24.
+- E2 semantic vocabulary was frozen from the dev-prefix and reports
+  `vocabulary_sha256=21787cff3f962392124b9e750b68dbee67b76e34587737a965a1b1c8a860917a`;
+  runtime `feedback_uses_gold=false`, model calls 0.
+- No command timed out or truncated output. E1/E4b/E5 were not substituted by
+  smoke/fixture runs.
+
+### E1 — sealed/live confirmatory model experiment
+
+`[BLOCKED]` Not executed. The repository does not contain the required sealed
+authorization/model snapshot and independent-source attestation for a fresh
+`ghost_test_rep`/`ghost_test_new` run; existing live artifacts are preflight or
+blocked records. Per protocol, no fixture or prior development replay is used
+as confirmation.
+
+### E2 — telemetry-CMIS vs replay-CMIS and placebo/permutation
+
+`[RESULT]` Executed with:
+
+```text
+python -m experiments.ghost_ecology_zero_call \
+  --cases artifacts/neuro_symbolic_evolution_v4/neuro_symbolic_evolution_v4/runs/v7-001/cases.merged.jsonl \
+  --output artifacts/phase5_e2_20260820_seed24.json \
+  --bootstrap-samples 10000 --seed 24 --decoupling-seed 91
+```
+
+The run is a real local zero-call development identifiability audit (not a
+router-performance or sealed-live claim): 3,100 cases / 796 families / 12,400
+candidate observations, model calls 0. The telemetry arm is
+`BLOCKED_FEEDBACK_NOT_IDENTIFIABLE`: family-macro Pearson `0.0036162454`,
+one-sided 95% bootstrap lower bound `-0.0662486454`, pairwise concordance
+`0.6249671485` (thresholds 0.20 / 0.10 / 0.55). Both positive controls
+collapsed as required: permutation Pearson `0.0421625456`, placebo Pearson
+`-0.0597322608`. Thus the controls do not indicate a telemetry shortcut, but
+the true telemetry-CMIS claim does not pass. No domain × failure_type pair
+passes the frozen router threshold; the router claim remains conditional and
+unverified.
+
+### E2-v2.2 typed-wired coverage-gated rerun
+
+The earlier v2/v2.1 artifacts and their Pearson tables were invalid as typed-v2
+evidence and are no longer referenced. E2-v1 above remains the historical
+real negative result. The v2.2 protocol manifest is
+`cmd-ghost-ecology-identifiability-v2.2-typed-wired-coverage-gated`, SHA-256
+`2ea9d12669609ec78f14ef92c395d1e81bc8cbc1daad14d92362e5aeeef14bdf`; feedback
+schema is `cmd-ghost-skill-conditioned-feedback-v2.2-typed-wired-coverage-gated`.
+Thresholds remain 0.20 / 0.10 / 0.55 / 0.50. Reference is materialized
+`recovery_gain` shadow, not fresh replay-CMIS.
+
+All five protocol-consistency runs used the same cases SHA-256
+`52569b23e71fe1750a0b3e037670587b0f485df2fa250bd04a24537d61f3d522`, 10,000
+bootstrap setting, decoupling seed 91, and model_calls=0. Because coverage
+blocked before estimation, the seed variation does not constitute bootstrap
+robustness evidence.
+
+| seed | artifact | observed / total | unknown / total | pairwise coverage | estimator quality | decision |
+|---:|---|---:|---:|---:|---|---|
+| 24 | `artifacts/phase5_e2_v2_2_coverage_gated_20260820_seed24.json` | 0/12,400 | 12,400/12,400 | 0.0 | UNMEASURED | BLOCKED_TYPED_EVIDENCE_UNAVAILABLE |
+| 25 | `artifacts/phase5_e2_v2_2_coverage_gated_20260820_seed25.json` | 0/12,400 | 12,400/12,400 | 0.0 | UNMEASURED | BLOCKED_TYPED_EVIDENCE_UNAVAILABLE |
+| 26 | `artifacts/phase5_e2_v2_2_coverage_gated_20260820_seed26.json` | 0/12,400 | 12,400/12,400 | 0.0 | UNMEASURED | BLOCKED_TYPED_EVIDENCE_UNAVAILABLE |
+| 27 | `artifacts/phase5_e2_v2_2_coverage_gated_20260820_seed27.json` | 0/12,400 | 12,400/12,400 | 0.0 | UNMEASURED | BLOCKED_TYPED_EVIDENCE_UNAVAILABLE |
+| 28 | `artifacts/phase5_e2_v2_2_coverage_gated_20260820_seed28.json` | 0/12,400 | 12,400/12,400 | 0.0 | UNMEASURED | BLOCKED_TYPED_EVIDENCE_UNAVAILABLE |
+
+Candidate/family Pearson, bootstrap LB, pairwise concordance, and comparable
+pair count are JSON null. Controls are `NOT_RUN_COVERAGE_BLOCKED`, not
+collapsed. Semantic context coverage is 3,100/3,100; failure_type coverage is
+unavailable and no labels were imputed. The conclusion is data-availability
+negative, not a typed estimator correlation result. Next step: fresh live
+materialization of typed execution evidence.
+
+### E3 — poison-density sweep
+
+`[RESULT]` Executed with:
+
+```text
+python -m experiments.poison_density_sweep \
+  --output artifacts/phase5_e3_poison_density_20260820.json \
+  --recall-size 10 --max-density 0.9 --threshold 0.6 --cases-per-cell 5
+```
+
+Real deterministic local construct-side sweep, model calls 0, 10 density
+cells (0.0–0.9) × 5 cases/cell, no timeout/truncation. `anchored_contrast`
+retained F1 `1.00` at every positive density; `minority_vote` and
+`loo_reconstruction` were F1 `1.00` through 0.4, then degraded at 0.5 and
+inverted at 0.6–0.9. Scope is the documented lexical-agreement oracle, not a
+judge-in-loop end-to-end detector headline.
+
+### E4 — Mix GHOST channel ablation
+
+`[RESULT]` Existing real local V4 zero-call prequential artifact reused under
+its frozen manifest (not rerun and not treated as sealed/live):
+`artifacts/neuro_symbolic_evolution_v4/ghost_ecology_v3/prequential-zero-call-industry-optimized-seed24/report.json`.
+It has 3,100 cases, budget 4, bootstrap 10,000/seed 24, case-stream SHA-256
+`52569b23e71fe1750a0b3e037670587b0f485df2fa250bd04a24537d61f3d522`, model
+calls 0. The primary same-feedback comparison `ghost_hierarchy_v1` vs
+`full_v4_observable` is +0.0831856451 with one-sided 95% LB +0.0542759323;
+the gate passes. The report also contains the single-channel/hierarchy
+controls (`global_policy`, `hierarchical_no_chain`, `legacy_symbolic`,
+`random_k`, `identity`) and records pre-action selection with delayed proxy
+available only after selection. This supports a development-proxy ablation
+screen, not E1 or a gold-free sealed claim.
+
+### E4b — descriptor/random/unkeyed ecology identifiability
+
+`[UNVERIFIED]` No independent, claim-bearing execution was possible in the
+current environment. `experiments/niche_evolution_runner.py` exposes the
+library runner and tests, but there is no frozen real-data CLI/materialized
+outcome stream producing the required descriptor/random/unkeyed paired rows,
+occupancy, transition/discovery counts and niche gates. Existing V4
+`random_k` is not the frozen E4b `random` mapping and is not relabeled as such.
+Therefore descriptor claim support is **UNVERIFIED**; no occupancy or
+transition numbers are promoted from tests/fixtures.
+
+### E5 — external competitor comparison
+
+`[UNVERIFIED]` No authorized, comparable external implementation or fresh
+third-party substrate is available locally, and no external values were
+invented. Existing local baselines remain context-only and are not reported as
+competitor comparisons.
+
+### Phase-5 verification
+
+`python -m pytest -q -p no:cacheprovider tests/experiments/test_phase4_wiring.py
+tests/experiments/test_niche_evolution_runner.py tests/repair/test_ghost_ecology.py
+tests/experiments/test_ghost_ecology_decoupling.py tests/eval/test_telemetry_cmis.py
+tests/eval/test_niche_gates.py tests/experiments/test_poison_density_sweep.py`
+completed with `[RESULT] 63 passed in 0.35s`; `git diff --check` passed.
+
 ## Prospective live readiness gate (2026-08-14)
 
 Decision: **IMPLEMENTATION PASS; DATA/OUTCOME COLLECTION PENDING.**
