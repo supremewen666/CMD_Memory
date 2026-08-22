@@ -981,8 +981,9 @@ class FailureMemorySkill:
 class MarkdownFailureMemoryStore:
     """Three-layer markdown storage for agent-owned Failure Memory."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, strict_revisions: bool = False) -> None:
         self.root = Path(root)
+        self.strict_revisions = strict_revisions
         self.index_path = self.root / "FAILURE_MEMORY.md"
         self.cases_dir = self.root / "cases"
         self.patterns_dir = self.root / "patterns"
@@ -1006,7 +1007,7 @@ class MarkdownFailureMemoryStore:
     ) -> Path:
         self.ensure()
         path = self.cases_dir / f"{case_id}.md"
-        path.write_text(markdown, encoding="utf-8")
+        self._write_revision(path, markdown, case_id)
         self._upsert_index_line(
             "## Cases",
             f"- [{case_id}](cases/{case_id}.md) - {summary}",
@@ -1022,7 +1023,7 @@ class MarkdownFailureMemoryStore:
     ) -> Path:
         self.ensure()
         path = self.patterns_dir / f"{pattern_id}.md"
-        path.write_text(markdown, encoding="utf-8")
+        self._write_revision(path, markdown, pattern_id)
         self._upsert_index_line(
             "## Patterns",
             f"- [{pattern_id}](patterns/{pattern_id}.md) - {summary}",
@@ -1132,6 +1133,33 @@ class MarkdownFailureMemoryStore:
         insert_at = text.index(marker) + len(marker)
         text = f"{text[:insert_at]}{line}\n{text[insert_at:]}"
         self.index_path.write_text(text, encoding="utf-8")
+
+    def _write_revision(self, path: Path, markdown: str, record_id: str) -> None:
+        """Prevent accidental mutable history when strict revisions are enabled.
+
+        Legacy experiment stores retain their overwrite behaviour by default.
+        Incident-owned stores can select ``strict_revisions=True`` and must use
+        a new identifier for altered content.
+        """
+        if path.exists():
+            current = path.read_text(encoding="utf-8")
+            if current == markdown:
+                return
+            if self.strict_revisions:
+                raise ValueError(f"immutable revision conflict for {record_id}")
+        path.write_text(markdown, encoding="utf-8")
+
+    def rebuild_index(self) -> str:
+        """Deterministically regenerate the derived Markdown index from files."""
+        self.ensure()
+        cases = tuple(sorted(path.stem for path in self.cases_dir.glob("*.md")))
+        patterns = tuple(sorted(path.stem for path in self.patterns_dir.glob("*.md")))
+        text = "# Failure Memory\n\n## Cases\n"
+        text += "".join(f"- [{item}](cases/{item}.md)\n" for item in cases)
+        text += "\n## Patterns\n"
+        text += "".join(f"- [{item}](patterns/{item}.md)\n" for item in patterns)
+        self.index_path.write_text(text, encoding="utf-8")
+        return text
 
 
 @dataclass(frozen=True)

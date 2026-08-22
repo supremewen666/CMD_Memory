@@ -1,6 +1,6 @@
 {
   "schema_version": "0.1",
-  "updated_at": "2026-08-19",
+  "updated_at": "2026-08-21T11:48:14+08:00",
   "common_runtime_root": "/Users/supremewen/.codex/loopx",
   "goals": [
     {
@@ -28,6 +28,17 @@
           "write",
           "publish",
           "production-action"
+        ],
+        "registered_agents": [
+          "codex-app-experiment-diagnosis-20260821"
+        ],
+        "agent_model": "peer_v1",
+        "thread_agent_bindings": [
+          {
+            "thread_id": "01a02259-e26b-73b0-b412-6e7b08c3435b",
+            "host_surface": "codex-app",
+            "agent_id": "codex-app-experiment-diagnosis-20260821"
+          }
         ]
       },
       "execution_profile": {

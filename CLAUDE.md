@@ -2,6 +2,19 @@
 
 ## Project Summary
 
+> **Runtime contract override (2026-08-23).** The live system is now a
+> gold-free ECC memory-state correction loop:
+> `MemAudit telemetry -> EccSyndrome -> GHOST repair selection -> shadow state
+> repair -> ECC checks -> commit/rollback -> EccRepairReceipt -> incident sinks
+> + router evolution`. Runtime detection, selection, mutation, acceptance,
+> receipt creation, and router updates must never read dataset gold/labels or
+> same-trace answer replay. GHOST/Thompson updates consume
+> `EccRepairReceipt`, not task accuracy. The replay/recovery-gain design below
+> is retained as legacy/offline baseline context and does not define the live
+> loop. `CONTEXT.md` and
+> `docs/RUNTIME_EVIDENCE_BOUNDARY_CONTRACT.md` are authoritative when older
+> text conflicts with this override.
+
 CMD frames agent-memory failure diagnosis as counterfactual attribution. The runtime is a two-branch confidence gate followed by a diagnostic cascade:
 
 ```text

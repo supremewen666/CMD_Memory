@@ -2,6 +2,34 @@
 
 Domain language for Counterfactual Memory Debugger research. Defines terminology, boundaries, and rules.
 
+## Runtime ECC Contract (authoritative, 2026-08-23)
+
+The live CMD runtime is a gold-free memory-state correction loop. Immutable
+events and the real memory state produce MemAudit/structural telemetry. A
+`MemAuditEccAdapter` decodes that telemetry into exactly one `EccSyndrome`:
+`process_fault`, `state_drift`, or `adversarial_poison`. GHOST selects a legal
+repair operator, the operator runs on a shadow/copy-on-write state, and ECC
+checks syndrome resolution, invariants, roots, safety, and locality before the
+state may commit. Every attempt emits a root-bound `EccRepairReceipt`; GHOST
+updates only from that receipt.
+
+Dataset gold answers, labels, reference answers, split metadata, and answer
+replay results are sealed evaluator inputs. They may score completed artifacts
+after the runtime has finished, but may not enter incident detection, operator
+selection, memory mutation, commit acceptance, receipt construction, or router
+updates. Runtime provenance is a closed gold-free structure and fails closed
+when sealed concepts appear at any nesting depth.
+
+For the live loop, *counterfactual* means applying a candidate repair to shadow
+state and checking whether the syndrome disappears without violating ECC
+invariants. Same-trace answer replay is forbidden as causal evidence. The
+counterfactual-replay, recovery-gain, Post-Repair Context Replay, gold verifier,
+and label-action material below is retained only as legacy/offline baseline and
+external-evaluation vocabulary; it does not define the live loop.
+
+The detailed boundary is frozen in
+`docs/RUNTIME_EVIDENCE_BOUNDARY_CONTRACT.md`.
+
 ## Core Concepts
 
 **CMD** — Counterfactual Memory Debugger: diagnoses memory-augmented agent failures by replaying controlled memory-operation interventions and measuring recovery gain.

@@ -1,125 +1,130 @@
-# Data Validation — GHOST Public Four-Partition Dataset
+# Data Validation
+
+Validation time: 2026-08-21. This review is restricted to acquisition and
+protocol inputs; it makes no claim about the experiment model.
 
 ## Dataset Identity
 
-- dataset: `data/ghost_live_v2`
-- upstream sources:
-  - LoCoMo `data/locomo10.json`, fixed Git revision
-    `3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376`.
-  - Mem2ActBench `Mem2ActBench/qa_dataset.jsonl`, fixed Git revision
-    `b00726940b5abbe9bd324bdd7a2cb272f5c62a29`.
-- transformation: public benchmark content plus one deterministic, explicitly
-  disclosed stale/conflicting memory per case. This is a benchmark adaptation,
-  not a sample of naturally observed production failures.
-- expected split: `ghost_dev`, `ghost_cal`, `ghost_test_rep`, and
-  `ghost_test_new`, frozen before relation measurement or intent proposal.
+| Dataset | Official source pinned by the acquisition path | Intended protocol boundary |
+|---|---|---|
+| LongMemEval cleaned | `xiaowu0162/LongMemEval` and HF dataset `xiaowu0162/longmemeval-cleaned` | 500 shared `question_id`s across S, M, and oracle; S/M are runner input and oracle is offline scorer only. |
+| MemFail | `ishirgarg/MemFail` | Real API stress/replay only; no delayed-live-outcome claim. |
+| Evo-Bench | `RUCAIBox/Evo-Bench` | Public validation and seed only; evaluation assets must remain sealed. |
+
+The manifest currently pins Evo-Bench commit
+`e1dc9386a193cab1ee8630824c085e5e26d0c730`. It is **not closed**: its
+`datasets` section contains only `evobench`, and it records a LongMemEval
+download failure. No partial file was treated as data.
 
 ## Reality Check
 
-- files present: yes. The byte-preserved source files, selected ProbeCase
-  streams, V4 CPU bundle, partition files, source provenance, build report and
-  validation report are all present.
-- real or mock:
-  - upstream conversations, questions and tool tasks are real public benchmark
-    records;
-  - the competing memory is synthetic and is declared by
-    `synthetic_conflict_injection=true`;
-  - no row is claimed to be a delayed deployment observation;
-  - `source_provenance.json` sets `independent_source=false` and
-    `confirmatory_attestation_eligible=false`.
-- evidence:
-  - LoCoMo raw SHA-256:
-    `79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4`.
-  - Mem2ActBench QA raw SHA-256:
-    `24fc8692567e5fc16457a7e6c9ec12d68ba06245d53b315c7ced5f76a84fd039`.
-  - dataset SHA-256:
-    `5603d48f40f7f03b2b100a79a9ec220eeb4981fe7ca64392dc917b38927564b5`.
-  - 543 unique cases, 131 families and 543 runtime relation requests.
-  - builder model/API calls: 0.
-- licensing:
-  - LoCoMo is recorded as CC-BY-NC-4.0.
-  - the pinned Mem2ActBench repository contains no license file. Its rows must
-    remain research-only until the upstream author supplies explicit terms.
+### LongMemEval
 
-## Split Integrity
+- `longmemeval_s_cleaned.json` exists, is a real JSON list, and has 500 rows,
+  500 unique nonmissing string `question_id`s.
+- Its row schema is exactly `answer`, `answer_session_ids`, `haystack_dates`,
+  `haystack_session_ids`, `haystack_sessions`, `question`, `question_date`,
+  `question_id`, and `question_type`; scalar/list types are consistent in the
+  inspected rows.
+- S has 23,867 session entries. The three aligned session arrays have equal
+  length in all 500 rows. Question-type counts are: knowledge-update 78,
+  multi-session 133, single-session-assistant 56, single-session-preference
+  30, single-session-user 70, temporal-reasoning 133.
+- `longmemeval_m_cleaned.json` is presently an incomplete `.partial` file;
+  `longmemeval_oracle.json` is absent. They are not valid inputs and were not
+  parsed. Consequently S/M/oracle 500-qid equality, M schema, oracle schema,
+  and the oracle/full-history content-hash mapping cannot yet be verified.
+- The required `oracle` sidecar must stay offline scoring-only. Its absence
+  prevents a valid R1 evidence score and makes the current unscorable fraction
+  **not computable** (not zero).
 
-- `ghost_dev`: 181 cases / 36 families.
-- `ghost_cal`: 134 cases / 25 families.
-- `ghost_test_rep`: 68 cases / the same 36 represented dev families, with
-  distinct case IDs and source records.
-- `ghost_test_new`: 160 cases / 70 families absent from every other partition.
-- case overlap: 0.
-- dev/cal family overlap: 0.
-- test-represented families outside dev: 0.
-- test-new family overlap: 0.
-- dependency-group split violations: 0.
-- exact normalized-query recurrence: one group, intentionally confined to one
-  dev/test-rep family. The two rows bind different user IDs, source evidence
-  and gold tool arguments, so the repeated wording does not reveal the answer.
-- leakage risk:
-  - family IDs and partition membership are evaluation-only and do not enter
-    runtime selection features;
-  - runtime rows contain no gold/label/family fields;
-  - shadow rows retain gold and the synthetic label for post-selection scoring;
-  - the data were selected by this project, so they cannot satisfy the live
-    protocol's independent-curator attestation.
+### MemFail
 
-## Label / Target Health
+All six official acquisition targets exist: five CSV files and the long-hop
+metadata JSON. The CSVs are nonempty and have these physical-row counts:
 
-- label format: closed CMD `ProbeCase` with one `item_conflict` perturbation,
-  a current protected memory, a prior conflicting memory, gold evidence, and a
-  recorded zero-score conflict baseline.
-- distribution: 543 `item_conflict` cases. This is deliberate specialization,
-  not a balanced estimate over all GHOST repair effects.
-- domains:
-  - `locomo_factual`: 260 cases;
-  - `locomo_inferential`: 100 cases;
-  - `mem2act_action`: 183 cases.
-- shape health:
-  - 543/543 unique case IDs;
-  - 543/543 constructible hidden intents;
-  - every case has two retrieved memories and exactly one relation request;
-  - no empty required text, missing evidence, missing baseline, NaN, or schema
-    variant was accepted.
-- claim limitation: the dataset can evaluate conflict routing and repair. It
-  cannot by itself support claims about retrieval misses, safety blocking,
-  annotation consumption, natural recurrence or delayed deployment utility.
+| File family | Rows | Target fields / observations |
+|---|---:|---|
+| coexisting facts | 100 | `preference_category`, facts, question, `ground_truth_answer`; questions unique. |
+| conditional easy | 100 | condition and `condition_met` (`yes`/`no`), question, `ground_truth_answer`; questions unique. |
+| conditional hard | 100 | Same schema as easy; `condition_met` (`yes`/`no`); questions unique. |
+| persona retrieval | 100 | Each row has facts plus a JSON `questions` list; 300 nested scored questions total, with `is_misleading`, distractor, and ground-truth answer. |
+| long hop | 92 | Unique `id`; hop count 1/2/3; answer plus choices A--E and `correct_choice`. |
 
-## Preprocessing Check
+The physical CSV total is 492, while flattening the persona nested questions
+gives 692 scored prompts. Runners must record which unit they use and must not
+report 692 as CSV rows. The long-hop metadata declares a fixed seed of 42,
+but its generated-at/model fields show this component is generated benchmark
+material; it is real downloaded upstream material, not a local mock.
 
-- expected preprocessing:
-  - fix upstream revisions and source hashes;
-  - convert source records into closed ProbeCase rows;
-  - inject and disclose one deterministic conflict;
-  - group before splitting and keep dev/cal/new family boundaries closed;
-  - project gold-free runtime rows and sealed shadow rows;
-  - stop before any semantic relation or intent model call.
-- observed preprocessing: matches the expected pipeline.
-- V4 validation:
-  - decision: `PASS`;
-  - reasons: none;
-  - intent constructibility: 1.00;
-  - runtime template marker count: 0;
-  - validation report SHA-256:
-    `96b09ea21955dcd9ba7f916b0cd056194baeae23b1763d0f9b0d05bd2267a744`.
-- old cache cleanup:
-  - removed `data/raw_cases` (approximately 296 MB of obsolete downloads);
-  - retained tracked `data/probe_cases` and `data/evolution_v4` because current
-    tests and CLI defaults still depend on them; they are regression fixtures,
-    not disposable caches.
+### Evo-Bench
+
+The public validation JSON exists and contains a `validation` list of exactly
+160 nested tasks. Every inspected task has `id`, `domain`, `prompt`, `scorer`,
+`metadata`, and `apex_public`. The acquired seed harness is the public
+`seed_codeact_bash_policy_harness` v0.1.0 (`max_steps=300`,
+`rollout_wall_clock_seconds=3600`). The local acquisition contains no
+evaluation/sealed suite or assets; this is correct and must remain so.
+
+## Split Integrity and Leakage Risk
+
+- LongMemEval cannot yet establish the required S/M/oracle exact-qid split
+  boundary. Do not run a scored M0/R1 or E2E result from S alone as if it were
+  the three-file protocol.
+- Session chronology is not safely represented by raw list order: only
+  289/500 S instances have lexically nondecreasing `haystack_dates`. The
+  dates are sortable `YYYY/MM/DD (Day) HH:MM` strings and line up with the
+  session arrays, so the loader must stably sort paired
+  `(haystack_date, session_id, session)` records before sequential ingestion;
+  it must retain original index as a tie breaker and audit the resulting order.
+- The LongMemEval `answer`, `answer_session_ids`, and future oracle evidence
+  are evaluation-only fields. They must not enter the memory writer, retriever,
+  router, candidate selector, prompt, or namespace key. Content-hash matching
+  may be built only after ingestion for offline scoring.
+- MemFail ground-truth and choice/correct-choice columns are labels. They are
+  offline scorer inputs, never Mem0 `add` content or repair-routing input.
+- Evo-Bench validation may tune/freeze a harness. The missing sealed
+  evaluation asset is intentional; no validation task or public seed should be
+  called a sealed evaluation result.
+
+## Preprocessing and Shape Check
+
+- JSON is UTF-8 list-of-object data for LongMemEval S; its 500-row cardinality
+  and array alignment are sound. M and oracle remain unvalidated.
+- MemFail CSV headers and label dtypes are coherent with their task families;
+  persona requires JSON decoding and flattening, whereas long-hop requires
+  categorical A--E validation.
+- Acquisition records SHA-256, bytes, and row/item count, but its open manifest
+  has not yet recorded LongMemEval or MemFail revisions/licenses/hashes/sizes.
+  Therefore it cannot yet serve as the required single provenance root.
+
+## Mock-data Disclosure
+
+No local synthetic substitute was used for these checks. MemFail long-hop is
+upstream generated material (metadata reports model `gpt-5` and seed 42), not
+an undisclosed local mock. The incomplete LongMemEval M file is explicitly
+excluded rather than substituted.
 
 ## Verdict
 
-- `NEEDS_REVISION` for a confirmatory live/deployment experiment.
-- The public benchmark CPU package itself is valid and reproducible (`PASS`),
-  but it is not independently collected, contains synthetic conflicts, has one
-  repair label only, and Mem2ActBench redistribution terms are unresolved.
+**BLOCKED**
+
+The closed acquisition manifest and mandatory LongMemEval M/oracle integrity
+checks are incomplete. It is unsafe to connect the scored LongMemEval runner
+or claim R1 recall/current-evidence results yet.
 
 ## Next Step
 
-- For a public model-calling benchmark, run the frozen relation instrument and
-  intent proposer over `data/ghost_live_v2/cpu_dataset`; use
-  `data/ghost_live_v2/partitions` unchanged.
-- For a confirmatory deployment claim, obtain a separate post-freeze curator
-  stream with source attestation, genuine baseline failures, and matured
-  delayed outcomes. Do not set `independent_source=true` for this public bundle.
+After no process holds `longmemeval_m_cleaned.json.partial`, resume only with:
+
+```sh
+python3 experiments/download_datasets.py --dataset longmemeval
+python3 experiments/download_datasets.py --dataset all
+python3 experiments/download_datasets.py --verify-only
+```
+
+Then rerun this validation to require: three 500-item qid sets with exact
+equality, M/oracle schema checks, session content-hash mapping coverage and
+unscorable rate, plus a closed manifest containing all three datasets with
+revision, license, SHA-256, bytes, and count. **Do not connect the runner
+until that succeeds.**

@@ -45,6 +45,7 @@ from cmd_audit.repair.neuro_symbolic_evolution import NeuroSymbolicEvolutionEngi
 from cmd_audit.repair.parametric_policy import (
     OnlineRepairPolicy,
     OutcomeObservation,
+    PolicySnapshot,
     PolicyContext,
     RepairIntent,
     SelectionDecision,
@@ -54,6 +55,12 @@ from cmd_audit.repair.repair_chain_governance import (
     ChainAttemptInput,
     ChainGovernanceDecision,
 )
+from experiments.v4_feedback_settlement import (
+    FeedbackSettlementLedger,
+    PendingSelection,
+    TypedFollowup,
+)
+from experiments.v4_run_checkpoint import OutcomeJournal, RunCheckpoint, RunCheckpointStore
 
 
 LEGACY_CASE_SCHEMA_VERSION = "cmd-v4-prequential-case-v1"
@@ -328,6 +335,13 @@ class V4ArmOutcome:
         value["chain_decisions"] = list(self.chain_decisions)
         return value
 
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, object]) -> "V4ArmOutcome":
+        converted = dict(value)
+        for name in ("candidate_intent_ids", "niche_path", "species_transitions", "chain_decisions"):
+            converted[name] = tuple(converted[name])
+        return cls(**converted)  # type: ignore[arg-type]
+
 
 @dataclass(frozen=True)
 class V4PrequentialRun:
@@ -366,6 +380,11 @@ class V4PrequentialRunner:
         on_arm_outcome: Callable[[dict[str, object]], None] | None = None,
         on_case_completed: Callable[[int, int, str], None] | None = None,
         on_ghost_selection: Callable[[dict[str, object]], None] | None = None,
+        settlement_ledger_path: Path | None = None,
+        typed_followups: Sequence[TypedFollowup] = (),
+        typed_followup_provider: Callable[[tuple[PendingSelection, ...], int], Sequence[TypedFollowup]] | None = None,
+        run_mode: str = "fresh",
+        run_manifest_sha256: str | None = None,
     ) -> None:
         if not cases:
             raise ValueError("V4 prequential run requires cases")
@@ -399,7 +418,12 @@ class V4PrequentialRunner:
             raise ValueError("case IDs must be unique")
         if any(len(row.intents) != candidate_budget for row in self.cases):
             raise ValueError("every case must match the frozen candidate budget")
+        if run_mode not in {"fresh", "resume"}:
+            raise ValueError("run_mode must be fresh or resume")
+        self.run_mode = run_mode
         self.output_dir = Path(output_dir)
+        self.run_manifest_sha256 = run_manifest_sha256 or content_sha256({"cases": [row.case_id for row in cases], "candidate_budget": candidate_budget, "seed": bootstrap_seed, "feedback_mode": ghost_feedback_mode, "partitions": dict(ghost_partitions), "evaluator": ghost_evaluator.snapshot_sha256, "locality_penalty": locality_penalty, "change_penalty": change_penalty})
+        self.case_stream_sha256 = content_sha256([row.to_mapping() for row in cases])
         self.candidate_budget = int(candidate_budget)
         self.bootstrap_samples = int(bootstrap_samples)
         self.bootstrap_seed = int(bootstrap_seed)
@@ -480,8 +504,29 @@ class V4PrequentialRunner:
         self.on_arm_outcome = on_arm_outcome
         self.on_case_completed = on_case_completed
         self.on_ghost_selection = on_ghost_selection
+        self.settlement_ledger_path = (
+            None if settlement_ledger_path is None else Path(settlement_ledger_path)
+        )
+        self._feedback_ledger: FeedbackSettlementLedger | None = None
+        self._typed_followups = tuple(typed_followups)
+        self._typed_followup_provider = typed_followup_provider
+        self._pending_typed_selections: dict[
+            str, tuple[str, V4PrequentialCase, _ArmSelection]
+        ] = {}
+        self._settlement_counts = {
+            "pending": 0, "matured": 0, "prepared": 0, "accepted": 0, "rejected": 0,
+            "duplicate": 0, "unknown": 0,
+        }
+        self._settlement_effect_updates: dict[str, int] = {}
+        self._restart_context_unavailable_ids: set[str] = set()
 
     def run(self) -> V4PrequentialRun:
+        if self.ghost_feedback_mode == "prospective_deployment":
+            self._feedback_ledger = FeedbackSettlementLedger(
+                self.settlement_ledger_path
+                or self.output_dir / "typed_feedback_settlement.jsonl",
+                manifest_root=self.run_manifest_sha256,
+            )
         repository_dir = self.output_dir / "repositories"
         repository_dir.mkdir(parents=True, exist_ok=True)
         repository_paths = {
@@ -491,7 +536,7 @@ class V4PrequentialRunner:
             )
         }
         for path in repository_paths.values():
-            if path.exists():
+            if path.exists() and self.run_mode == "fresh":
                 raise ValueError(f"refusing to reuse mutable experiment repository: {path}")
         repositories = {
             arm: EvolutionRepository(path) for arm, path in repository_paths.items()
@@ -505,9 +550,38 @@ class V4PrequentialRunner:
                 locality_penalty=self.locality_penalty,
                 change_penalty=self.change_penalty,
             )
-            outcomes: list[V4ArmOutcome] = []
+            start_position = 0
+            checkpoint_store = RunCheckpointStore(self.output_dir / "run_checkpoints")
+            outcome_journal = OutcomeJournal(self.output_dir / "outcomes.journal.jsonl")
+            if self.run_mode == "resume":
+                checkpoint = checkpoint_store.load_latest(manifest_sha256=self.run_manifest_sha256, case_stream_sha256=self.case_stream_sha256)
+                global_policy = OnlineRepairPolicy.from_snapshot(PolicySnapshot.from_mapping(checkpoint.global_policy_snapshot))
+                if self._feedback_ledger is not None and (checkpoint.settlement_head != self._feedback_ledger.head or checkpoint.pending_root != self._feedback_ledger.pending_root):
+                    raise ValueError("checkpoint settlement root mismatch")
+                for arm, engine in engines.items():
+                    if checkpoint.repository_identities.get(arm) != engine.repository.repository_hash():
+                        raise ValueError("checkpoint repository root mismatch")
+                    snapshot = checkpoint.arm_policy_snapshots.get(arm)
+                    if snapshot is None or PolicySnapshot.from_mapping(snapshot).snapshot_sha256 != engine.policy.snapshot.snapshot_sha256:
+                        raise ValueError("checkpoint arm policy root mismatch")
+                self.ghost_router = GHOSTEcologyRouter.from_snapshot(checkpoint.router_snapshots["ghost"])
+                self.observable_ghost_router = ObservableResidualGHOSTRouter.from_snapshot(checkpoint.router_snapshots["observable_ghost"])
+                start_position = checkpoint.next_position
+                prior = outcome_journal.prefix(checkpoint.outcome_head, checkpoint.outcome_count)
+                if len(prior) != start_position or [row["case_id"] for row in prior] != [case.case_id for case in self.cases[:start_position]]:
+                    raise ValueError("checkpoint outcome prefix mismatch")
+                outcomes = [V4ArmOutcome.from_mapping(row) for event in prior for row in event["rows"]]
+                if len(outcomes) != start_position * len(V4_ARMS): raise ValueError("checkpoint outcome row count mismatch")
+            self._restore_pending_typed_selections(engines)
+            self._recover_prepared_settlements(global_policy=global_policy, engines=engines)
+            outcomes: list[V4ArmOutcome] = locals().get("outcomes", [])
             total = len(self.cases)
-            for position, case in enumerate(self.cases, 1):
+            for position, case in enumerate(self.cases[start_position:], start_position + 1):
+                self._settle_typed_followups(
+                    case.context.event_index,
+                    global_policy=global_policy,
+                    engines=engines,
+                )
                 selections = self._select_all(
                     case,
                     global_policy=global_policy,
@@ -520,6 +594,18 @@ class V4PrequentialRunner:
                     engines=engines,
                 )
                 outcomes.extend(case_rows)
+                outcome_journal.append(position, case.case_id, [row.to_mapping() for row in case_rows])
+                checkpoint_store.commit(RunCheckpoint(
+                    run_id=str(self.output_dir.resolve()), manifest_sha256=self.run_manifest_sha256,
+                    case_stream_sha256=self.case_stream_sha256, next_position=position,
+                    last_completed_event_index=case.context.event_index,
+                    global_policy_snapshot=global_policy.snapshot.to_mapping(), arm_policy_snapshots={arm: engine.policy.snapshot.to_mapping() for arm, engine in engines.items()},
+                    repository_identities={arm: engine.repository.repository_hash() for arm, engine in engines.items()},
+                    settlement_head="0" * 64 if self._feedback_ledger is None else self._feedback_ledger.head,
+                    pending_root="0" * 64 if self._feedback_ledger is None else self._feedback_ledger.pending_root,
+                    router_snapshots={"ghost": self.ghost_router.snapshot, "observable_ghost": self.observable_ghost_router.snapshot},
+                    outcome_head=outcome_journal.head, outcome_count=len(outcome_journal.events),
+                ))
                 if self.on_arm_outcome is not None:
                     for row in case_rows:
                         self.on_arm_outcome(row.to_mapping())
@@ -530,6 +616,144 @@ class V4PrequentialRunner:
         finally:
             for repository in repositories.values():
                 repository.close()
+
+    def _recover_prepared_settlements(self, *, global_policy: OnlineRepairPolicy, engines: Mapping[str, NeuroSymbolicEvolutionEngine]) -> None:
+        if self._feedback_ledger is None or self.run_mode != "resume": return
+        for txn in self._feedback_ledger.prepared_transactions:
+            policy = global_policy if txn.arm_id == "global_policy" else engines.get(txn.arm_id, None)
+            root = policy.snapshot.snapshot_sha256 if isinstance(policy, OnlineRepairPolicy) else (None if policy is None else policy.policy.snapshot.snapshot_sha256)
+            if txn.after_root is not None:
+                if root != txn.after_root: raise ValueError("prepared settlement committed root mismatch")
+                self._feedback_ledger.accept_prepared(txn.feedback); continue
+            if txn.arm_id != "global_policy":
+                raise ValueError("prepared evolution settlement requires explicit replay evidence")
+            if root != txn.before_root: raise ValueError("prepared settlement root is neither before nor committed")
+            record = self._pending_typed_selections.get(txn.feedback.selection_id)
+            if record is None or not isinstance(record[2].decision, SelectionDecision): raise ValueError("prepared settlement lacks resumable decision")
+            _, case, selection = record
+            observation = OutcomeObservation(selection.decision.selection_id, case.case_id, txn.feedback.observed_after_event_index, case.family_id, txn.feedback.intent_id, txn.feedback.typed_reward, txn.feedback.locality_cost, txn.feedback.changed_item_count, txn.feedback.valid, txn.feedback.rolled_back)
+            global_policy.observe(selection.decision, (observation,), observed_after_event_index=txn.feedback.observed_after_event_index)
+            self._feedback_ledger.policy_update_committed(txn.feedback.feedback_id, global_policy.snapshot.snapshot_sha256)
+            self._feedback_ledger.accept_prepared(txn.feedback)
+            self._pending_typed_selections.pop(txn.feedback.selection_id, None)
+
+    def _settle_typed_followups(
+        self,
+        current_event_index: int,
+        *,
+        global_policy: OnlineRepairPolicy,
+        engines: Mapping[str, NeuroSymbolicEvolutionEngine],
+    ) -> None:
+        """Apply only mature, external typed feedback to its original selection."""
+        if self._feedback_ledger is None:
+            return
+        followups = list(self._typed_followups)
+        if self._typed_followup_provider is not None:
+            followups.extend(
+                self._typed_followup_provider(
+                    self._feedback_ledger.pending, current_event_index
+                )
+            )
+        for feedback in followups:
+            if feedback.observed_after_event_index > current_event_index:
+                continue
+            self._settlement_counts["matured"] += 1
+            if feedback.selection_id in self._restart_context_unavailable_ids:
+                receipt = self._feedback_ledger.reject(
+                    feedback, "restart_context_unavailable"
+                )
+                self._settlement_counts[receipt.status] += 1
+                continue
+            record = self._pending_typed_selections.get(feedback.selection_id)
+            before_root = (
+                global_policy.snapshot.snapshot_sha256
+                if record is None or record[0] == "global_policy"
+                else engines[record[0]].policy.snapshot.snapshot_sha256
+            )
+            receipt = self._feedback_ledger.prepare_settlement(feedback, before_root=before_root, arm_id=feedback.arm_id)
+            self._settlement_counts[receipt.status] += 1
+            if receipt.status == "rejected" and receipt.reason == "unknown_or_consumed_selection":
+                self._settlement_counts["unknown"] += 1
+            if receipt.status != "prepared":
+                continue
+            record = self._pending_typed_selections.get(feedback.selection_id)
+            if record is None:
+                raise ValueError("accepted feedback has no in-process selection record")
+            arm, case, selection = record
+            if self.ghost_partitions[case.case_id] != "ghost_dev":
+                self._feedback_ledger.policy_update_committed(feedback.feedback_id, before_root)
+                receipt = self._feedback_ledger.accept_prepared(feedback)
+                self._settlement_counts[receipt.status] += 1
+                self._pending_typed_selections.pop(feedback.selection_id, None)
+                continue
+            if not isinstance(selection.decision, SelectionDecision):
+                raise AssertionError("typed settlement requires a policy selection")
+            observation = OutcomeObservation(
+                selection.decision.selection_id,
+                case.case_id,
+                feedback.observed_after_event_index,
+                case.family_id,
+                feedback.intent_id,
+                feedback.typed_reward,
+                feedback.locality_cost,
+                feedback.changed_item_count,
+                feedback.valid,
+                feedback.rolled_back,
+            )
+            if arm == "global_policy":
+                global_policy.observe(
+                    selection.decision,
+                    (observation,),
+                    observed_after_event_index=feedback.observed_after_event_index,
+                )
+                self._feedback_ledger.policy_update_committed(
+                    feedback.feedback_id, global_policy.snapshot.snapshot_sha256
+                )
+            else:
+                engines[arm].record_outcomes(selection.decision, (observation,))
+                self._feedback_ledger.policy_update_committed(
+                    feedback.feedback_id, engines[arm].policy.snapshot.snapshot_sha256
+                )
+            receipt = self._feedback_ledger.accept_prepared(feedback)
+            self._settlement_counts[receipt.status] += 1
+            self._pending_typed_selections.pop(feedback.selection_id, None)
+            effect = next(
+                intent.effect
+                for intent in case.intents
+                if intent.intent_id == feedback.intent_id
+            )
+            self._settlement_effect_updates[effect] = (
+                self._settlement_effect_updates.get(effect, 0) + 1
+            )
+
+    def _restore_pending_typed_selections(
+        self, engines: Mapping[str, NeuroSymbolicEvolutionEngine]
+    ) -> None:
+        """Hydrate persisted selections so a restarted runner can settle them."""
+        if self._feedback_ledger is None:
+            return
+        cases = {case.case_id: case for case in self.cases}
+        for pending in self._feedback_ledger.pending:
+            case = cases.get(pending.case_id)
+            if case is None:
+                raise ValueError("pending feedback references a case absent from restart")
+            decision = SelectionDecision.from_mapping(pending.decision_mapping)
+            if (
+                decision.case_id != case.case_id
+                or decision.graph_sha256 != case.graph.graph_sha256
+                or decision.policy_snapshot_sha256 != pending.pre_policy_snapshot_sha256
+                or pending.intent_id != decision.selected_intent_id
+            ):
+                raise ValueError("persisted pending selection lineage is inconsistent")
+            if self.run_mode == "fresh":
+                # Fresh runs never attach to old mutable lineage.
+                self._restart_context_unavailable_ids.add(pending.selection_id)
+                continue
+            arm = pending.arm_id
+            selection = _ArmSelection(decision.selected_intent_id, "resumed", decision.niche_path, decision, decision.policy_snapshot_sha256)
+            self._pending_typed_selections[pending.selection_id] = (arm, case, selection)
+            if arm in engines:
+                engines[arm]._selection_records[decision.selection_id] = (case.context, tuple(case.intents), decision)
 
     def _select_all(
         self,
@@ -760,6 +984,7 @@ class V4PrequentialRunner:
                 selected is not None
                 and arm in _UPDATING_ARMS
                 and self.ghost_partitions[case.case_id] == "ghost_dev"
+                and self._feedback_ledger is None
             ):
                 if selection.decision is None:
                     raise AssertionError("updating arm is missing its frozen decision")
@@ -780,6 +1005,64 @@ class V4PrequentialRunner:
                         selected.valid,
                         selected.rolled_back,
                     )
+            if (
+                self._feedback_ledger is not None
+                and selection.decision is not None
+                and selected is not None
+                and arm in _UPDATING_ARMS
+            ):
+                selected_intent = next(
+                    row for row in case.intents if row.intent_id == selected.intent_id
+                )
+                self._feedback_ledger.register(
+                    PendingSelection(
+                        arm_id=arm,
+                        selection_id=f"{arm}:{selection.decision.selection_id}",
+                        case_id=case.case_id,
+                        family_id=case.family_id,
+                        intent_id=selected_intent.intent_id,
+                        graph_sha256=case.graph.graph_sha256,
+                        pre_policy_snapshot_sha256=(
+                            selection.policy_snapshot_before
+                            or selection.decision.policy_snapshot_sha256
+                        ),
+                        probe_id=content_sha256(
+                            {
+                                "case_id": case.case_id,
+                                "intent_id": selected_intent.intent_id,
+                                "graph_sha256": case.graph.graph_sha256,
+                            }
+                        ),
+                        selected_at_event_index=case.context.event_index,
+                        effect=selected_intent.effect,
+                        decision_mapping=selection.decision.to_mapping(),
+                        evidence_contract_sha256=content_sha256(
+                            {
+                                "arm_id": arm,
+                                "intent_id": selected_intent.intent_id,
+                                "effect": selected_intent.effect,
+                                "graph_sha256": case.graph.graph_sha256,
+                                "pre_policy_snapshot_sha256": (
+                                    selection.policy_snapshot_before
+                                    or selection.decision.policy_snapshot_sha256
+                                ),
+                                "probe_id": content_sha256(
+                                    {
+                                        "case_id": case.case_id,
+                                        "intent_id": selected_intent.intent_id,
+                                        "graph_sha256": case.graph.graph_sha256,
+                                    }
+                                ),
+                            }
+                        ),
+                    )
+                )
+                self._pending_typed_selections[
+                    f"{arm}:{selection.decision.selection_id}"
+                ] = (
+                    arm, case, selection,
+                )
+                self._settlement_counts["pending"] += 1
             transitions: tuple[dict[str, object], ...] = ()
             chain_decisions: tuple[dict[str, object], ...] = ()
             after = selection.policy_snapshot_before
@@ -1231,6 +1514,40 @@ class V4PrequentialRunner:
                 if self.ghost_feedback_mode == "prospective_deployment"
                 else 0
             ),
+            "typed_feedback_settlement": {
+                "enabled": self._feedback_ledger is not None,
+                "pending": (
+                    0 if self._feedback_ledger is None else self._feedback_ledger.pending_count
+                ),
+                "ledger_path": (
+                    None
+                    if self._feedback_ledger is None
+                else str(self._feedback_ledger.path.resolve())
+                ),
+                "counts": dict(self._settlement_counts),
+                "per_effect_update_counts": dict(
+                    sorted(self._settlement_effect_updates.items())
+                ),
+                "restart_context_unavailable_pending": len(
+                    self._restart_context_unavailable_ids
+                ),
+                "settlement_head": (
+                    None if self._feedback_ledger is None else self._feedback_ledger.head
+                ),
+                "pending_root": (
+                    None if self._feedback_ledger is None else self._feedback_ledger.pending_root
+                ),
+                "checkpoint_journal": str(
+                    (self.output_dir / "run_checkpoints" / "checkpoints.jsonl").resolve()
+                ),
+                "outcome_journal": str(
+                    (self.output_dir / "outcomes.journal.jsonl").resolve()
+                ),
+                "router_snapshot_roots": {
+                    "ghost": self.ghost_router.snapshot["snapshot_sha256"],
+                    "observable_ghost": self.observable_ghost_router.snapshot["snapshot_sha256"],
+                },
+            },
             "observable_residual_ghost_pending_feedback_count": (
                 sum(
                     row.arm_id == "v4_observable_ghost_residual_v1"
@@ -1523,6 +1840,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--ghost-evaluator", type=Path, required=True)
     parser.add_argument("--ghost-protocol", type=Path, required=True)
     parser.add_argument("--materialization-manifest", type=Path)
+    parser.add_argument("--run-mode", choices=("fresh", "resume"), default="fresh")
+    parser.add_argument("--settlement-ledger", type=Path)
     parser.add_argument(
         "--ghost-feedback-mode",
         choices=sorted(_GHOST_FEEDBACK_MODES),
@@ -1541,7 +1860,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     report_path = args.output_dir / "report.json"
     ghost_selection_path = args.output_dir / "ghost_selections.jsonl"
     for path in (outcome_path, progress_path, report_path, ghost_selection_path):
-        if path.exists():
+        if path.exists() and args.run_mode == "fresh":
             raise ValueError(f"refusing to overwrite experiment artifact: {path}")
     cases = load_cases(args.cases)
     upstream_model_calls = 0
@@ -1593,7 +1912,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "materialization_manifest_file_sha256": materialization_manifest_sha256,
         "upstream_materialization_model_calls": upstream_model_calls,
     }
-    _atomic_json(args.output_dir / "run_manifest.json", manifest)
+    manifest_path = args.output_dir / "run_manifest.json"
+    manifest_hash = content_sha256(manifest)
+    if args.run_mode == "resume":
+        if not manifest_path.exists() or content_sha256(json.loads(manifest_path.read_text(encoding="utf-8"))) != manifest_hash:
+            raise ValueError("resume manifest mismatch")
+    else:
+        _atomic_json(manifest_path, manifest)
     _append_jsonl(
         progress_path,
         {"event": "started", "completed": 0, "total": len(cases)},
@@ -1646,6 +1971,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             ghost_partitions=ghost_partitions,
             ghost_feedback_mode=args.ghost_feedback_mode,
             upstream_model_calls=upstream_model_calls,
+            run_mode=args.run_mode,
+            run_manifest_sha256=manifest_hash,
+            settlement_ledger_path=args.settlement_ledger,
             on_arm_outcome=lambda row: _append_jsonl(outcome_path, row),
             on_case_completed=completed,
             on_ghost_selection=lambda row: _append_jsonl(

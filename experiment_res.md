@@ -638,3 +638,21 @@ evidence tier is unchanged — `analysis_kind` is still
 `descriptive_observational`, and the new manifests record
 `hypothesis_test_role=descriptive_not_confirmatory` — so these tests bound
 sampling noise and still do not confirm a treatment effect.
+# P4B typed evidence and frozen-BM25 selection (2026-08-23)
+
+P4B generated real closed visible-feature ledgers from P4A's root-bound
+LongMemEval S/M BM25 ranking caches and then ran four frozen-candidate arms.
+The candidate cache is not selected-action typed outcome evidence: both full
+ledgers have zero selected-action typed outcomes, zero comparable coverage, and
+the mandatory gate is `BLOCKED_TYPED_EVIDENCE_UNAVAILABLE`. Therefore BM25
+remains the only baseline selection; static, CMD and GHOST take auditable
+abstentions. No answerer/judge/LLM/API or label sidecar was invoked, and there
+are no repair-efficacy or gate-pass metrics. Evidence:
+`artifacts/experiments/p4b_typed_evidence/full_lme_s/`,
+`full_lme_m/`, and `artifacts/experiments/p4b_cmd_bm25/full_lme_{s,m}/`.
+
+MemFail is `BLOCKED_CANDIDATE_CACHE_UNAVAILABLE`: P4A's full BM25 artifact has
+retrieval metrics but not a root-bound candidate ranking cache. Reconstructing
+one would create a new artifact and was deliberately not represented as P4A
+evidence. This leaves process-fault/coexisting, temporal/current evidence, CI,
+and efficacy gates unavailable—not passed or proxied.

@@ -9,13 +9,16 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-import hashlib
 import json
 import math
 from pathlib import Path
 import random
 from statistics import fmean
 from typing import Mapping, Sequence
+
+from cmd_audit.core.state_codec import canonical_json as _state_canonical_json
+from cmd_audit.core.state_codec import content_sha256 as _state_content_sha256
+from cmd_audit.repair.ecc import EccRepairReceipt
 
 
 SCHEMA_VERSION = "cmd-ghost-ecology-v2"
@@ -89,13 +92,11 @@ def is_legal_niche_transition(from_state: str, to_state: str) -> bool:
 
 
 def _canonical(value: object) -> bytes:
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
-    ).encode()
+    return _state_canonical_json(value, ensure_ascii=False, allow_nan=False).encode()
 
 
 def content_sha256(value: object) -> str:
-    return hashlib.sha256(_canonical(value)).hexdigest()
+    return _state_content_sha256(value, ensure_ascii=False, allow_nan=False)
 
 
 def _finite(value: object, name: str) -> float:
@@ -782,8 +783,13 @@ class GHOSTEcologyRouter:
     def observe(
         self,
         decision: EcologySelection,
-        feedback: DeploymentSkillFeedback | DelayedOutcomeFeedback,
+        feedback: DeploymentSkillFeedback | DelayedOutcomeFeedback | EccRepairReceipt,
     ) -> dict[str, object]:
+        if not isinstance(
+            feedback,
+            (DeploymentSkillFeedback, DelayedOutcomeFeedback, EccRepairReceipt),
+        ):
+            raise TypeError("router feedback must be a typed repair receipt")
         pending = self._pending.get(decision.selection_id)
         if pending is None or pending[0] != decision:
             raise ValueError("feedback refers to an unknown or consumed selection")
@@ -804,6 +810,11 @@ class GHOSTEcologyRouter:
             and feedback.selected_at_event_index != decision.event_index
         ):
             raise ValueError("delayed outcome selection event binding mismatch")
+        if (
+            isinstance(feedback, EccRepairReceipt)
+            and feedback.observed_after_event_index <= decision.event_index
+        ):
+            raise ValueError("repair receipt must be observed after selection")
         selected = next(
             row for row in pending[2]
             if row.skill_revision_id == decision.selected_skill_revision_id
@@ -811,7 +822,7 @@ class GHOSTEcologyRouter:
         if feedback.probe_id != selected.success_probe["probe_id"]:
             raise ValueError("feedback does not use the selected skill's registered probe")
         self._pending.pop(decision.selection_id)
-        if feedback.evaluation_only:
+        if getattr(feedback, "evaluation_only", False):
             return self.snapshot
         pre_update = dict(self._stats)
         pattern_means: dict[str, float] = {}
@@ -837,6 +848,16 @@ class GHOSTEcologyRouter:
                 natural + weight * target,
             )
         return self.snapshot
+
+    def observe_receipt(
+        self,
+        decision: EcologySelection,
+        receipt: EccRepairReceipt,
+    ) -> dict[str, object]:
+        """Receipt-only live update seam; legacy feedback stays baseline-only."""
+        if not isinstance(receipt, EccRepairReceipt):
+            raise TypeError("live router updates require EccRepairReceipt")
+        return self.observe(decision, receipt)
 
     def restore_pending(
         self,
@@ -1787,6 +1808,7 @@ class GhostEcology:
         candidate_skill_revision_ids: Sequence[str],
         registry_id: str,
         event_index: int,
+        skill_priors: Mapping[str, float] | None = None,
     ) -> EcologySelection:
         registry = self.registries.get(registry_id)
         if registry is None:
@@ -1795,43 +1817,63 @@ class GhostEcology:
             skills = tuple(self.skills[row] for row in candidate_skill_revision_ids)
         except KeyError as error:
             raise ValueError("unknown skill candidate") from error
+        explicit_priors = skill_priors is not None
+        priors = (
+            {skill.skill_revision_id: 0.0 for skill in skills}
+            if skill_priors is None
+            else {str(key): float(value) for key, value in skill_priors.items()}
+        )
         decision = self.router.select(
             failure,
             pattern_responsibilities=responsibilities,
             skills=skills,
             registry=registry,
             event_index=event_index,
+            skill_priors=priors,
         )
+        selection_payload: dict[str, object] = {
+            "selection_id": decision.selection_id,
+            "failure_id": decision.failure_id,
+            "registry_id": decision.registry_id,
+            "candidate_skill_revision_ids": list(decision.candidate_skill_revision_ids),
+            "selected_skill_revision_id": decision.selected_skill_revision_id,
+            "pattern_responsibilities": [
+                [row.pattern_revision_id, row.responsibility]
+                for row in decision.pattern_responsibilities
+            ],
+            "scores": [list(row) for row in decision.scores],
+            "posterior_before_sha256": decision.posterior_before_sha256,
+        }
+        if explicit_priors:
+            selection_payload["skill_priors"] = [
+                list(row) for row in sorted(priors.items())
+            ]
         self.ledger.append(
             "selection",
             event_index=event_index,
-            payload={
-                "selection_id": decision.selection_id,
-                "failure_id": decision.failure_id,
-                "registry_id": decision.registry_id,
-                "candidate_skill_revision_ids": list(decision.candidate_skill_revision_ids),
-                "selected_skill_revision_id": decision.selected_skill_revision_id,
-                "pattern_responsibilities": [
-                    [row.pattern_revision_id, row.responsibility]
-                    for row in decision.pattern_responsibilities
-                ],
-                "scores": [list(row) for row in decision.scores],
-                "posterior_before_sha256": decision.posterior_before_sha256,
-            },
+            payload=selection_payload,
         )
         return decision
 
     def observe(
         self,
         decision: EcologySelection,
-        feedback: DeploymentSkillFeedback | DelayedOutcomeFeedback,
+        feedback: DeploymentSkillFeedback | DelayedOutcomeFeedback | EccRepairReceipt,
         *,
         event_index: int,
     ) -> dict[str, object]:
-        if self.evaluation_only and not feedback.evaluation_only:
+        evaluation_only = getattr(feedback, "evaluation_only", False)
+        if self.evaluation_only and not evaluation_only:
             raise PermissionError("sealed evaluation feedback must be evaluation-only")
         snapshot = self.router.observe(decision, feedback)
-        if isinstance(feedback, DelayedOutcomeFeedback):
+        if isinstance(feedback, EccRepairReceipt):
+            feedback_payload: dict[str, object] = {
+                "feedback_kind": "ecc_repair_receipt",
+                **feedback.to_mapping(),
+                "receipt_sha256": feedback.content_hash,
+                "reward": feedback.reward,
+            }
+        elif isinstance(feedback, DelayedOutcomeFeedback):
             feedback_payload: dict[str, object] = {
                 "feedback_kind": "delayed_outcome",
                 "selection_id": feedback.selection_id,
@@ -1872,11 +1914,23 @@ class GhostEcology:
             event_index=event_index,
             payload=feedback_payload,
         )
-        if not feedback.evaluation_only:
+        if not evaluation_only:
             self.ledger.append(
                 "posterior_snapshot", event_index=event_index + 1, payload=snapshot
             )
         return snapshot
+
+    def observe_receipt(
+        self,
+        decision: EcologySelection,
+        receipt: EccRepairReceipt,
+        *,
+        event_index: int,
+    ) -> dict[str, object]:
+        """Receipt-only live update seam with durable feedback persistence."""
+        if not isinstance(receipt, EccRepairReceipt):
+            raise TypeError("live ecology updates require EccRepairReceipt")
+        return self.observe(decision, receipt, event_index=event_index)
 
     def record_niche_snapshot(
         self, snapshot: NicheSnapshot, *, event_index: int

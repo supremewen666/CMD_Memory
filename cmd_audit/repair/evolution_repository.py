@@ -16,20 +16,21 @@ import math
 from pathlib import Path
 import sqlite3
 
+from cmd_audit.core.state_codec import canonical_json as _state_canonical_json
+from cmd_audit.core.state_codec import content_sha256 as _state_content_sha256
+
 
 JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 
 
 def canonical_json(value: object) -> str:
     """Serialize a closed, finite JSON value in its content-addressed form."""
-    return json.dumps(
-        _closed_json(value), ensure_ascii=True, sort_keys=True,
-        separators=(",", ":"), allow_nan=False,
-    )
+    return _state_canonical_json(_closed_json(value), ensure_ascii=True, allow_nan=False)
 
 
 def content_sha256(value: object) -> str:
-    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+    # Retain validation-before-hashing compatibility for repository callers.
+    return _state_content_sha256(_closed_json(value), ensure_ascii=True, allow_nan=False)
 
 
 class EvolutionRepository:

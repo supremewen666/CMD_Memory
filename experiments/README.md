@@ -4,6 +4,214 @@ This package contains the runnable evidence for `EXPERIMENT.md`. The active pape
 
 ## Frontline runners
 
+## No-Mem0 offline suite
+
+`run_no_mem0_suite` is the closed allowlist for experiments that can run with
+local inputs and no network, API, extractor, embedding endpoint, or Mem0
+backend. It distinguishes fixture wiring from headline evidence and records
+commands, input roots, logs, and a closed manifest. It never discovers or runs
+legacy scripts implicitly.
+
+```bash
+python -m experiments.run_no_mem0_suite --profile plumbing-smoke \
+  --output-root artifacts/experiments/no_mem0_smoke --limit 1 --fail-fast
+```
+
+Profiles: `plumbing-smoke` runs P3A → P3B → P3C (consuming the newly emitted
+P3A retrieval root) → P3D's local fake lifecycle; `offline-memory` runs only
+in-memory retrieval protocol; `zero-call-governance` runs the typed-v2
+identifiability audit. `--plan-only` performs no write or execution.
+
+## P4A no-Mem0 retrieval baselines
+
+`experiments.baselines.retrieval_confirmation` is a vanilla-arm-only,
+provider-neutral retrieval comparison over the P3 `MemoryRecord` ABI. It uses
+the same visible ingest content, stable chronology, per-case namespace and
+`top_k`; gold fields are opened only by an offline scorer after search. The
+strategies are deterministic lexical, stdlib Okapi BM25, and the optional local
+`all-MiniLM-L6-v2` adapter. MiniLM never downloads a model: a missing local
+dependency/checkpoint produces an explicit `unavailable` manifest. The oracle
+ceiling is scorer-only (`offline_upper_bound=true`) and writes no prediction
+context, so it cannot feed P3C/repair/router code.
+
+```bash
+python -m experiments.run_no_mem0_suite --profile baseline-confirmation \
+  --output-root artifacts/experiments/p4a_baseline_confirmation --limit 5 --fail-fast
+```
+
+The profile runs LongMemEval-S and all 692 MemFail prompts for lexical/BM25;
+it runs MiniLM only on the requested small LongMemEval-S sample. Full
+LongMemEval-M lexical/BM25 receipts are recorded separately under
+`artifacts/experiments/p4a_baseline_confirmation/`: they use append-only,
+gold-free ranking checkpoints plus a root-bound receipt so interrupted runs can
+resume exactly once. P4A measures retrieval only, never answerer or judge quality.
+
+## P4B typed evidence / frozen-BM25 selection
+
+`build_p4b_typed_evidence` binds P4A BM25 rankings to a closed visible-feature
+ledger; `run_p4b_cmd_bm25` consumes that same frozen candidate root for BM25,
+static, CMD and GHOST. A cache is not typed outcome evidence: without selected
+action telemetry and the decoupling audit, its machine gate remains blocked and
+CMD/GHOST abstain. Current P4A MemFail has no root-bound candidate cache, so its
+P4B receipt is explicitly unavailable rather than reconstructed.
+
+## P4C gold-free ECC live execution
+
+`experiments.p4c_ecc_runner` is the isolated P4C execution layer. It does not
+extend the legacy V4 prequential runner: P4B remains a negative typed-evidence
+boundary and the old V4 runner remains an explicit baseline. P4C consumes an
+immutable, closed incident-overlay JSONL through `load_p4c_cases`; raw datasets
+and sealed audit labels are not members of that runtime ABI.
+
+The per-case chronology is:
+
+```text
+runtime observation -> EccSyndrome -> P4cGhostRouter selection
+  -> apply_shadow -> evaluate_ecc -> commit/rollback
+  -> EccRepairReceipt -> incident sink + observe_receipt
+  -> hash-chained case completion
+```
+
+`P4cGhostRouter` binds prepared `GhostEcology` failures, pattern
+responsibilities, skills, and registries to the runner. Alternative routers
+must expose the same `select()` and receipt-only `observe_receipt()` seam.
+Stores expose only `snapshot_root/apply_shadow/commit_shadow/rollback_shadow`;
+evaluators expose only `evaluate_ecc`. There is no answerer, same-trace replay,
+task reward, `TypedFollowup`, or gold/label parameter in the runtime
+constructor.
+
+Runtime artifacts are `incidents.jsonl`, `repair_receipts.jsonl`, the
+manifest-bound hash-chained `case_completions.jsonl`, and `manifest.json`.
+`run_mode="resume"` verifies the case-stream root, receipt hashes, incident
+head, completion chain, and—when more cases remain—the restored router root
+before skipping a completed prefix.
+
+Only after runtime completion may `audit_p4c_run` open a sealed sidecar. The
+sidecar must bind the run manifest and every receipt hash; it computes offline
+accuracy, false-repair rate, incident recall, and incident-type accuracy while
+refusing to write inside the runtime directory. These audit metrics never feed
+back into GHOST.
+
+### P4C-0 deterministic mechanism screen
+
+`experiments.p4c_zero_call` supplies the first execution substrate for that
+ABI. `StructuralMemoryStore` implements copy-on-write state for pipeline
+health, memory activation, supersession lineage, quarantine, and protected
+memory IDs. Its three closed operator kinds are `pipeline_patch`,
+`supersede_lineage`, and `quarantine_poison`. `StructuralEccEvaluator` checks
+root binding, syndrome resolution, structural invariants, protected-memory
+safety, and mutation locality without exposing an answer or replay method.
+
+`P4cZeroCallSuite` runs frozen `P4cZeroCallScenario` records through the normal
+`P4cEccRunner` and writes `zero_call_report.json`. The report is bound to the
+runtime manifest and receipt root and records commit, rollback, resolution,
+invariant, safety, locality, and recurrence rates with
+`model_call_count=0`. A real `P4cGhostRouter` can be supplied directly; router
+learning still receives only `EccRepairReceipt`.
+
+P4C-0 starts after an incident observation has been emitted, so its claim is
+limited to the post-detection ECC mechanism loop. A no-fault detector control
+belongs to the upstream MemAudit signal-generation experiment and is not
+encoded as a fourth incident type. The deterministic suite is fresh-run only;
+durable resume remains available at the lower-level P4C runner where the
+caller also owns restoration of its real memory substrate.
+
+The frozen three-mechanism formal screen is executable with the real GHOST
+router and receipt feedback:
+
+```bash
+python -B -m experiments.run_p4c_zero_call_sweep \
+  --overlay experiments/fixtures/p4c_zero_call_v1.jsonl \
+  --output-dir artifacts/experiments/p4c_zero_call_v1
+```
+
+The top-level `sweep_manifest.json` binds the overlay, frozen registry, final
+router snapshot, ecology ledger head, and runtime report. Runtime state and
+receipts remain under `runtime/`; `ecology.jsonl` contains the real selection,
+ECC receipt feedback, and posterior-snapshot transitions.
+
+Mixed-GHOST prior calibration remains zero-call. It expands the three frozen
+mechanisms into two same-family candidates and gives each candidate three
+predeclared receipt opportunities, satisfying conservative global, pattern,
+and local support gates without reading outcomes before selection:
+
+```bash
+python -B -m experiments.run_p4c_zero_call_sweep \
+  --mode prior-calibration \
+  --overlay experiments/fixtures/p4c_zero_call_v1.jsonl \
+  --output-dir artifacts/experiments/p4c_zero_call_prior_calibration_v1
+```
+
+The calibration includes a protected-memory mutation control; its rollback
+receipts supply negative evidence. This artifact qualifies router support and
+is not a repair-effect headline comparison.
+
+### P4C-1 real-source structural wiring
+
+`experiments.run_p4c1_real_sources` projects deployment-visible structure from
+LongMemEval, MemFail, and the coordinated poison sweep into a sealed
+`source_projection.jsonl`. It then writes a separate
+`incident_overlay.jsonl`: LongMemEval exercises state-drift supersession,
+MemFail exercises retrieval process faults, and the poison construction
+exercises CAS/influence quarantine. Runtime memory records contain source-bound
+content hashes, never source answers or benchmark annotations.
+
+```bash
+python -B -m experiments.run_p4c1_real_sources \
+  --longmemeval data/external/longmemeval/input/longmemeval_s_cleaned.json \
+  --memfail-root data/external/memfail/datasets \
+  --limit-per-source 5 --poison-recall-size 10 --poison-count 3 \
+  --output-dir artifacts/experiments/p4c1_real_sources_v1
+```
+
+The P4C-1 manifest binds all source roots, the visible projection, incident
+overlay, runtime receipts, ecology head, and final router snapshot. Its claim
+scope is structural live-ABI wiring only, not task-answer accuracy.
+
+## P3 LongMemEval execution
+
+P3A emits per-arm retrieval snapshots before its scorer-only oracle sidecar.
+P3C consumes those snapshots and enforces `retrieve frozen -> predict-only ->
+prediction seal -> score-only`.  It is offline by default:
+
+```bash
+python -m experiments.run_longmemeval_e2e --mode all \
+  --retrieval-run artifacts/experiments/longmemeval_m0_r1_s5_live_ready_v1 \
+  --data data/external/longmemeval/input/longmemeval_s_cleaned.json \
+  --answerer-backend fake --judge-backend fake --limit 5 \
+  --output artifacts/experiments/longmemeval_e2e_smoke
+```
+
+The fake result is only wiring smoke.  Live OpenAI-compatible execution is
+explicitly opt-in via `--answerer-backend openai-compatible --llm-config ...`;
+official judge scoring is exported as an interface, not claimed locally.
+
+The guarded post-P4C live entrypoint is `./run_remaining_experiment.sh`. It is
+plan-only by default, binds successful P4C-1 and mixed-GHOST prior artifacts in
+preflight, and requires explicit `--execute` before the answer endpoint is
+contacted. See `docs/RUN_REMAINING_EXPERIMENT.md` for configuration, call
+budget, resume, prediction-seal, and offline-evaluator instructions. The older
+plural `run_remaining_experiments.sh` remains the legacy Route A/V4 controller.
+
+## P3D Evo-Bench harness governance
+
+`experiments.run_evobench_harness` is a provider-neutral, offline governance
+runner for the separate harness-evolution track. It parses the public 160-task
+validation suite only; it never opens, generates, or executes a sealed
+evaluation task. External evolvers and executors provide closed JSON receipts.
+The runner records seed → prepare → validation → commit/rollback → freeze →
+opaque sealed-evaluation export → external sealed-result ingest in an
+append-only hash chain, with V4 outcome/checkpoint recovery.
+
+```bash
+python -m experiments.run_evobench_harness --help
+```
+
+Validation gain/cost/regression, failure/rollback, and resume parity are a
+separate Track B report. A native evaluation score is reportable only after an
+externally produced, root-bound sealed result is ingested. It must never be
+pooled with LongMemEval, Mem0, or any memory-repair metric.
+
 | Claim | Runner | Use |
 |---|---|---|
 | C3-C4 | `python -m experiments.run_experiment_14_repair_efficacy` | Four-arm repair efficacy: no-repair / random / LLM judge / CMD. |
@@ -199,9 +407,59 @@ structural smoke scores into recovery claims.
 
 ## Legacy runners
 
+## P3A LongMemEval M0/R1 execution
+
+The production diagnostic runner streams a top-level S/M JSON array (it never
+`json.loads` the full M file), stably sorts each instance's paired sessions by
+`(date, original_index)`, and uses one isolated namespace per `(arm, question)`.
+`answer`, `answer_session_ids`, and oracle content are evaluation-only: the
+oracle is opened only for the post-retrieval sidecar scorer. `cmd` and `ghost`
+are currently **shadow/observe-only**, not repair-efficacy arms. In-memory is
+the default and makes no SDK, network, model, or LLM call.
+
+```bash
+python -m experiments.run_longmemeval_m0_r1 \
+  --data data/external/longmemeval/input/longmemeval_s_cleaned.json \
+  --oracle data/external/longmemeval/oracle/longmemeval_oracle.json \
+  --backend in-memory --arms vanilla,static,cmd,ghost --limit 5 \
+  --run-mode fresh --output artifacts/experiments/longmemeval_m0_r1_s5
+```
+
+Use `--run-mode resume` only with the identical data/oracle roots, arm list,
+backend, top-k and frozen case stream. Results are append-only in
+`outcomes.jsonl` and bind the existing P0 checkpoint journal. Real Mem0 is
+explicit opt-in (`--backend mem0 --mem0-config CONFIG.json`); it requires a
+locally installed/configured pinned SDK and never falls back to a model or
+network default.
+
 Older runners remain in the package for diagnostics and appendix evidence. They should not be cited as headline classification experiments unless `EXPERIMENT.md` explicitly promotes them back into the claim chain.
 
 ## B-scheme staged entrypoints
+
+## P3B MemFail M0/R1 process-fault execution
+
+`run_memfail_m0_r1` consumes the five official local MemFail CSVs directly,
+validates the 492 physical-row corpus, and expands Persona rows into 692 scored
+prompts. It uses only deployment-visible query/content/provenance during
+add/search. Ground truth, choices, misleading status, family, and subtype are
+opened only after all arms complete for offline scoring. `--limit` is **per
+family physical-row** smoke limiting, never a headline sample.
+
+```bash
+python -m experiments.run_memfail_m0_r1 \
+  --data-root data/external/memfail/datasets \
+  --backend in-memory --arms vanilla,static,cmd,ghost --limit 1 --top-k 5 \
+  --run-mode fresh --output artifacts/experiments/memfail_m0_r1_smoke
+```
+
+Arms use independent opaque case scopes and equal retrieval budgets. `ghost`
+is shadow-only. The current runner reports retrieval-side probes, not generated
+answers: Persona unsafe-answer metrics are explicitly unavailable, while
+coexisting facts remain conflict controls rather than forced process faults.
+Only post-retrieval scorer-confirmed misses append a hash-chained P1 incident.
+Use `--backend mem0 --mem0-config CONFIG.json` only for an installed, locally
+configured Mem0 SDK; no implicit network/model/API fallback exists. `fresh`
+refuses non-empty output; `resume` requires an identical manifest and case root.
 
 The complete B-plan experiment surface is:
 

@@ -30,6 +30,7 @@ RESEARCH_SURVEY_RSI_2026-07.md
 SKILL_EVOLUTION_DESIGN.md
 SKILL_MODE_DEPLOYMENT.md
 data/raw_cases/
+data/external/
 data/probe_cases.bak.*/
 data/probe_cases/T1_T2_400_FULL.json
 papers/

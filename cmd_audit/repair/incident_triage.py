@@ -84,6 +84,22 @@ class RepairFamily(str, Enum):
     QUARANTINE_AND_AUDIT = "quarantine_and_audit"
 
 
+class ClassificationStatus(str, Enum):
+    """Confidence of a mechanism decision, not a fourth mechanism."""
+
+    PROVISIONAL = "provisional"
+    CONFIRMED = "confirmed"
+
+
+class ProcessFaultSubtype(str, Enum):
+    """The pipeline surface that actually failed."""
+
+    RETRIEVAL = "retrieval"
+    INJECTION = "injection"
+    GRANULARITY = "granularity"
+    SAFETY = "safety"
+
+
 #: Mechanism -> repair family.  One-to-one and total, so a mechanism can never
 #: be routed to an action family it does not admit.
 MECHANISM_REPAIR_FAMILY: Mapping[IncidentMechanism, RepairFamily] = {
@@ -117,6 +133,9 @@ class TriageDecision:
     #: tell", and these are different claims.
     drift_sensor_available: bool
     admits_to_failure_memory: bool
+    classification_status: ClassificationStatus = ClassificationStatus.CONFIRMED
+    process_fault_subtype: ProcessFaultSubtype | None = None
+    observed_order: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         expected = MECHANISM_REPAIR_FAMILY[self.mechanism]
@@ -130,6 +149,13 @@ class TriageDecision:
                 "only process_fault may enter FailureMemory; "
                 f"{self.mechanism.value} may not"
             )
+        if self.mechanism is IncidentMechanism.PROCESS_FAULT:
+            if self.process_fault_subtype is None:
+                # Preserve the former public constructor while ensuring that
+                # newly persisted decisions never erase the subtype.
+                object.__setattr__(self, "process_fault_subtype", ProcessFaultSubtype.RETRIEVAL)
+        elif self.process_fault_subtype is not None:
+            raise TriageError("only process_fault may carry a fault subtype")
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -139,6 +165,12 @@ class TriageDecision:
             "reason": self.reason,
             "drift_sensor_available": self.drift_sensor_available,
             "admits_to_failure_memory": self.admits_to_failure_memory,
+            "classification_status": self.classification_status.value,
+            "process_fault_subtype": (
+                self.process_fault_subtype.value
+                if self.process_fault_subtype is not None else None
+            ),
+            "observed_order": list(self.observed_order),
         }
 
     def assert_exclusive(self) -> None:
@@ -251,6 +283,7 @@ def triage_incident(
     *,
     pipeline_recovered: bool,
     observed_order: Sequence[str] = (),
+    process_fault_subtype: ProcessFaultSubtype = ProcessFaultSubtype.RETRIEVAL,
 ) -> TriageDecision:
     """Route one incident to exactly one mechanism.
 
@@ -280,6 +313,7 @@ def triage_incident(
             reason=f"poison signature on {len(poisoned)} item(s): {list(poisoned)}",
             drift_sensor_available=bool(observed_order),
             admits_to_failure_memory=False,
+            observed_order=tuple(observed_order),
         )
 
     order = validate_observed_order(observed_order, recall_set)
@@ -293,6 +327,7 @@ def triage_incident(
             ),
             drift_sensor_available=True,
             admits_to_failure_memory=False,
+            observed_order=order,
         )
 
     return TriageDecision(
@@ -306,6 +341,7 @@ def triage_incident(
         ),
         drift_sensor_available=bool(order),
         admits_to_failure_memory=True,
+        process_fault_subtype=process_fault_subtype,
     )
 
 
@@ -386,7 +422,7 @@ class IncidentTriageStores:
             if any(value is not None for value in (superseding_memory_id, superseded_memory_id)):
                 raise TriageError("process_fault cannot carry lineage ids")
             record = FailureMemoryRecord(
-                error_type="retrieval_error",
+                error_type=f"{decision.process_fault_subtype.value}_error",
                 wrong_memory=" | ".join(item.text for item in recall_set),
                 original_evidence="",
                 cause=decision.reason,
@@ -406,13 +442,15 @@ class IncidentTriageStores:
                 superseding_memory_id=superseding_memory_id,
                 superseded_memory_id=superseded_memory_id,
                 revision_kind=RevisionKind.REVISION,
-                observed_order=tuple(item.memory_id for item in recall_set),
+                # The validated substrate observation is evidence; retrieval
+                # order is an implementation artifact and must not replace it.
+                observed_order=decision.observed_order,
                 reason=decision.reason,
             ))
         else:
             if any(value is not None for value in (patch_name, superseding_memory_id, superseded_memory_id)):
                 raise TriageError("adversarial_poison cannot carry patch or lineage ids")
-            self.quarantined_ids.extend(item.memory_id for item in recall_set)
+            self.quarantined_ids.extend(_poisoned_ids(recall_set))
         self.audit_records.append(audit)
         return audit
 
@@ -422,11 +460,13 @@ __all__ = [
     "MECHANISM_REPAIR_FAMILY",
     "TRIAGE_SCHEMA_VERSION",
     "IncidentMechanism",
+    "ClassificationStatus",
     "IncidentAuditRecord",
     "LineageEntry",
     "LineageLog",
     "IncidentTriageStores",
     "RepairFamily",
+    "ProcessFaultSubtype",
     "RevisionKind",
     "TriageDecision",
     "TriageError",

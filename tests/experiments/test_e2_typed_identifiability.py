@@ -78,6 +78,20 @@ def test_e2_suite_rejects_unbound_manifest_and_duplicate_seeds(tmp_path: Path) -
             bootstrap_samples=100,
             materialization_manifest=manifest,
         )
+
+    mismatched_cases = tmp_path / "mismatched-cases.jsonl"
+    _write_cases(mismatched_cases)
+    mismatched_cases.write_text(
+        mismatched_cases.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="does not bind"):
+        run_e2_suite(
+            cases_path=mismatched_cases,
+            output_dir=tmp_path / "e2-mismatched-source",
+            seeds=(24,),
+            materialization_manifest=manifest,
+        )
     with pytest.raises(ValueError, match="distinct"):
         run_e2_suite(
             cases_path=cases,

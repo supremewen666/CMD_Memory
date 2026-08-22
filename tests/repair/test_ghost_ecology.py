@@ -5,6 +5,14 @@ from pathlib import Path
 
 import pytest
 
+from cmd_audit.repair.ecc import EccRepairReceipt, EccSyndrome, MemAuditEccAdapter
+from cmd_audit.repair.incident_store import IncidentLedger
+from cmd_audit.repair.incident_triage import (
+    ClassificationStatus,
+    IncidentMechanism,
+    ProcessFaultSubtype,
+    RepairFamily,
+)
 from cmd_audit.repair.ghost_ecology import (
     DelayedOutcomeFeedback,
     DeploymentSkillFeedback,
@@ -249,6 +257,107 @@ def test_router_updates_only_selected_skill_registered_probe_and_replays(tmp_pat
                 "wrong", 1.0, 0.0, 0.0, False, False, True, "deployment",
             ),
         )
+
+
+def test_router_evolves_from_root_bound_ecc_repair_receipt(tmp_path: Path) -> None:
+    ecology, failure, pattern, skills, registry = _ready_ecology(tmp_path)
+    decision = ecology.select(
+        failure,
+        responsibilities=(PatternResponsibility(pattern.pattern_revision_id, 1.0),),
+        candidate_skill_revision_ids=tuple(row.skill_revision_id for row in skills),
+        registry_id=registry.registry_id,
+        event_index=10,
+    )
+    selected = ecology.skills[decision.selected_skill_revision_id]
+    receipt = EccRepairReceipt(
+        receipt_id="receipt-1",
+        syndrome_id="syndrome-1",
+        incident_id="incident-1",
+        selection_id=decision.selection_id,
+        selected_skill_revision_id=decision.selected_skill_revision_id,
+        probe_id=str(selected.success_probe["probe_id"]),
+        observed_after_event_index=11,
+        before_root="root-before",
+        shadow_root="root-shadow",
+        after_root="root-shadow",
+        resolved_syndrome=True,
+        invariants_passed=True,
+        committed=True,
+        rolled_back=False,
+        safety_violation=False,
+        locality_cost=0.05,
+        recurrence_after_commit=False,
+        provenance={"evaluator": "ecc-v1"},
+    )
+
+    after = ecology.observe_receipt(decision, receipt, event_index=11)
+
+    assert after["snapshot_sha256"] != decision.posterior_before_sha256
+    feedback = ecology.ledger.events[-2]
+    assert feedback["payload"]["feedback_kind"] == "ecc_repair_receipt"
+    assert "gold_derived" not in feedback["payload"]
+    replayed = GhostEcology(EcologyLedger(tmp_path / "ecology.jsonl"))
+    assert replayed.router.snapshot == after
+
+
+def test_receipt_settlement_binds_incident_sink_and_router_update(tmp_path: Path) -> None:
+    ecology, failure, pattern, skills, registry = _ready_ecology(tmp_path)
+    decision = ecology.select(
+        failure,
+        responsibilities=(PatternResponsibility(pattern.pattern_revision_id, 1.0),),
+        candidate_skill_revision_ids=tuple(row.skill_revision_id for row in skills),
+        registry_id=registry.registry_id,
+        event_index=10,
+    )
+    selected = ecology.skills[decision.selected_skill_revision_id]
+    syndrome = EccSyndrome(
+        syndrome_id="syndrome-1",
+        observation_id="observation-1",
+        incident_id="incident-1",
+        observed_at_event_index=9,
+        state_root="root-before",
+        source_manifest_root="manifest-1",
+        mechanism=IncidentMechanism.PROCESS_FAULT,
+        repair_family=RepairFamily.PIPELINE_PATCH,
+        classification_status=ClassificationStatus.CONFIRMED,
+        process_fault_subtype=ProcessFaultSubtype.RETRIEVAL,
+        signal_ids=("retrieval-miss",),
+        provenance={"detector": "memaudit-v1"},
+    )
+    receipt = EccRepairReceipt(
+        receipt_id="receipt-1",
+        syndrome_id=syndrome.syndrome_id,
+        incident_id=syndrome.incident_id,
+        selection_id=decision.selection_id,
+        selected_skill_revision_id=decision.selected_skill_revision_id,
+        probe_id=str(selected.success_probe["probe_id"]),
+        observed_after_event_index=11,
+        before_root=syndrome.state_root,
+        shadow_root="root-after",
+        after_root="root-after",
+        resolved_syndrome=True,
+        invariants_passed=True,
+        committed=True,
+        rolled_back=False,
+        safety_violation=False,
+        locality_cost=0.0,
+        recurrence_after_commit=False,
+        provenance={"checker": "ecc-v1"},
+    )
+    incidents = IncidentLedger(tmp_path / "incidents.jsonl")
+
+    event, snapshot = MemAuditEccAdapter().settle_repair(
+        syndrome,
+        receipt,
+        ledger=incidents,
+        ecology=ecology,
+        decision=decision,
+        event_index=11,
+    )
+
+    assert event["mechanism"] == "process_fault"
+    assert len(incidents.views.process_faults) == 1
+    assert snapshot["snapshot_sha256"] != decision.posterior_before_sha256
 
 
 def test_pending_selection_survives_process_restart_before_feedback(tmp_path: Path) -> None:
