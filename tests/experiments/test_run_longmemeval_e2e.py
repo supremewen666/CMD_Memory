@@ -40,3 +40,16 @@ def test_retrieval_content_tamper_is_rejected(tmp_path):
     item = json.loads(artifact.read_text()); item["records"][0]["content"] = "tampered"; artifact.write_text(json.dumps(item))
     with pytest.raises(ValueError, match="root mismatch"):
         predict(data=data, retrieval_run=run, output=tmp_path / "out", arms=("vanilla",))
+
+
+def test_score_accepts_integer_reference_and_resume_is_prefix_safe(tmp_path):
+    data, run = _fixture(tmp_path); out = tmp_path / "out"
+    rows = json.loads(data.read_text()); rows[0]["answer"] = 3; data.write_text(json.dumps(rows))
+    predict(data=data, retrieval_run=run, output=out, arms=("vanilla",))
+    first = score(reference=data, output=out, judge_backend="fake")
+    assert first["arms"]["vanilla"]["count"] == 1
+    (out / "score_report.json").unlink()
+    with pytest.raises(ValueError, match="fresh scoring refuses"):
+        score(reference=data, output=out, judge_backend="fake")
+    resumed = score(reference=data, output=out, judge_backend="fake", resume=True)
+    assert resumed["score_outcome_root"] == first["score_outcome_root"]

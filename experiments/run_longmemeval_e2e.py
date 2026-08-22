@@ -81,6 +81,14 @@ def _norm(value: str) -> str:
     return re.sub(r"\W+", "", value).casefold()
 
 
+def _reference_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    raise ValueError("score reference answer must be a string or integer")
+
+
 def _sha_file(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -171,16 +179,27 @@ def score(*, reference: Path, output: Path, judge_backend: str = "none", judge_m
     if judge_backend == "none": return {"status": "prediction_sealed_no_score"}
     if judge_backend != "fake": raise ValueError("official/live judge export only; no local official score implementation")
     refs = {str(row["question_id"]): row for row in iter_json_array(Path(reference)) if isinstance(row.get("question_id"), str)}
-    journal = OutcomeJournal(output / "score_outcomes.jsonl")
-    judge: Judge = FakeJudge(); scores: dict[str, list[Mapping[str, object]]] = {}
+    judge: Judge = FakeJudge(); scores: dict[str, list[Mapping[str, object]]] = {}; expected=[]; position=0
     for arm_path in sorted((output / "predictions").glob("*.jsonl")):
         arm = arm_path.stem; rows=[]
         for line in arm_path.read_text(encoding="utf-8").splitlines():
             pred = json.loads(line); ref = refs.get(pred["question_id"])
-            if not ref or not isinstance(ref.get("answer"), str) or not isinstance(ref.get("question"), str): raise ValueError("score reference requires question_id/question/answer")
-            result = dict(judge.score(question=ref["question"], hypothesis=pred["hypothesis"], reference=ref["answer"]))
-            rows.append({"question_id": pred["question_id"], **result}); journal.append(len(journal.events)+1, f"{arm}:{pred['question_id']}", [rows[-1]])
+            if not ref or not isinstance(ref.get("question"), str): raise ValueError("score reference requires question_id/question/answer")
+            reference_text = _reference_text(ref.get("answer"))
+            result = dict(judge.score(question=ref["question"], hypothesis=pred["hypothesis"], reference=reference_text))
+            rows.append({"question_id": pred["question_id"], **result}); position += 1
+            expected.append((position, f"{arm}:{pred['question_id']}", [rows[-1]]))
         scores[arm] = rows
+    journal = OutcomeJournal(output / "score_outcomes.jsonl")
+    if journal.events and not resume:
+        raise ValueError("fresh scoring refuses an existing score outcome prefix; use resume")
+    if len(journal.events) > len(expected):
+        raise ValueError("score outcome prefix exceeds the sealed prediction set")
+    for event, (position, case_id, rows) in zip(journal.events, expected, strict=False):
+        if event["position"] != position or event["case_id"] != case_id or event["rows"] != rows:
+            raise ValueError("score outcome prefix does not match sealed predictions")
+    for position, case_id, rows in expected[len(journal.events):]:
+        journal.append(position, case_id, rows)
     report = {"schema_version": "cmd-longmemeval-e2e-score-v1", "prediction_seal_root": _sha_file(output / "prediction_seal.json"), "judge_backend": judge_backend, "judge_model": judge.model_id, "official_score": False, "score_outcome_root": journal.head, "arms": {arm: {"count": len(rows), "normalized_exact": sum(bool(r["correct"]) for r in rows) / len(rows) if rows else None} for arm, rows in scores.items()}}
     atomic_json_write(output / "score_report.json", report, ensure_ascii=False, allow_nan=False, indent=2, trailing_newline=True)
     return report
