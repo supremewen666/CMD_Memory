@@ -51,18 +51,18 @@ def _object(path: Path, name: str) -> Mapping[str, object]:
 
 
 def _jsonl(path: Path, name: str) -> list[Mapping[str, object]]:
+    rows: list[Mapping[str, object]] = []
     try:
-        lines = Path(path).read_text(encoding="utf-8").splitlines()
+        with Path(path).open("r", encoding="utf-8") as stream:
+            for index, line in enumerate(stream, 1):
+                if not line.strip():
+                    continue
+                value = json.loads(line)
+                if not isinstance(value, Mapping):
+                    raise ValueError(f"{name} line {index} must be an object")
+                rows.append(value)
     except OSError as exc:
         raise ValueError(f"{name} is unavailable") from exc
-    rows: list[Mapping[str, object]] = []
-    for index, line in enumerate(lines, 1):
-        if not line.strip():
-            continue
-        value = json.loads(line)
-        if not isinstance(value, Mapping):
-            raise ValueError(f"{name} line {index} must be an object")
-        rows.append(value)
     if not rows:
         raise ValueError(f"{name} must not be empty")
     return rows
@@ -331,21 +331,22 @@ def _load_outcomes(path: Path, binding_root: str) -> tuple[list[dict[str, object
         return [], "0" * 64
     rows: list[dict[str, object]] = []
     head = "0" * 64
-    for index, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        row = json.loads(raw)
-        expected = content_sha256({key: value for key, value in row.items() if key != "event_hash"}, ensure_ascii=False, allow_nan=False)
-        if (
-            not isinstance(row, dict)
-            or set(row) != _OUTCOME_FIELDS
-            or row.get("schema_version") != OUTCOME_SCHEMA
-            or row.get("event_index") != index
-            or row.get("previous_hash") != head
-            or row.get("binding_root") != binding_root
-            or row.get("event_hash") != expected
-        ):
-            raise ValueError("P4C-6 outcome journal chain is invalid")
-        rows.append(row)
-        head = str(row["event_hash"])
+    with path.open("r", encoding="utf-8") as stream:
+        for index, raw in enumerate(stream, 1):
+            row = json.loads(raw)
+            expected = content_sha256({key: value for key, value in row.items() if key != "event_hash"}, ensure_ascii=False, allow_nan=False)
+            if (
+                not isinstance(row, dict)
+                or set(row) != _OUTCOME_FIELDS
+                or row.get("schema_version") != OUTCOME_SCHEMA
+                or row.get("event_index") != index
+                or row.get("previous_hash") != head
+                or row.get("binding_root") != binding_root
+                or row.get("event_hash") != expected
+            ):
+                raise ValueError("P4C-6 outcome journal chain is invalid")
+            rows.append(row)
+            head = str(row["event_hash"])
     return rows, head
 
 

@@ -112,6 +112,51 @@ def test_preflight_validates_seal_chain_roots_and_complete_pairs(tmp_path: Path)
         preflight(p4c2_run=run, sealed_sidecar=tmp_path / "sidecar.jsonl")
 
 
+def test_preflight_preserves_unicode_line_separators_in_physical_jsonl(
+    tmp_path: Path,
+) -> None:
+    run = _p4c2_fixture(tmp_path)
+    journal = run / "paired_predictions.jsonl"
+    rows = [json.loads(line) for line in journal.open(encoding="utf-8")]
+    rows[0]["hypothesis"] = "old\u2028memory\u2029value"
+    head = "0" * 64
+    for index, row in enumerate(rows, 1):
+        row["event_index"] = index
+        row["previous_hash"] = head
+        row["event_hash"] = content_sha256(
+            {key: value for key, value in row.items() if key != "event_hash"},
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        head = row["event_hash"]
+    journal.write_text(
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+            for row in rows
+        ),
+        encoding="utf-8",
+    )
+    seal_path = run / "prediction_seal.json"
+    seal = json.loads(seal_path.read_text())
+    seal["paired_prediction_head"] = head
+    seal["paired_predictions_sha256"] = hashlib.sha256(journal.read_bytes()).hexdigest()
+    _write_json(seal_path, seal)
+    manifest_path = run / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["paired_prediction_head"] = head
+    manifest["paired_predictions_sha256"] = hashlib.sha256(journal.read_bytes()).hexdigest()
+    manifest["prediction_seal_sha256"] = hashlib.sha256(seal_path.read_bytes()).hexdigest()
+    _write_json(manifest_path, manifest)
+
+    report, pairs = preflight(
+        p4c2_run=run,
+        sealed_sidecar=_sidecar(tmp_path / "unicode-sidecar.jsonl"),
+    )
+
+    assert report["paired_case_count"] == 2
+    assert pairs[0].control_hypothesis == "old\u2028memory\u2029value"
+
+
 def test_prepare_sidecar_requires_seal_then_projects_string_and_integer_answers(tmp_path: Path) -> None:
     run = _p4c2_fixture(tmp_path)
     raw = tmp_path / "long.json"

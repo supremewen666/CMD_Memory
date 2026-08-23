@@ -440,7 +440,12 @@ def _load_prediction_prefix(path: Path) -> tuple[list[dict[str, object]], str]:
     head = "0" * 64
     if not path.exists():
         return rows, head
-    for line in path.read_text(encoding="utf-8").splitlines():
+    # Iterate physical JSONL records only. ``str.splitlines()`` also treats
+    # legal Unicode separators (for example U+2028 in a model hypothesis) as
+    # record boundaries and corrupts an otherwise valid append-only journal.
+    with path.open("r", encoding="utf-8") as stream:
+        physical_lines = tuple(stream)
+    for line in physical_lines:
         row = json.loads(line)
         if not isinstance(row, dict) or set(row) != _ROW_FIELDS:
             raise ValueError("P4C-2 prediction journal row is not closed")

@@ -6,7 +6,7 @@ from collections import Counter
 import importlib
 import os
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 from .arena_runner_common import (
     ArenaCase,
@@ -22,6 +22,8 @@ from cmd_audit.repair.scope_ledger import ScopeLedger
 
 
 ArenaLoader = Callable[..., tuple[ArenaCase, ...]]
+ParserConfigurer = Callable[[argparse.ArgumentParser], None]
+LoaderKwargsFactory = Callable[[argparse.Namespace], Mapping[str, object]]
 
 
 def run_arena_cli(
@@ -31,6 +33,10 @@ def run_arena_cli(
     default_cases: str,
     default_output: str,
     chains_default: bool,
+    best_of_n_default: bool = False,
+    context_stuffing_default: bool = False,
+    configure_parser: ParserConfigurer | None = None,
+    loader_kwargs_factory: LoaderKwargsFactory | None = None,
 ) -> int:
     parser = argparse.ArgumentParser(
         description=f"Run the {arena_id} observational skill arena."
@@ -58,7 +64,7 @@ def run_arena_cli(
     parser.add_argument(
         "--best-of-n-control",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=best_of_n_default,
         help=(
             "Run an unstructured best-of-N arm with N equal to CMD's distinct "
             "non-baseline contexts after cache reuse."
@@ -67,7 +73,7 @@ def run_arena_cli(
     parser.add_argument(
         "--context-stuffing-control",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=context_stuffing_default,
         help=(
             "Run the named context-stuffing baseline: the whole retrieved pool "
             "in one prompt under a frozen token cap, one answer call, no "
@@ -162,8 +168,20 @@ def run_arena_cli(
     parser.add_argument("--perturb-window-size", type=int, default=25)
     parser.add_argument("--perturb-stability-threshold", type=float, default=0.05)
     parser.add_argument("--perturb-stable-windows", type=int, default=2)
+    if configure_parser is not None:
+        configure_parser(parser)
     args = parser.parse_args()
-    cases = loader(args.cases, seed=args.seed, limit=args.limit)
+    loader_kwargs = (
+        dict(loader_kwargs_factory(args))
+        if loader_kwargs_factory is not None
+        else {}
+    )
+    cases = loader(
+        args.cases,
+        seed=args.seed,
+        limit=args.limit,
+        **loader_kwargs,
+    )
     _print_stream_validation(arena_id, cases, dataset_source_path=args.cases)
     if args.validate_only:
         print("[RESULT] validation_only=1")

@@ -203,6 +203,37 @@ def test_fake_or_injected_execution_writes_paired_seal_and_resumes(tmp_path: Pat
     assert len((output / "paired_predictions.jsonl").read_text().splitlines()) == 2
 
 
+def test_resume_preserves_unicode_line_separator_inside_hypothesis(tmp_path: Path) -> None:
+    p4c1, inputs = _fixture(tmp_path)
+    output = tmp_path / "out"
+
+    class _UnicodeAnswerer:
+        model_id = "unicode-answerer-v1"
+
+        def answer(self, request):
+            return AnswerResult("before\u2028after", 1)
+
+    seal = run_p4c2(
+        p4c1_run=p4c1,
+        inputs=inputs,
+        output=output,
+        answerer=_UnicodeAnswerer(),
+        limit=1,
+    )
+    assert seal["paired_prediction_count"] == 2
+
+    resumed = run_p4c2(
+        p4c1_run=p4c1,
+        inputs=inputs,
+        output=output,
+        answerer=_UnicodeAnswerer(),
+        limit=1,
+        run_mode="resume",
+    )
+
+    assert resumed == seal
+
+
 def test_prepare_inputs_projects_longmemeval_without_gold(tmp_path: Path) -> None:
     p4c1, _inputs = _fixture(tmp_path)
     sessions = [

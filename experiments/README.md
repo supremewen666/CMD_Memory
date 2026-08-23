@@ -228,6 +228,7 @@ pooled with LongMemEval, Mem0, or any memory-repair metric.
 | Arena A+B+C | `python -m experiments.run_arena_memtrace` | One-path MemTrace-B stream with gold-free, ecology, and chain observers. |
 | Arena A+B replication | `python -m experiments.run_arena_memfail` | MemFail cross-environment signal/ecology replication. |
 | Arena B adjacent niches | `python -m experiments.run_arena_stale` | STALE stale-vs-conflict niche observations. |
+| Arena real LongMemEval | `python -m experiments.run_arena_longmemeval` | Full-history BM25 control plus bounded CMD retrieval repair, real answer model, matched best-of-N, and context-stuffing controls. |
 
 Recommended sequence:
 
@@ -255,6 +256,7 @@ Validate all three immutable streams without model calls:
 python -m experiments.run_arena_memtrace --validate-only
 python -m experiments.run_arena_memfail --validate-only
 python -m experiments.run_arena_stale --validate-only
+python -m experiments.run_arena_longmemeval --limit 50 --validate-only
 ```
 
 Live execution uses the concrete vLLM/OpenAI-compatible dual-score backend:
@@ -266,6 +268,33 @@ export LLM_JUDGE_BASE_URL=http://localhost:8000/v1
 export LLM_JUDGE_MODEL=qwen2.5-7b-instruct
 python -m experiments.run_arena_memtrace --case-workers 32
 ```
+
+The LongMemEval entrypoint runs this same live backend on the cleaned public
+haystack. It indexes every session with BM25, uses top-5 as the unrepaired
+control, and gives CMD only the bounded top-10 prefix as its repair candidate
+pool. The answer and `answer_session_ids` fields do not participate in
+retrieval, routing, context construction, or reference-free selection. They
+are available only to the isolated shadow evaluator. Best-of-N and
+context-stuffing controls are enabled by default for this entrypoint:
+
+```bash
+python -m experiments.run_arena_longmemeval \
+  --limit 50 \
+  --retrieval-top-k 5 \
+  --candidate-pool-k 10 \
+  --case-workers 8 \
+  --output artifacts/arena/longmemeval_live_50.jsonl
+```
+
+Do not start with all 500 cases: each Fix case evaluates the legal CMD
+operators and the matched control candidates. Use a 5-case endpoint smoke,
+then 50 cases, inspect failure/abstention and budget-alignment coverage, and
+only then launch the full stream. Under the default top-5/top-10 protocol, the
+current 500-case corpus produces exactly two cache-distinct non-baseline CMD
+contexts per case. With both controls enabled, the nominal budget is therefore
+6 answer generations, 5 reference-free selection scores, and 5 frozen shadow
+scores per case (about 80 / 800 / 8,000 endpoint calls for 5 / 50 / 500 cases,
+before transport retries).
 
 `experiments.arena_backends:create_vllm_backend` is the default factory. Its
 runtime selection signal is scored by the answerer endpoint; the frozen judge
