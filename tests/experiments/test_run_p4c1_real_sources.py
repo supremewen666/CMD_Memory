@@ -7,6 +7,11 @@ from experiments.run_p4c1_real_sources import (
     build_p4c1_plan,
     run_p4c1_zero_call,
 )
+from experiments.run_p4c3_native_detection import (
+    audit_p4c3_detection,
+    prepare_detection_sidecar,
+    run_p4c3_detection,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -90,3 +95,30 @@ def test_p4c1_real_source_suite_runs_receipt_only_and_zero_call(
     assert result["same_trace_answer_replay"] is False
     assert (tmp_path / "p4c1" / "source_projection.jsonl").exists()
     assert (tmp_path / "p4c1" / "incident_overlay.jsonl").exists()
+    visible_path = tmp_path / "p4c1" / "visible_telemetry.jsonl"
+    assert visible_path.exists()
+    visible_rows = [json.loads(line) for line in visible_path.read_text().splitlines()]
+    assert len(visible_rows) == 12
+    visible_text = json.dumps(visible_rows, sort_keys=True).casefold()
+    assert all(marker not in visible_text for marker in ("gold", "label", "mechanism"))
+    detector = run_p4c3_detection(
+        visible_telemetry=visible_path,
+        output_dir=tmp_path / "p4c3",
+    )
+    assert detector["mechanism_counts"] == {
+        "process_fault": 2,
+        "state_drift": 2,
+        "adversarial_poison": 2,
+    }
+    assert detector["abstain_count"] == 6
+    sidecar = tmp_path / "sealed" / "p4c3.jsonl"
+    prepare_detection_sidecar(
+        output_dir=tmp_path / "p4c3",
+        incident_overlay=tmp_path / "p4c1" / "detection_audit_overlay.jsonl",
+        sealed_sidecar=sidecar,
+    )
+    audit = audit_p4c3_detection(
+        output_dir=tmp_path / "p4c3", sealed_sidecar=sidecar
+    )
+    assert audit["accuracy"] == 1.0
+    assert audit["false_repair_rate"] == 0.0

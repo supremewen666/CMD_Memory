@@ -15,6 +15,7 @@ from cmd_audit.core.state_codec import (
     atomic_json_write,
     content_sha256,
 )
+from cmd_audit.repair.ecc import EccRepairReceipt
 from cmd_audit.repair.ghost_ecology import (
     EcologyLedger,
     FailureDeposit,
@@ -74,6 +75,100 @@ def _base_state(memories: Mapping[str, Mapping[str, object]]) -> dict[str, objec
         "lineage": [],
         "quarantine": [],
         "protected_ids": [],
+    }
+
+
+def _visible_telemetry(
+    *,
+    seed: _P4c1Seed,
+    case_id: str,
+    observed_at_event_index: int,
+    source_manifest_root: str,
+) -> dict[str, object]:
+    """Project only signals a deployed detector may observe.
+
+    This is deliberately derived from the live state and structural telemetry,
+    not from the incident overlay's mechanism field.
+    """
+    pipeline = seed.state.get("pipeline")
+    if not isinstance(pipeline, Mapping):
+        raise ValueError("P4C-1 state pipeline telemetry is unavailable")
+    checks = {
+        name: pipeline.get(name)
+        for name in ("retrieval", "injection", "granularity", "safety")
+    }
+    if any(not isinstance(value, bool) for value in checks.values()):
+        raise ValueError("P4C-1 pipeline telemetry must be boolean")
+
+    observed_order = seed.observation_channels.get("observed_order", [])
+    if not isinstance(observed_order, list):
+        raise ValueError("P4C-1 observed order telemetry must be a list")
+    active_versions = [
+        {
+            "slot": "active-memory-version",
+            "memory_id": str(memory_id),
+            "observed_at": position,
+        }
+        for position, memory_id in enumerate(observed_order, 1)
+    ]
+    suspect_ids = seed.observation_channels.get("suspect_ids", [])
+    if not isinstance(suspect_ids, list):
+        raise ValueError("P4C-1 integrity telemetry suspects must be a list")
+    integrity_signals = [
+        {
+            "memory_id": str(memory_id),
+            "cas_valid": False,
+            "influence_score": 1.0,
+            "influence_threshold": 0.5,
+        }
+        for memory_id in suspect_ids
+    ]
+    return {
+        "schema_version": "cmd-p4c3-visible-telemetry-v1",
+        "case_id": case_id,
+        "observed_at_event_index": observed_at_event_index,
+        "state_root": content_sha256(seed.state, ensure_ascii=False, allow_nan=False),
+        "source_manifest_root": source_manifest_root,
+        "pipeline_checks": checks,
+        "active_versions": active_versions,
+        "integrity_signals": integrity_signals,
+    }
+
+
+def _clean_visible_telemetry(
+    *,
+    seed: _P4c1Seed,
+    case_id: str,
+    observed_at_event_index: int,
+    source_manifest_root: str,
+    committed_state_root: str,
+) -> dict[str, object]:
+    observed_order = seed.observation_channels.get("observed_order", [])
+    if not isinstance(observed_order, list):
+        raise ValueError("P4C-1 clean-control observed order must be a list")
+    active_versions = []
+    if observed_order:
+        active_versions.append(
+            {
+                "slot": "active-memory-version",
+                "memory_id": str(observed_order[-1]),
+                "observed_at": 1,
+            }
+        )
+    return {
+        "schema_version": "cmd-p4c3-visible-telemetry-v1",
+        "case_id": f"{case_id}-clean-control",
+        "observed_at_event_index": observed_at_event_index,
+        "state_root": committed_state_root,
+        "source_manifest_root": source_manifest_root,
+        "pipeline_checks": {
+            "retrieval": True,
+            "injection": True,
+            "granularity": True,
+            "safety": True,
+        },
+        "active_versions": active_versions,
+        "integrity_signals": [],
     }
 
 
@@ -373,12 +468,38 @@ def run_p4c1_zero_call(
     )
     projection_path = output_dir / "source_projection.jsonl"
     overlay_path = output_dir / "incident_overlay.jsonl"
+    visible_telemetry_path = output_dir / "visible_telemetry.jsonl"
+    detection_overlay_path = output_dir / "detection_audit_overlay.jsonl"
     for row in plan.source_projection:
         append_jsonl_fsync(
             projection_path, row, ensure_ascii=False, allow_nan=False
         )
     for row in plan.incident_overlay:
         append_jsonl_fsync(overlay_path, row, ensure_ascii=False, allow_nan=False)
+    for position, (seed, overlay) in enumerate(
+        zip(plan.seeds, plan.incident_overlay, strict=True)
+    ):
+        append_jsonl_fsync(
+            visible_telemetry_path,
+            _visible_telemetry(
+                seed=seed,
+                case_id=str(overlay["case_id"]),
+                observed_at_event_index=1000 + position * 3,
+                source_manifest_root=plan.plan_sha256,
+            ),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        append_jsonl_fsync(
+            detection_overlay_path,
+            {
+                "schema_version": "cmd-p4c3-audit-overlay-v1",
+                "case_id": str(overlay["case_id"]),
+                "label": seed.mechanism,
+            },
+            ensure_ascii=False,
+            allow_nan=False,
+        )
 
     failures: list[FailureDeposit] = []
     for seed, overlay in zip(plan.seeds, plan.incident_overlay, strict=True):
@@ -535,6 +656,40 @@ def run_p4c1_zero_call(
         output_dir=output_dir / "runtime",
         router=router,
     ).run()
+    receipts = [
+        EccRepairReceipt.from_mapping(json.loads(line))
+        for line in (output_dir / "runtime" / "repair_receipts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line
+    ]
+    if len(receipts) != len(plan.seeds) or any(
+        not receipt.committed for receipt in receipts
+    ):
+        raise ValueError("P4C-1 clean controls require one committed repair per case")
+    for position, (seed, overlay, receipt) in enumerate(
+        zip(plan.seeds, plan.incident_overlay, receipts, strict=True)
+    ):
+        clean = _clean_visible_telemetry(
+            seed=seed,
+            case_id=str(overlay["case_id"]),
+            observed_at_event_index=1000 + position * 3 + 2,
+            source_manifest_root=plan.plan_sha256,
+            committed_state_root=receipt.after_root,
+        )
+        append_jsonl_fsync(
+            visible_telemetry_path, clean, ensure_ascii=False, allow_nan=False
+        )
+        append_jsonl_fsync(
+            detection_overlay_path,
+            {
+                "schema_version": "cmd-p4c3-audit-overlay-v1",
+                "case_id": clean["case_id"],
+                "label": "no_fault",
+            },
+            ensure_ascii=False,
+            allow_nan=False,
+        )
     if plan.source_roots != build_p4c1_plan(
         longmemeval_path=longmemeval_path,
         memfail_root=memfail_root,
@@ -559,6 +714,9 @@ def run_p4c1_zero_call(
         "incident_overlay_sha256": content_sha256(
             list(plan.incident_overlay), ensure_ascii=False, allow_nan=False
         ),
+        "visible_telemetry_sha256": _file_sha256(visible_telemetry_path),
+        "visible_telemetry_case_count": len(plan.seeds) * 2,
+        "detection_audit_overlay_sha256": _file_sha256(detection_overlay_path),
         "ecology_head_sha256": ecology.ledger.head_sha256,
         "router_snapshot_sha256": router.snapshot_sha256,
         "router": "P4cGhostRouter",

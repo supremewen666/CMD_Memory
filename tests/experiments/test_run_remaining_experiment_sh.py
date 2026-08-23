@@ -204,3 +204,21 @@ def test_shell_is_syntax_valid_and_never_sources_credentials() -> None:
     assert ". $" not in source
     assert "run_remaining_experiments.sh" not in source
     assert "experiments.run_remaining_live_experiment" in source
+    assert "experiments.run_p4c2_live_efficacy" in source
+    assert "experiments.run_p4c3_native_detection" in source
+    assert "experiments.run_p4c45_zero_call" in source
+    assert "experiments.run_p4c6_sealed_evaluation" in source
+
+
+def test_shell_dispatches_p4c2_without_breaking_default_plan() -> None:
+    stages = _run("--stages")
+    assert stages.returncode == 0
+    assert stages.stdout.splitlines() == [
+        "calibration", "p4c1", "p4c2", "p4c3", "p4c45", "p4c6"
+    ]
+    p4c2 = _run("p4c2", "--plan", "--limit", "2")
+    assert p4c2.returncode == 0, p4c2.stderr
+    plan = json.loads(p4c2.stdout)
+    assert plan["stage"] == "P4C-2 repair-vs-control paired live efficacy"
+    assert plan["planned_calls"] == 4
+    assert plan["external_calls_authorized"] is False

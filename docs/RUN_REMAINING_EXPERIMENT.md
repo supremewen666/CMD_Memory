@@ -1,14 +1,139 @@
-# Remaining call-required experiment
+# P4C experiment program
 
-`run_remaining_experiment.sh` is the safe entrypoint for the first experiment
-that needs external model calls after P4C-0 and P4C-1. With no mode flag it only
-prints a plan. It cannot spend an API call unless `--execute` is present.
+`run_remaining_experiment.sh` is the safe entrypoint for the complete P4C
+program. With no stage it preserves the original live-confirmation launcher;
+with a stage name it dispatches P4C-1 through P4C-6. Planning, preparation,
+preflight, native detection, ablation, robustness, and exact audit are zero-call.
+Only P4C-2 `--execute-live`, the legacy calibration `--execute`, and P4C-6
+semantic `--evaluate --backend openai-compatible` can contact a model endpoint.
 
-This is intentionally different from the older plural
-`run_remaining_experiments.sh`, which controls legacy Route A/V4/GPU jobs. Do
-not use the plural script for this P4C follow-up.
+List the available stages:
 
-## What the script runs
+```bash
+./run_remaining_experiment.sh --stages
+```
+
+| Stage | Purpose | Calls by default | May read sealed labels |
+|---|---|---:|---:|
+| `calibration` | Four-arm answer confirmation over frozen retrieval | no | no |
+| `p4c1` | Real-source ECC state/repair wiring and visible telemetry | no | no |
+| `p4c2` | Paired control-state vs repaired-state answer efficacy | no | no |
+| `p4c3` | Native syndrome detection and post-seal detector audit | no | audit only |
+| `p4c45` | Router/ECC ablation and robustness matrix | no | no |
+| `p4c6` | Independent paired answer evaluation | exact: no | yes, after seal |
+
+The plural `run_remaining_experiments.sh` remains the legacy Route A/V4/GPU
+launcher and is not part of this P4C program.
+
+## Formal P4C sequence
+
+Use a new P4C-1 output directory because a fresh run refuses to overwrite old
+evidence. This run also writes `visible_telemetry.jsonl` directly from live
+state; the detector never reconstructs telemetry from overlay labels.
+
+```bash
+./run_remaining_experiment.sh p4c1 \
+  --longmemeval data/external/longmemeval/input/longmemeval_s_cleaned.json \
+  --memfail-root data/external/memfail/datasets \
+  --limit-per-source 5 \
+  --poison-recall-size 10 \
+  --poison-count 3 \
+  --output-dir artifacts/experiments/p4c1_real_sources_v2
+```
+
+Run native detection, then create and open its sidecar only after the runtime
+manifest says `prediction_sealed`:
+
+```bash
+./run_remaining_experiment.sh p4c3 \
+  --mode runtime \
+  --visible-telemetry artifacts/experiments/p4c1_real_sources_v2/visible_telemetry.jsonl \
+  --output-dir artifacts/experiments/p4c3_native_detection_v1
+
+./run_remaining_experiment.sh p4c3 \
+  --mode prepare-sidecar \
+  --incident-overlay artifacts/experiments/p4c1_real_sources_v2/detection_audit_overlay.jsonl \
+  --sealed-sidecar artifacts/sealed/p4c3_detection_sidecar_v1.jsonl \
+  --output-dir artifacts/experiments/p4c3_native_detection_v1
+
+./run_remaining_experiment.sh p4c3 \
+  --mode audit \
+  --sealed-sidecar artifacts/sealed/p4c3_detection_sidecar_v1.jsonl \
+  --output-dir artifacts/experiments/p4c3_native_detection_v1
+```
+
+Build P4C-2's gold-free LongMemEval projection. P4C-1 currently has a natural
+answer-query contract for LongMemEval only; MemFail and poison cases fail closed
+until separate query contracts are frozen.
+
+```bash
+./run_remaining_experiment.sh p4c2 --prepare \
+  --p4c1-run artifacts/experiments/p4c1_real_sources_v2 \
+  --longmemeval-data data/external/longmemeval/input/longmemeval_s_cleaned.json \
+  --inputs artifacts/experiments/p4c2_answer_inputs_v1.jsonl \
+  --limit 5
+
+./run_remaining_experiment.sh p4c2 --preflight \
+  --p4c1-run artifacts/experiments/p4c1_real_sources_v2 \
+  --inputs artifacts/experiments/p4c2_answer_inputs_v1.jsonl \
+  --limit 5
+```
+
+The first command that performs P4C paired answer calls is the following. Use
+`--execute-fake` first if only a zero-call wiring check is desired.
+
+```bash
+./run_remaining_experiment.sh p4c2 --execute-live \
+  --p4c1-run artifacts/experiments/p4c1_real_sources_v2 \
+  --inputs artifacts/experiments/p4c2_answer_inputs_v1.jsonl \
+  --llm-config ~/.config/cmd-memory/live-llm.json \
+  --limit 5 \
+  --output artifacts/experiments/p4c2_live_efficacy_v1
+```
+
+Run the P4C-4/5 zero-call structural matrix. Its GHOST arms use the real
+`GHOSTEcologyRouter`; adaptive arms update only from typed `EccRepairReceipt`,
+while `without_ecc_gate` is explicitly unsafe and cannot emit a receipt.
+
+```bash
+./run_remaining_experiment.sh p4c45 \
+  --overlay experiments/fixtures/p4c_zero_call_v1.jsonl \
+  --config experiments/fixtures/p4c45_zero_call_v1.json \
+  --output-dir artifacts/experiments/p4c45_zero_call_v1 \
+  --run-mode fresh
+```
+
+Finally, create the P4C-6 reference sidecar after verifying the P4C-2 seal, run
+the zero-call exact diagnostic, and optionally run a separately configured
+semantic judge. The evaluator writes outside P4C-2 and never updates the router.
+
+```bash
+./run_remaining_experiment.sh p4c6 --prepare-sidecar \
+  --p4c2-run artifacts/experiments/p4c2_live_efficacy_v1 \
+  --longmemeval-data data/external/longmemeval/input/longmemeval_s_cleaned.json \
+  --sidecar artifacts/sealed/p4c6_longmemeval_sidecar_v1.jsonl
+
+./run_remaining_experiment.sh p4c6 --preflight \
+  --p4c2-run artifacts/experiments/p4c2_live_efficacy_v1 \
+  --sidecar artifacts/sealed/p4c6_longmemeval_sidecar_v1.jsonl
+
+./run_remaining_experiment.sh p4c6 --evaluate --backend exact \
+  --p4c2-run artifacts/experiments/p4c2_live_efficacy_v1 \
+  --sidecar artifacts/sealed/p4c6_longmemeval_sidecar_v1.jsonl \
+  --output artifacts/experiments/p4c6_exact_v1
+
+./run_remaining_experiment.sh p4c6 --evaluate \
+  --backend openai-compatible \
+  --llm-config ~/.config/cmd-memory/live-judge.json \
+  --p4c2-run artifacts/experiments/p4c2_live_efficacy_v1 \
+  --sidecar artifacts/sealed/p4c6_longmemeval_sidecar_v1.jsonl \
+  --output artifacts/experiments/p4c6_semantic_v1
+```
+
+Every resumable stage requires unchanged roots and parameters. Use
+`--run-mode resume` only with the same output directory and frozen inputs.
+
+## Legacy four-arm calibration stage
 
 The ECC memory loop remains unchanged and zero-call:
 
@@ -84,14 +209,14 @@ artifact.
    number of questions, so the maximum answer-call budget is `4 × limit`.
 
 ```bash
-./run_remaining_experiment.sh --plan --limit 5
+./run_remaining_experiment.sh calibration --plan --limit 5
 ```
 
 2. Run the root/config preflight. This also performs no calls and does not create
    the experiment output directory.
 
 ```bash
-./run_remaining_experiment.sh --preflight \
+./run_remaining_experiment.sh calibration --preflight \
   --llm-config /absolute/path/to/cmd-live-llm.json \
   --limit 5
 ```
@@ -99,7 +224,7 @@ artifact.
 3. Explicitly authorize the live run. Start with the five-question bounded run.
 
 ```bash
-./run_remaining_experiment.sh --execute \
+./run_remaining_experiment.sh calibration --execute \
   --llm-config /absolute/path/to/cmd-live-llm.json \
   --limit 5 \
   --output artifacts/experiments/remaining_live_confirmation_v1
@@ -122,7 +247,7 @@ Use the identical data, retrieval run, model, prompt, temperature, context
 budget, limit, and output directory:
 
 ```bash
-./run_remaining_experiment.sh --execute \
+./run_remaining_experiment.sh calibration --execute \
   --llm-config /absolute/path/to/cmd-live-llm.json \
   --limit 5 \
   --run-mode resume \
