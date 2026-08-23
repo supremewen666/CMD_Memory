@@ -1,5 +1,25 @@
 # Experiment Results — Counterfactual Memory Evolution Governance
 
+## P4C gold-free mainline v2 implementation verification (2026-08-23)
+
+The v1 case/metric audit and the corrected zero-call verification are recorded
+in `experiment_analysis/analysis_p4c_mainline_v2_1.md` and
+`experiment_analysis/analysis_p4c_mainline_v2_2.md`. The v2 runner separates
+shadow resolution from safe committed correction, uses receipt-only router
+updates, freezes holdout updates, and reports real-source cases separately from
+replicated robustness variants.
+
+- P4C-1 verification: 684 structural cases (500 LongMemEval, 92 MemFail, 92
+  poison variants), zero calls.
+- P4C-3 verification: 1,368 decisions over paired fault/clean telemetry, zero
+  calls.
+- P4C-4/5 verification: 600 scenario variants × 8 arms = 4,800 outcomes;
+  zero-prior evolution reached 40/240 safe holdout corrections versus 16/240
+  frozen and matched static typed at 40/240.
+- Guardrail: these disposable local verification outputs are not task-accuracy
+  evidence and must be rerun into fresh, hash-bound artifact directories before
+  use as paper headline results.
+
 ## Phase 6 v6 zero-call execution (2026-08-20)
 
 See `experiment_analysis/analysis_zero_call_e2_e4_v6.md` for the complete

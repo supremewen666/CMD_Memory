@@ -210,6 +210,7 @@ def test_shell_is_syntax_valid_and_never_sources_credentials() -> None:
     assert "experiments.run_p4c2_live_efficacy" in source
     assert "experiments.run_p4c3_native_detection" in source
     assert "experiments.run_p4c45_zero_call" in source
+    assert "experiments.run_p4c45_prequential_v2" in source
     assert "experiments.run_p4c6_sealed_evaluation" in source
 
 
@@ -217,7 +218,7 @@ def test_shell_dispatches_p4c2_without_breaking_default_plan() -> None:
     stages = _run("--stages")
     assert stages.returncode == 0
     assert stages.stdout.splitlines() == [
-        "mainline", "p4c1", "p4c3", "p4c45", "p4c2", "p4c6", "legacy-answer"
+        "mainline", "p4c1", "p4c3", "p4c45", "p4c45-v1", "p4c2", "p4c6", "legacy-answer"
     ]
     p4c2 = _run("p4c2", "--plan", "--limit", "2")
     assert p4c2.returncode == 0, p4c2.stderr

@@ -114,6 +114,9 @@ def test_p4c1_real_source_suite_runs_receipt_only_and_zero_call(
     assert visible_path.exists()
     visible_rows = [json.loads(line) for line in visible_path.read_text().splitlines()]
     assert len(visible_rows) == 12
+    assert [row["observed_at_event_index"] for row in visible_rows] == sorted(
+        row["observed_at_event_index"] for row in visible_rows
+    )
     visible_text = json.dumps(visible_rows, sort_keys=True).casefold()
     assert all(marker not in visible_text for marker in ("gold", "label", "mechanism"))
     detector = run_p4c3_detection(
@@ -137,3 +140,34 @@ def test_p4c1_real_source_suite_runs_receipt_only_and_zero_call(
     )
     assert audit["accuracy"] == 1.0
     assert audit["false_repair_rate"] == 0.0
+
+
+def test_p4c1_supports_independent_source_counts(tmp_path: Path) -> None:
+    result = run_p4c1_zero_call(
+        longmemeval_path=LONGMEM,
+        memfail_root=MEMFAIL,
+        output_dir=tmp_path / "p4c1-unequal",
+        limit_per_source=1,
+        longmemeval_limit=3,
+        memfail_limit=2,
+        poison_case_count=4,
+        poison_recall_size=10,
+        poison_count=3,
+        poison_counts=(1, 3),
+    )
+
+    assert result["case_count"] == 9
+    assert result["source_counts"] == {
+        "longmemeval": 3,
+        "memfail": 2,
+        "poison_sweep": 4,
+    }
+    assert result["requested_source_counts"] == result["source_counts"]
+    assert result["visible_telemetry_case_count"] == 18
+    assert result["telemetry_ordering"].startswith("observed_at_event_index_ascending")
+    assert result["poison_grid"] == {
+        "recall_size": 10,
+        "poison_counts": [1, 3],
+        "case_count": 4,
+        "evidence_unit": "parameterized_structural_variant_not_independent_real_source_case",
+    }

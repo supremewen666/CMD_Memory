@@ -23,6 +23,7 @@ List the available stages:
 | `p4c1` | mainline | Gold-free real-source correction receipts | no |
 | `p4c3` | mainline | Native detection, abstention, false-repair audit | no |
 | `p4c45` | mainline | GHOST/ECC evolution, ablation, robustness | no |
+| `p4c45-v1` | superseded | Original 30-scenario metric protocol | no |
 | `p4c2` | supplementary | Paired repaired-state answer confirmation | no |
 | `p4c6` | supplementary | Independent paired answer evaluation | exact: no |
 | `legacy-answer` | legacy | Degraded four-arm answer wiring pipeline | no |
@@ -38,15 +39,28 @@ state; the detector never reconstructs telemetry from overlay labels. The v2
 source projection admits only nested `role/content`; fields such as
 `has_answer` never enter memory content hashes or state decisions.
 
+The earlier `--limit-per-source 5` command was a smoke protocol: it produced
+15 repair cases (5 per source), then P4C-3 paired them with 15 clean controls.
+It was never a 500-case LongMemEval run. The formal source counts are now
+independent because LongMemEval has 500 eligible rows while the available
+MemFail long-hop file has 92 rows. Poison rows are explicitly reported as
+parameterized structural variants, not independent real-source examples.
+
 ```bash
 ./run_remaining_experiment.sh p4c1 \
   --longmemeval data/external/longmemeval/input/longmemeval_s_cleaned.json \
   --memfail-root data/external/memfail/datasets \
-  --limit-per-source 5 \
+  --longmemeval-limit 500 \
+  --memfail-limit 92 \
+  --poison-case-count 92 \
   --poison-recall-size 10 \
-  --poison-count 3 \
-  --output-dir artifacts/experiments/p4c1_real_sources_v2
+  --poison-counts 1,3,5,8 \
+  --output-dir artifacts/experiments/p4c1_real_sources_full_v2
 ```
+
+This produces 684 P4C-1 repair cases: 500 LongMemEval projections, 92 MemFail
+cases, and 92 poison variants. P4C-3 consumes the resulting 684 fault rows plus
+684 post-repair clean controls, for 1,368 detection decisions.
 
 Run native detection, then create and open its sidecar only after the runtime
 manifest says `prediction_sealed`:
@@ -54,30 +68,33 @@ manifest says `prediction_sealed`:
 ```bash
 ./run_remaining_experiment.sh p4c3 \
   --mode runtime \
-  --visible-telemetry artifacts/experiments/p4c1_real_sources_v2/visible_telemetry.jsonl \
-  --output-dir artifacts/experiments/p4c3_native_detection_v1
+  --visible-telemetry artifacts/experiments/p4c1_real_sources_full_v2/visible_telemetry.jsonl \
+  --output-dir artifacts/experiments/p4c3_native_detection_full_v2
 
 ./run_remaining_experiment.sh p4c3 \
   --mode prepare-sidecar \
-  --incident-overlay artifacts/experiments/p4c1_real_sources_v2/detection_audit_overlay.jsonl \
-  --sealed-sidecar artifacts/sealed/p4c3_detection_sidecar_v1.jsonl \
-  --output-dir artifacts/experiments/p4c3_native_detection_v1
+  --incident-overlay artifacts/experiments/p4c1_real_sources_full_v2/detection_audit_overlay.jsonl \
+  --sealed-sidecar artifacts/sealed/p4c3_detection_sidecar_full_v2.jsonl \
+  --output-dir artifacts/experiments/p4c3_native_detection_full_v2
 
 ./run_remaining_experiment.sh p4c3 \
   --mode audit \
-  --sealed-sidecar artifacts/sealed/p4c3_detection_sidecar_v1.jsonl \
-  --output-dir artifacts/experiments/p4c3_native_detection_v1
+  --sealed-sidecar artifacts/sealed/p4c3_detection_sidecar_full_v2.jsonl \
+  --output-dir artifacts/experiments/p4c3_native_detection_full_v2
 ```
 
-Run the P4C-4/5 zero-call structural matrix. Its GHOST arms use the real
-`GHOSTEcologyRouter`; adaptive arms update only from typed `EccRepairReceipt`,
-while `without_ecc_gate` is explicitly unsafe and cannot emit a receipt.
+Run the corrected P4C-4/5 v2 zero-call matrix. It contains 600 structural
+scenario variants and 4,800 outcomes (600 × 8 arms), split into 120
+calibration, 240 adaptation, and 240 sealed-holdout cases. These are robustness
+variants derived from three base templates, not 600 independent real-source
+cases. Adaptive arms update only through `observe_receipt(EccRepairReceipt)`;
+the holdout never updates the router.
 
 ```bash
 ./run_remaining_experiment.sh p4c45 \
   --overlay experiments/fixtures/p4c_zero_call_v1.jsonl \
-  --config experiments/fixtures/p4c45_zero_call_v1.json \
-  --output-dir artifacts/experiments/p4c45_zero_call_v1 \
+  --config experiments/fixtures/p4c45_prequential_v2.json \
+  --output-dir artifacts/experiments/p4c45_prequential_v2 \
   --run-mode fresh
 ```
 
@@ -86,9 +103,9 @@ binds their roots; it performs no model calls.
 
 ```bash
 ./run_remaining_experiment.sh --verify \
-  --p4c1-run artifacts/experiments/p4c1_real_sources_v2 \
-  --p4c3-run artifacts/experiments/p4c3_native_detection_v1 \
-  --p4c45-run artifacts/experiments/p4c45_zero_call_v1
+  --p4c1-run artifacts/experiments/p4c1_real_sources_full_v2 \
+  --p4c3-run artifacts/experiments/p4c3_native_detection_full_v2 \
+  --p4c45-run artifacts/experiments/p4c45_prequential_v2
 ```
 
 ## Supplementary answer confirmation
@@ -99,13 +116,13 @@ LongMemEval only; MemFail and poison fail closed until separate contracts exist.
 
 ```bash
 ./run_remaining_experiment.sh p4c2 --prepare \
-  --p4c1-run artifacts/experiments/p4c1_real_sources_v2 \
+  --p4c1-run artifacts/experiments/p4c1_real_sources_full_v2 \
   --longmemeval-data data/external/longmemeval/input/longmemeval_s_cleaned.json \
   --inputs artifacts/experiments/p4c2_answer_inputs_v1.jsonl \
   --limit 5
 
 ./run_remaining_experiment.sh p4c2 --preflight \
-  --p4c1-run artifacts/experiments/p4c1_real_sources_v2 \
+  --p4c1-run artifacts/experiments/p4c1_real_sources_full_v2 \
   --inputs artifacts/experiments/p4c2_answer_inputs_v1.jsonl \
   --limit 5
 ```
@@ -115,7 +132,7 @@ The first command that performs P4C paired answer calls is the following. Use
 
 ```bash
 ./run_remaining_experiment.sh p4c2 --execute-live \
-  --p4c1-run artifacts/experiments/p4c1_real_sources_v2 \
+  --p4c1-run artifacts/experiments/p4c1_real_sources_full_v2 \
   --inputs artifacts/experiments/p4c2_answer_inputs_v1.jsonl \
   --llm-config ~/.config/cmd-memory/live-llm.json \
   --limit 5 \

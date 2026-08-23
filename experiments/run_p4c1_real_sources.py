@@ -199,14 +199,34 @@ def build_p4c1_plan(
     *,
     longmemeval_path: Path,
     memfail_root: Path,
-    limit_per_source: int,
-    poison_recall_size: int,
-    poison_count: int,
+    limit_per_source: int = 5,
+    longmemeval_limit: int | None = None,
+    memfail_limit: int | None = None,
+    poison_case_count: int | None = None,
+    poison_recall_size: int = 10,
+    poison_count: int = 3,
+    poison_counts: tuple[int, ...] | None = None,
 ) -> P4c1Plan:
     """Project visible source structure, then freeze separate incident overlays."""
     if limit_per_source < 1:
         raise ValueError("P4C-1 limit_per_source must be positive")
-    if not 0 < poison_count <= poison_recall_size:
+    source_limits = {
+        "longmemeval": limit_per_source if longmemeval_limit is None else longmemeval_limit,
+        "memfail": limit_per_source if memfail_limit is None else memfail_limit,
+        "poison_sweep": limit_per_source if poison_case_count is None else poison_case_count,
+    }
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 1
+        for value in source_limits.values()
+    ):
+        raise ValueError("P4C-1 source-specific limits must be positive integers")
+    poison_grid = (poison_count,) if poison_counts is None else tuple(poison_counts)
+    if not poison_grid or any(
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 < value <= poison_recall_size
+        for value in poison_grid
+    ):
         raise ValueError("P4C-1 poison_count must be positive and within recall size")
     longmemeval_path = Path(longmemeval_path)
     memfail_root = Path(memfail_root)
@@ -222,7 +242,7 @@ def build_p4c1_plan(
         {
             "code_sha256": _file_sha256(poison_code),
             "recall_size": poison_recall_size,
-            "poison_count": poison_count,
+            "poison_counts": list(poison_grid),
         }
     )
     source_roots = {
@@ -235,7 +255,10 @@ def build_p4c1_plan(
     seeds: list[_P4c1Seed] = []
 
     for row in iter_json_array(longmemeval_path):
-        if len([seed for seed in seeds if seed.source == "longmemeval"]) >= limit_per_source:
+        if (
+            len([seed for seed in seeds if seed.source == "longmemeval"])
+            >= source_limits["longmemeval"]
+        ):
             break
         question_id = row.get("question_id")
         session_ids = row.get("haystack_session_ids")
@@ -321,7 +344,7 @@ def build_p4c1_plan(
     long_hop = memfail_root / "long_hop" / "long_hop_chains.csv"
     with long_hop.open(newline="", encoding="utf-8") as stream:
         for index, row in enumerate(csv.DictReader(stream)):
-            if index >= limit_per_source:
+            if index >= source_limits["memfail"]:
                 break
             source_case_id = str(row["id"])
             facts = [
@@ -391,11 +414,12 @@ def build_p4c1_plan(
                 )
             )
 
-    for index in range(limit_per_source):
+    for index in range(source_limits["poison_sweep"]):
+        case_poison_count = poison_grid[index % len(poison_grid)]
         sweep = build_sweep_case(
             case_id=f"p4c1-poison-{index + 1}",
             recall_size=poison_recall_size,
-            poisoned_count=poison_count,
+            poisoned_count=case_poison_count,
         )
         memory_rows = [
             {
@@ -459,8 +483,8 @@ def build_p4c1_plan(
             )
         )
     if any(
-        sum(seed.source == source for seed in seeds) != limit_per_source
-        for source in source_roots
+        sum(seed.source == source for seed in seeds) != source_limits[source]
+        for source in source_limits
     ):
         raise ValueError("P4C-1 could not project the requested source coverage")
     plan_body = {
@@ -482,9 +506,13 @@ def run_p4c1_zero_call(
     longmemeval_path: Path,
     memfail_root: Path,
     output_dir: Path,
-    limit_per_source: int,
-    poison_recall_size: int,
-    poison_count: int,
+    limit_per_source: int = 5,
+    longmemeval_limit: int | None = None,
+    memfail_limit: int | None = None,
+    poison_case_count: int | None = None,
+    poison_recall_size: int = 10,
+    poison_count: int = 3,
+    poison_counts: tuple[int, ...] | None = None,
 ) -> dict[str, object]:
     """Run the sealed source projection through the receipt-only live ABI."""
     output_dir = Path(output_dir)
@@ -495,8 +523,12 @@ def run_p4c1_zero_call(
         longmemeval_path=longmemeval_path,
         memfail_root=memfail_root,
         limit_per_source=limit_per_source,
+        longmemeval_limit=longmemeval_limit,
+        memfail_limit=memfail_limit,
+        poison_case_count=poison_case_count,
         poison_recall_size=poison_recall_size,
         poison_count=poison_count,
+        poison_counts=poison_counts,
     )
     projection_path = output_dir / "source_projection.jsonl"
     overlay_path = output_dir / "incident_overlay.jsonl"
@@ -508,29 +540,25 @@ def run_p4c1_zero_call(
         )
     for row in plan.incident_overlay:
         append_jsonl_fsync(overlay_path, row, ensure_ascii=False, allow_nan=False)
+    fault_telemetry: list[Mapping[str, object]] = []
+    fault_labels: list[Mapping[str, object]] = []
     for position, (seed, overlay) in enumerate(
         zip(plan.seeds, plan.incident_overlay, strict=True)
     ):
-        append_jsonl_fsync(
-            visible_telemetry_path,
+        fault_telemetry.append(
             _visible_telemetry(
                 seed=seed,
                 case_id=str(overlay["case_id"]),
                 observed_at_event_index=1000 + position * 3,
                 source_manifest_root=plan.plan_sha256,
-            ),
-            ensure_ascii=False,
-            allow_nan=False,
+            )
         )
-        append_jsonl_fsync(
-            detection_overlay_path,
+        fault_labels.append(
             {
                 "schema_version": "cmd-p4c3-audit-overlay-v1",
                 "case_id": str(overlay["case_id"]),
                 "label": seed.mechanism,
-            },
-            ensure_ascii=False,
-            allow_nan=False,
+            }
         )
 
     failures: list[FailureDeposit] = []
@@ -699,6 +727,8 @@ def run_p4c1_zero_call(
         not receipt.committed for receipt in receipts
     ):
         raise ValueError("P4C-1 clean controls require one committed repair per case")
+    clean_telemetry: list[Mapping[str, object]] = []
+    clean_labels: list[Mapping[str, object]] = []
     for position, (seed, overlay, receipt) in enumerate(
         zip(plan.seeds, plan.incident_overlay, receipts, strict=True)
     ):
@@ -709,16 +739,30 @@ def run_p4c1_zero_call(
             source_manifest_root=plan.plan_sha256,
             committed_state_root=receipt.after_root,
         )
-        append_jsonl_fsync(
-            visible_telemetry_path, clean, ensure_ascii=False, allow_nan=False
-        )
-        append_jsonl_fsync(
-            detection_overlay_path,
+        clean_telemetry.append(clean)
+        clean_labels.append(
             {
                 "schema_version": "cmd-p4c3-audit-overlay-v1",
                 "case_id": clean["case_id"],
                 "label": "no_fault",
-            },
+            }
+        )
+    telemetry_by_case = {
+        str(row["case_id"]): row for row in (*fault_telemetry, *clean_telemetry)
+    }
+    labels_by_case = {
+        str(row["case_id"]): row for row in (*fault_labels, *clean_labels)
+    }
+    ordered_telemetry = sorted(
+        telemetry_by_case.values(), key=lambda row: int(row["observed_at_event_index"])
+    )
+    for row in ordered_telemetry:
+        append_jsonl_fsync(
+            visible_telemetry_path, row, ensure_ascii=False, allow_nan=False
+        )
+        append_jsonl_fsync(
+            detection_overlay_path,
+            labels_by_case[str(row["case_id"])],
             ensure_ascii=False,
             allow_nan=False,
         )
@@ -726,8 +770,12 @@ def run_p4c1_zero_call(
         longmemeval_path=longmemeval_path,
         memfail_root=memfail_root,
         limit_per_source=limit_per_source,
+        longmemeval_limit=longmemeval_limit,
+        memfail_limit=memfail_limit,
+        poison_case_count=poison_case_count,
         poison_recall_size=poison_recall_size,
         poison_count=poison_count,
+        poison_counts=poison_counts,
     ).source_roots:
         raise ValueError("P4C-1 source roots changed during execution")
     source_counts = {
@@ -740,6 +788,20 @@ def run_p4c1_zero_call(
         "plan_sha256": plan.plan_sha256,
         "source_roots": dict(plan.source_roots),
         "source_counts": source_counts,
+        "requested_source_counts": {
+            "longmemeval": limit_per_source if longmemeval_limit is None else longmemeval_limit,
+            "memfail": limit_per_source if memfail_limit is None else memfail_limit,
+            "poison_sweep": limit_per_source if poison_case_count is None else poison_case_count,
+        },
+        "telemetry_ordering": "observed_at_event_index_ascending_fault_then_clean_per_case",
+        "poison_grid": {
+            "recall_size": poison_recall_size,
+            "poison_counts": list(
+                (poison_count,) if poison_counts is None else poison_counts
+            ),
+            "case_count": source_counts["poison_sweep"],
+            "evidence_unit": "parameterized_structural_variant_not_independent_real_source_case",
+        },
         "projection_sha256": content_sha256(
             list(plan.source_projection), ensure_ascii=False, allow_nan=False
         ),
@@ -776,16 +838,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--memfail-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--limit-per-source", type=int, default=5)
+    parser.add_argument("--longmemeval-limit", type=int)
+    parser.add_argument("--memfail-limit", type=int)
+    parser.add_argument("--poison-case-count", type=int)
     parser.add_argument("--poison-recall-size", type=int, default=10)
     parser.add_argument("--poison-count", type=int, default=3)
+    parser.add_argument(
+        "--poison-counts",
+        help="comma-separated poison counts; cycled over poison structural variants",
+    )
     args = parser.parse_args(argv)
     result = run_p4c1_zero_call(
         longmemeval_path=args.longmemeval,
         memfail_root=args.memfail_root,
         output_dir=args.output_dir,
         limit_per_source=args.limit_per_source,
+        longmemeval_limit=args.longmemeval_limit,
+        memfail_limit=args.memfail_limit,
+        poison_case_count=args.poison_case_count,
         poison_recall_size=args.poison_recall_size,
         poison_count=args.poison_count,
+        poison_counts=(
+            None
+            if args.poison_counts is None
+            else tuple(int(value) for value in args.poison_counts.split(","))
+        ),
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0

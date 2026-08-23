@@ -12,13 +12,14 @@ from experiments.run_p4c1_real_sources import (
     P4C1_MANIFEST_SCHEMA,
     SESSION_PROJECTION_SCHEMA,
 )
+from experiments.run_p4c45_prequential_v2 import REPORT_SCHEMA as P4C45_REPORT_SCHEMA
 
 
 SCHEMA = "cmd-p4c-mainline-program-v1"
 PRIMARY_CLAIM = "gold-free memory fault correction and evolution"
-DEFAULT_P4C1 = Path("artifacts/experiments/p4c1_real_sources_v2")
-DEFAULT_P4C3 = Path("artifacts/experiments/p4c3_native_detection_v1")
-DEFAULT_P4C45 = Path("artifacts/experiments/p4c45_zero_call_v1")
+DEFAULT_P4C1 = Path("artifacts/experiments/p4c1_real_sources_full_v2")
+DEFAULT_P4C3 = Path("artifacts/experiments/p4c3_native_detection_full_v2")
+DEFAULT_P4C45 = Path("artifacts/experiments/p4c45_prequential_v2")
 
 
 def _sha(path: Path) -> str:
@@ -77,6 +78,18 @@ def verify(*, p4c1_run: Path, p4c3_run: Path, p4c45_run: Path) -> dict[str, obje
     p4c3_runtime = _object(p4c3_runtime_path, "P4C-3 runtime manifest")
     p4c3_audit = _object(p4c3_audit_path, "P4C-3 audit")
     p4c45 = _object(p4c45_path, "P4C-4/5 manifest")
+    source_counts = p4c1.get("source_counts")
+    p4c45_arms = p4c45.get("arms")
+    ghost_holdout_frozen = isinstance(p4c45_arms, Mapping) and all(
+        isinstance(p4c45_arms.get(arm), Mapping)
+        and p4c45_arms[arm].get("holdout_router_updates") == 0
+        for arm in (
+            "ghost_zero_frozen",
+            "ghost_zero_evolution",
+            "ghost_typed_prior_frozen",
+            "ghost_typed_prior_evolution",
+        )
+    )
     if not (
         p4c1.get("schema_version") == P4C1_MANIFEST_SCHEMA
         and p4c1.get("status") == "success"
@@ -86,6 +99,10 @@ def verify(*, p4c1_run: Path, p4c3_run: Path, p4c45_run: Path) -> dict[str, obje
         and p4c1.get("runtime_uses_labels") is False
         and p4c1.get("router_feedback") == "EccRepairReceipt"
         and p4c1.get("session_projection_schema") == SESSION_PROJECTION_SCHEMA
+        and isinstance(source_counts, Mapping)
+        and int(source_counts.get("longmemeval", 0)) >= 500
+        and int(source_counts.get("memfail", 0)) >= 92
+        and int(source_counts.get("poison_sweep", 0)) >= 92
     ):
         raise ValueError("P4C-1 is not eligible for the mainline claim")
     if not (
@@ -95,15 +112,30 @@ def verify(*, p4c1_run: Path, p4c3_run: Path, p4c45_run: Path) -> dict[str, obje
         and p4c3_runtime.get("external_call_count") == 0
         and p4c3_audit.get("paper_role") == "mainline"
         and p4c3_audit.get("runtime_feedback_written") is False
+        and int(p4c3_runtime.get("case_count", 0)) >= 1368
+        and int(p4c3_runtime.get("syndrome_count", 0)) >= 684
+        and int(p4c3_runtime.get("abstain_count", 0)) >= 684
     ):
         raise ValueError("P4C-3 is not eligible for the mainline claim")
     if not (
-        p4c45.get("status") == "success"
+        p4c45.get("schema_version") == P4C45_REPORT_SCHEMA
+        and p4c45.get("holdout_update_policy") == "frozen_no_observe"
+        and p4c45.get("status") == "success"
         and p4c45.get("paper_role") == "mainline"
         and p4c45.get("primary_claim") == PRIMARY_CLAIM
         and p4c45.get("runtime_uses_gold") is False
         and p4c45.get("runtime_uses_labels") is False
         and p4c45.get("router_implementation") == "GHOSTEcologyRouter"
+        and p4c45.get("router_feedback_channel")
+        == "GHOSTEcologyRouter.observe_receipt(EccRepairReceipt) only"
+        and isinstance(p4c45.get("metric_semantics"), Mapping)
+        and p4c45["metric_semantics"].get("primary")
+        == "safe_committed_resolution_per_incident"
+        and int(p4c45.get("case_count", 0)) >= 600
+        and int(p4c45.get("outcome_count", 0)) >= 4800
+        and isinstance(p4c45.get("phase_case_counts"), Mapping)
+        and int(p4c45["phase_case_counts"].get("holdout", 0)) >= 240
+        and ghost_holdout_frozen
     ):
         raise ValueError("P4C-4/5 is not eligible for the mainline claim")
     return {

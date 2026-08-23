@@ -8,6 +8,7 @@ from experiments.run_p4c1_real_sources import (
     SESSION_PROJECTION_SCHEMA,
 )
 from experiments.run_p4c_mainline import build_plan, verify
+from experiments.run_p4c45_prequential_v2 import REPORT_SCHEMA
 
 
 def _write(path: Path, value: object) -> None:
@@ -47,6 +48,11 @@ def test_verify_accepts_only_mainline_manifests(tmp_path: Path) -> None:
             "runtime_uses_labels": False,
             "router_feedback": "EccRepairReceipt",
             "session_projection_schema": SESSION_PROJECTION_SCHEMA,
+            "source_counts": {
+                "longmemeval": 500,
+                "memfail": 92,
+                "poison_sweep": 92,
+            },
         },
     )
     p4c3.mkdir()
@@ -57,6 +63,9 @@ def test_verify_accepts_only_mainline_manifests(tmp_path: Path) -> None:
                 "paper_role": "mainline",
                 "runtime_gold_free": True,
                 "external_call_count": 0,
+                "case_count": 1368,
+                "syndrome_count": 684,
+                "abstain_count": 684,
             }
         ),
         encoding="utf-8",
@@ -68,12 +77,32 @@ def test_verify_accepts_only_mainline_manifests(tmp_path: Path) -> None:
     _write(
         p4c45,
         {
+            "schema_version": REPORT_SCHEMA,
             "status": "success",
             "paper_role": "mainline",
             "primary_claim": "gold-free memory fault correction and evolution",
             "runtime_uses_gold": False,
             "runtime_uses_labels": False,
             "router_implementation": "GHOSTEcologyRouter",
+            "router_feedback_channel": "GHOSTEcologyRouter.observe_receipt(EccRepairReceipt) only",
+            "holdout_update_policy": "frozen_no_observe",
+            "metric_semantics": {"primary": "safe_committed_resolution_per_incident"},
+            "case_count": 600,
+            "phase_case_counts": {
+                "calibration": 120,
+                "adaptation": 240,
+                "holdout": 240,
+            },
+            "outcome_count": 4800,
+            "arms": {
+                arm: {"holdout_router_updates": 0}
+                for arm in (
+                    "ghost_zero_frozen",
+                    "ghost_zero_evolution",
+                    "ghost_typed_prior_frozen",
+                    "ghost_typed_prior_evolution",
+                )
+            },
         },
     )
     report = verify(p4c1_run=p4c1, p4c3_run=p4c3, p4c45_run=p4c45)

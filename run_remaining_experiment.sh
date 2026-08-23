@@ -34,6 +34,10 @@ case "$stage" in
     ;;
   p4c45)
     shift
+    exec python -B -m experiments.run_p4c45_prequential_v2 "$@"
+    ;;
+  p4c45-v1)
+    shift
     exec python -B -m experiments.run_p4c45_zero_call "$@"
     ;;
   p4c6)
@@ -41,7 +45,7 @@ case "$stage" in
     exec python -B -m experiments.run_p4c6_sealed_evaluation "$@"
     ;;
   --stages)
-    printf '%s\n' mainline p4c1 p4c3 p4c45 p4c2 p4c6 legacy-answer
+    printf '%s\n' mainline p4c1 p4c3 p4c45 p4c45-v1 p4c2 p4c6 legacy-answer
     ;;
   *)
     printf 'unknown P4C stage: %s\n' "$stage" >&2
