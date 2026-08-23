@@ -19,6 +19,12 @@ from typing import Any
 from cmd_audit.core.state_codec import append_jsonl_fsync, atomic_json_write, content_sha256
 from cmd_audit.repair.ecc import EccRepairReceipt
 from experiments.p4c_ecc_runner import RUN_SCHEMA_VERSION
+from experiments.run_p4c1_real_sources import (
+    P4C1_MANIFEST_SCHEMA,
+    P4C1_PROJECTION_SCHEMA,
+    SESSION_PROJECTION_SCHEMA,
+    project_gold_free_session,
+)
 from experiments.run_longmemeval_e2e import (
     AnswerRequest,
     Answerer,
@@ -164,6 +170,8 @@ def build_plan(*, limit: int, output: Path, run_mode: str) -> dict[str, object]:
         "planned_calls": limit * len(ARMS),
         "external_calls_authorized": False,
         "runtime_gold_free": True,
+        "paper_role": "supplementary",
+        "mainline_commit_authority": False,
         "same_trace_answer_replay": False,
         "router_feedback": "EccRepairReceipt-only",
         "evaluator_boundary": "prediction-seal-first",
@@ -173,16 +181,8 @@ def build_plan(*, limit: int, output: Path, run_mode: str) -> dict[str, object]:
 
 
 def _session_text(session: object) -> str:
-    if not isinstance(session, list):
-        raise ValueError("LongMemEval session must be a list")
     lines: list[str] = []
-    for message in session:
-        if (
-            not isinstance(message, Mapping)
-            or not isinstance(message.get("role"), str)
-            or not isinstance(message.get("content"), str)
-        ):
-            raise ValueError("LongMemEval session message is invalid")
+    for message in project_gold_free_session(session):
         lines.append(f"{message['role']}: {message['content']}")
     return "\n".join(lines)
 
@@ -250,8 +250,14 @@ def prepare_inputs(
         for memory in memory_records:
             if not isinstance(memory, Mapping) or str(memory.get("source_event_id")) not in indexed:
                 raise ValueError("P4C-1 memory has no LongMemEval session binding")
-            session = sessions[indexed[str(memory["source_event_id"])]]
-            if content_sha256(session, ensure_ascii=False, allow_nan=False) != memory.get("content_sha256"):
+            session = project_gold_free_session(
+                sessions[indexed[str(memory["source_event_id"])]]
+            )
+            if (
+                memory.get("content_projection_schema") != SESSION_PROJECTION_SCHEMA
+                or content_sha256(session, ensure_ascii=False, allow_nan=False)
+                != memory.get("content_sha256")
+            ):
                 raise ValueError("LongMemEval session differs from P4C-1 content root")
             projected_sessions.append((str(memory["memory_id"]), session))
         if not receipt.committed or receipt.before_root != projection.get("state_root"):
@@ -298,6 +304,8 @@ def prepare_inputs(
         "source": "longmemeval",
         "case_count": len(rows),
         "runtime_gold_free": True,
+        "paper_role": "supplementary",
+        "primary_claim": "paired answer confirmation only",
         "unsupported_sources": ["memfail", "poison_sweep"],
         "unsupported_reason": "no frozen natural answer-query contract",
         "p4c1_manifest_sha256": _sha_file(p4c1_run / "p4c1_manifest.json"),
@@ -316,11 +324,14 @@ def preflight(
     p4c1_manifest = _json_object(p4c1_run / "p4c1_manifest.json", "P4C-1 manifest")
     runtime_manifest = _json_object(p4c1_run / "runtime" / "manifest.json", "P4C-1 runtime manifest")
     if not (
-        p4c1_manifest.get("schema_version") == "cmd-p4c1-real-source-zero-call-v1"
+        p4c1_manifest.get("schema_version") == P4C1_MANIFEST_SCHEMA
         and p4c1_manifest.get("status") == "success"
         and p4c1_manifest.get("runtime_uses_gold") is False
         and p4c1_manifest.get("runtime_uses_labels") is False
         and p4c1_manifest.get("router_feedback") == "EccRepairReceipt"
+        and p4c1_manifest.get("paper_role") == "mainline"
+        and p4c1_manifest.get("session_projection_schema")
+        == SESSION_PROJECTION_SCHEMA
         and p4c1_manifest.get("model_call_count") == 0
         and runtime_manifest.get("schema_version") == RUN_SCHEMA_VERSION
         and runtime_manifest.get("status") == "success"
@@ -339,7 +350,7 @@ def preflight(
         if (
             not isinstance(case_id, str)
             or overlay.get("schema_version") != "cmd-p4c1-incident-overlay-v1"
-            or projection.get("schema_version") != "cmd-p4c1-source-projection-v1"
+            or projection.get("schema_version") != P4C1_PROJECTION_SCHEMA
             or overlay.get("source") != projection.get("source")
             or overlay.get("state_root") != projection.get("state_root")
             or receipt.before_root != projection.get("state_root")
@@ -402,6 +413,7 @@ def preflight(
             "mode": "preflight",
             "preflight_passed": True,
             "runtime_gold_free": True,
+            "paper_role": "supplementary",
             "eligible_case_count": len(cases),
             "roots": roots,
         },
@@ -555,6 +567,8 @@ def run_p4c2(
         "roots": report["roots"],
         "prediction_seal_sha256": _sha_file(output / "prediction_seal.json"),
         "router_feedback": "EccRepairReceipt-only",
+        "paper_role": "supplementary",
+        "mainline_commit_authority": False,
         "router_updated_from_predictions": False,
         "sealed_evaluator": "not_opened_by_runtime",
     }

@@ -597,6 +597,8 @@ def run_p4c45_zero_call(
         "runtime_uses_gold": False,
         "runtime_uses_labels": False,
         "same_trace_answer_replay": False,
+        "paper_role": "mainline",
+        "primary_claim": "gold-free memory fault correction and evolution",
         "router_feedback_channel": (
             "EccRepairReceipt-only for adaptive ECC arms; unsafe no-gate control excluded"
         ),

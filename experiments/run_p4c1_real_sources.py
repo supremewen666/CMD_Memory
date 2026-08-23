@@ -55,6 +55,29 @@ class P4c1Plan:
     seeds: tuple[_P4c1Seed, ...]
 
 
+SESSION_PROJECTION_SCHEMA = "cmd-runtime-session-role-content-v1"
+P4C1_MANIFEST_SCHEMA = "cmd-p4c1-real-source-zero-call-v2"
+P4C1_PROJECTION_SCHEMA = "cmd-p4c1-source-projection-v2"
+
+
+def project_gold_free_session(session: object) -> list[dict[str, str]]:
+    """Return the only LongMemEval message fields admitted to runtime state."""
+    if not isinstance(session, list):
+        raise ValueError("LongMemEval session must be a list")
+    projected: list[dict[str, str]] = []
+    for message in session:
+        if (
+            not isinstance(message, Mapping)
+            or not isinstance(message.get("role"), str)
+            or not isinstance(message.get("content"), str)
+        ):
+            raise ValueError("LongMemEval message requires role/content")
+        projected.append(
+            {"role": str(message["role"]), "content": str(message["content"])}
+        )
+    return projected
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -229,9 +252,12 @@ def build_p4c1_plan(
             {
                 "memory_id": f"lm-{question_id}-{index}",
                 "content_sha256": content_sha256(
-                    sessions[index], ensure_ascii=False, allow_nan=False
+                    project_gold_free_session(sessions[index]),
+                    ensure_ascii=False,
+                    allow_nan=False,
                 ),
                 "source_event_id": str(session_ids[index]),
+                "content_projection_schema": SESSION_PROJECTION_SCHEMA,
             }
             for index in range(2)
         ]
@@ -246,11 +272,17 @@ def build_p4c1_plan(
         state = _base_state(memories)
         case_id = f"p4c1-longmemeval-{question_id}"
         projection = {
-            "schema_version": "cmd-p4c1-source-projection-v1",
+            "schema_version": P4C1_PROJECTION_SCHEMA,
             "source": "longmemeval",
             "source_case_id": question_id,
             "source_root": long_root,
-            "visible_fields": ["question_id", "haystack_session_ids", "haystack_sessions"],
+            "visible_fields": [
+                "question_id",
+                "haystack_session_ids",
+                "haystack_sessions[].role",
+                "haystack_sessions[].content",
+            ],
+            "session_projection_schema": SESSION_PROJECTION_SCHEMA,
             "memory_records": memory_rows,
             "state_root": content_sha256(state, ensure_ascii=False, allow_nan=False),
         }
@@ -319,7 +351,7 @@ def build_p4c1_plan(
             state["pipeline"]["retrieval"] = False
             case_id = f"p4c1-memfail-{source_case_id}"
             projection = {
-                "schema_version": "cmd-p4c1-source-projection-v1",
+                "schema_version": P4C1_PROJECTION_SCHEMA,
                 "source": "memfail",
                 "source_case_id": source_case_id,
                 "source_root": memfail_root_hash,
@@ -387,7 +419,7 @@ def build_p4c1_plan(
         state = _base_state(memories)
         case_id = sweep.case_id
         projection = {
-            "schema_version": "cmd-p4c1-source-projection-v1",
+            "schema_version": P4C1_PROJECTION_SCHEMA,
             "source": "poison_sweep",
             "source_case_id": sweep.case_id,
             "source_root": poison_root,
@@ -704,7 +736,7 @@ def run_p4c1_zero_call(
     }
     result: dict[str, object] = {
         **runtime,
-        "schema_version": "cmd-p4c1-real-source-zero-call-v1",
+        "schema_version": P4C1_MANIFEST_SCHEMA,
         "plan_sha256": plan.plan_sha256,
         "source_roots": dict(plan.source_roots),
         "source_counts": source_counts,
@@ -721,6 +753,9 @@ def run_p4c1_zero_call(
         "router_snapshot_sha256": router.snapshot_sha256,
         "router": "P4cGhostRouter",
         "router_feedback": "EccRepairReceipt",
+        "paper_role": "mainline",
+        "primary_claim": "gold-free memory fault correction and evolution",
+        "session_projection_schema": SESSION_PROJECTION_SCHEMA,
         "raw_sources_mutated": False,
         "claim_scope": "real_source_structural_wiring_not_task_accuracy",
     }
@@ -756,7 +791,15 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["P4c1Plan", "build_p4c1_plan", "run_p4c1_zero_call"]
+__all__ = [
+    "P4c1Plan",
+    "P4C1_MANIFEST_SCHEMA",
+    "P4C1_PROJECTION_SCHEMA",
+    "SESSION_PROJECTION_SCHEMA",
+    "build_p4c1_plan",
+    "project_gold_free_session",
+    "run_p4c1_zero_call",
+]
 
 
 if __name__ == "__main__":

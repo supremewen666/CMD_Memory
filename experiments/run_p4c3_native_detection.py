@@ -250,6 +250,8 @@ def run_p4c3_detection(*, visible_telemetry: Path, output_dir: Path) -> dict[str
         "sealed_sidecar_opened": False,
         "external_call_count": 0,
         "same_trace_answer_replay": False,
+        "paper_role": "mainline",
+        "primary_claim": "gold-free memory fault correction and evolution",
         "visible_telemetry_sha256": _sha256(visible_telemetry),
         "detection_sha256": _sha256(detection_path),
         "case_count": len(detections),
@@ -333,6 +335,7 @@ def audit_p4c3_detection(*, output_dir: Path, sealed_sidecar: Path) -> dict[str,
         "per_class": per_class,
         "confusion": {truth: dict(confusion[truth]) for truth in LABELS},
         "runtime_feedback_written": False,
+        "paper_role": "mainline",
         "external_call_count": 0,
         "claim_scope": "sealed_detector_precision_recall_confusion_and_false_repair_only",
     }
@@ -394,6 +397,7 @@ def prepare_detection_sidecar(
         "sidecar_sha256": _sha256(sealed_sidecar),
         "case_count": len(labels),
         "runtime_feedback_written": False,
+        "paper_role": "mainline-supporting-sidecar",
     }
 
 

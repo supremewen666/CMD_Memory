@@ -5,6 +5,7 @@ from pathlib import Path
 
 from experiments.run_p4c1_real_sources import (
     build_p4c1_plan,
+    project_gold_free_session,
     run_p4c1_zero_call,
 )
 from experiments.run_p4c3_native_detection import (
@@ -17,6 +18,19 @@ from experiments.run_p4c3_native_detection import (
 ROOT = Path(__file__).resolve().parents[2]
 LONGMEM = ROOT / "data/external/longmemeval/input/longmemeval_s_cleaned.json"
 MEMFAIL = ROOT / "data/external/memfail/datasets"
+
+
+def test_gold_free_session_projection_ignores_nested_evaluation_metadata() -> None:
+    clean = [{"role": "user", "content": "fact"}]
+    annotated = [
+        {
+            "role": "user",
+            "content": "fact",
+            "has_answer": True,
+            "label": "sealed",
+        }
+    ]
+    assert project_gold_free_session(annotated) == clean
 
 
 def test_p4c1_plan_projects_three_real_sources_without_runtime_sealed_fields() -> None:
@@ -92,6 +106,7 @@ def test_p4c1_real_source_suite_runs_receipt_only_and_zero_call(
     assert result["model_call_count"] == 0
     assert result["external_call_count"] == 0
     assert result["runtime_uses_gold"] is False
+    assert result["paper_role"] == "mainline"
     assert result["same_trace_answer_replay"] is False
     assert (tmp_path / "p4c1" / "source_projection.jsonl").exists()
     assert (tmp_path / "p4c1" / "incident_overlay.jsonl").exists()

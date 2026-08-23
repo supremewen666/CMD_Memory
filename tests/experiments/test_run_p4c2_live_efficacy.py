@@ -15,6 +15,12 @@ from experiments.run_p4c2_live_efficacy import (
     preflight,
     run_p4c2,
 )
+from experiments.run_p4c1_real_sources import (
+    P4C1_MANIFEST_SCHEMA,
+    P4C1_PROJECTION_SCHEMA,
+    SESSION_PROJECTION_SCHEMA,
+    project_gold_free_session,
+)
 
 
 class _RecordingAnswerer:
@@ -62,7 +68,7 @@ def _fixture(tmp_path: Path, *, forbidden: bool = False) -> tuple[Path, Path]:
         recurrence_after_commit=False,
     )
     projection = {
-        "schema_version": "cmd-p4c1-source-projection-v1",
+        "schema_version": P4C1_PROJECTION_SCHEMA,
         "source": "longmemeval",
         "source_case_id": "q1",
         "source_root": "a" * 64,
@@ -90,13 +96,15 @@ def _fixture(tmp_path: Path, *, forbidden: bool = False) -> tuple[Path, Path]:
     (p4c1 / "p4c1_manifest.json").write_text(
         json.dumps(
             {
-                "schema_version": "cmd-p4c1-real-source-zero-call-v1",
+                "schema_version": P4C1_MANIFEST_SCHEMA,
                 "status": "success",
                 "case_count": 1,
                 "runtime_uses_gold": False,
                 "runtime_uses_labels": False,
                 "router_feedback": "EccRepairReceipt",
                 "model_call_count": 0,
+                "paper_role": "mainline",
+                "session_projection_schema": SESSION_PROJECTION_SCHEMA,
             }
         ),
         encoding="utf-8",
@@ -207,12 +215,14 @@ def test_prepare_inputs_projects_longmemeval_without_gold(tmp_path: Path) -> Non
         {
             "memory_id": "m-old",
             "source_event_id": "s1",
-            "content_sha256": content_sha256(sessions[0]),
+            "content_sha256": content_sha256(project_gold_free_session(sessions[0])),
+            "content_projection_schema": SESSION_PROJECTION_SCHEMA,
         },
         {
             "memory_id": "m-new",
             "source_event_id": "s2",
-            "content_sha256": content_sha256(sessions[1]),
+            "content_sha256": content_sha256(project_gold_free_session(sessions[1])),
+            "content_projection_schema": SESSION_PROJECTION_SCHEMA,
         },
     ]
     _write_jsonl(projection_path, [projection])

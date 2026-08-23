@@ -42,9 +42,8 @@ def build(*, dataset:str, ranking_root:Path, output:Path, run_mode:str="fresh", 
         return prior
     ranking=ranking_root/"rankings.jsonl"; receipt=ranking_root/"run_receipt.json"; p4a=ranking_root/"manifest.json"
     binding={"dataset":dataset,"ranking_root":str(ranking_root.resolve()),"ranking_sha256":_sha(ranking) if ranking.is_file() else None,"receipt_sha256":_sha(receipt) if receipt.is_file() else None,"p4a_manifest_sha256":_sha(p4a) if p4a.is_file() else None,"feature_schema":FEATURE_SCHEMA,"feature_allowlist":sorted(ALLOWED)}
-    if dataset=="memfail" and not ranking.is_file():
-        result={"schema_version":SCHEMA,**binding,"status":"BLOCKED_CANDIDATE_CACHE_UNAVAILABLE","reason":"P4A MemFail BM25 artifact has metrics but no root-bound candidate ranking cache; deterministic reconstruction would be a new cache, not P4A evidence.","typed_evidence_gate":_gate([],binding),"network":"prohibited","api":"prohibited","mem0":"prohibited"}; output.mkdir(parents=True,exist_ok=True); atomic_json_write(manifest_path,result,ensure_ascii=False,allow_nan=False,indent=2,trailing_newline=True); return result
-    if not ranking.is_file() or not receipt.is_file(): raise ValueError("P4B requires P4A ranking and root-bound receipt")
+    if not ranking.is_file() or not receipt.is_file():
+        result={"schema_version":SCHEMA,**binding,"status":"BLOCKED_CANDIDATE_CACHE_UNAVAILABLE","paper_role":"legacy","mainline":False,"scientific_status":"degraded_artifact_dependent_baseline","reason":"The legacy P4A ranking/cache receipt is unavailable; it is not reconstructed because that would manufacture new evidence for a degraded path.","typed_evidence_gate":_gate([],binding),"network":"prohibited","api":"prohibited","mem0":"prohibited"}; output.mkdir(parents=True,exist_ok=True); atomic_json_write(manifest_path,result,ensure_ascii=False,allow_nan=False,indent=2,trailing_newline=True); return result
     root=Path(__file__).resolve().parents[1]; data=root/"data/external/longmemeval/input"/("longmemeval_s_cleaned.json" if dataset.endswith("s") else "longmemeval_m_cleaned.json")
     cases={str(c["question_id"]):c for c in _case_stream(data,limit or 10**9)}; rows=[]; output.mkdir(parents=True,exist_ok=True); ledger=output/"typed_evidence.jsonl"
     for ordinal,line in enumerate(ranking.read_text(encoding="utf-8").splitlines(),1):
@@ -63,7 +62,7 @@ def build(*, dataset:str, ranking_root:Path, output:Path, run_mode:str="fresh", 
         if set(features) != {"query_sha256","candidates"} or any(set(x)-ALLOWED for x in features["candidates"]): raise ValueError("feature allowlist violation")
         row={"schema_version":SCHEMA,"event_index":ordinal,"case_id_sha256":content_sha256(str(case["question_id"])),"candidate_root":content_sha256(features["candidates"],ensure_ascii=False,allow_nan=False),"features":features,"actionability":"not_actionable","reason":"ranking has no selected-action typed outcome telemetry","previous_hash":rows[-1]["event_hash"] if rows else "0"*64}
         row["event_hash"]=content_sha256(row,ensure_ascii=False,allow_nan=False); append_jsonl_fsync(ledger,row,ensure_ascii=False,allow_nan=False); rows.append(row)
-    result={"schema_version":SCHEMA,**binding,"status":"success","case_count":len(rows),"ledger_sha256":_sha(ledger),"ledger_head":rows[-1]["event_hash"] if rows else "0"*64,"typed_evidence_gate":_gate(rows,binding),"runtime_forbidden":sorted(FORBIDDEN),"label_sidecar":"not opened by builder","network":"prohibited","api":"prohibited","mem0":"prohibited"}
+    result={"schema_version":SCHEMA,**binding,"status":"success","paper_role":"legacy","mainline":False,"scientific_status":"degraded_not_for_primary_claim","case_count":len(rows),"ledger_sha256":_sha(ledger),"ledger_head":rows[-1]["event_hash"] if rows else "0"*64,"typed_evidence_gate":_gate(rows,binding),"runtime_forbidden":sorted(FORBIDDEN),"label_sidecar":"not opened by builder","network":"prohibited","api":"prohibited","mem0":"prohibited"}
     atomic_json_write(manifest_path,result,ensure_ascii=False,allow_nan=False,indent=2,trailing_newline=True); return result
 
 def main(argv:Sequence[str]|None=None)->int:

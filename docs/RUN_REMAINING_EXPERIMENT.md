@@ -1,11 +1,15 @@
 # P4C experiment program
 
-`run_remaining_experiment.sh` is the safe entrypoint for the complete P4C
-program. With no stage it preserves the original live-confirmation launcher;
-with a stage name it dispatches P4C-1 through P4C-6. Planning, preparation,
-preflight, native detection, ablation, robustness, and exact audit are zero-call.
-Only P4C-2 `--execute-live`, the legacy calibration `--execute`, and P4C-6
-semantic `--evaluate --backend openai-compatible` can contact a model endpoint.
+The paper's primary claim is **gold-free memory fault correction and
+evolution**. `run_remaining_experiment.sh` now defaults to a zero-call mainline
+plan containing P4C-1, P4C-3, and P4C-4/5. P4C-2/P4C-6 are supplementary
+answer confirmation. The old four-arm LongMemEval answer pipeline is legacy and
+can only be selected explicitly.
+
+```bash
+./run_remaining_experiment.sh
+./run_remaining_experiment.sh --plan
+```
 
 List the available stages:
 
@@ -13,23 +17,26 @@ List the available stages:
 ./run_remaining_experiment.sh --stages
 ```
 
-| Stage | Purpose | Calls by default | May read sealed labels |
+| Stage | Paper role | Purpose | Calls by default |
 |---|---|---:|---:|
-| `calibration` | Four-arm answer confirmation over frozen retrieval | no | no |
-| `p4c1` | Real-source ECC state/repair wiring and visible telemetry | no | no |
-| `p4c2` | Paired control-state vs repaired-state answer efficacy | no | no |
-| `p4c3` | Native syndrome detection and post-seal detector audit | no | audit only |
-| `p4c45` | Router/ECC ablation and robustness matrix | no | no |
-| `p4c6` | Independent paired answer evaluation | exact: no | yes, after seal |
+| `mainline` | mainline | Plan/verify primary evidence | no |
+| `p4c1` | mainline | Gold-free real-source correction receipts | no |
+| `p4c3` | mainline | Native detection, abstention, false-repair audit | no |
+| `p4c45` | mainline | GHOST/ECC evolution, ablation, robustness | no |
+| `p4c2` | supplementary | Paired repaired-state answer confirmation | no |
+| `p4c6` | supplementary | Independent paired answer evaluation | exact: no |
+| `legacy-answer` | legacy | Degraded four-arm answer wiring pipeline | no |
 
 The plural `run_remaining_experiments.sh` remains the legacy Route A/V4/GPU
 launcher and is not part of this P4C program.
 
-## Formal P4C sequence
+## Mainline sequence
 
 Use a new P4C-1 output directory because a fresh run refuses to overwrite old
 evidence. This run also writes `visible_telemetry.jsonl` directly from live
-state; the detector never reconstructs telemetry from overlay labels.
+state; the detector never reconstructs telemetry from overlay labels. The v2
+source projection admits only nested `role/content`; fields such as
+`has_answer` never enter memory content hashes or state decisions.
 
 ```bash
 ./run_remaining_experiment.sh p4c1 \
@@ -62,9 +69,33 @@ manifest says `prediction_sealed`:
   --output-dir artifacts/experiments/p4c3_native_detection_v1
 ```
 
-Build P4C-2's gold-free LongMemEval projection. P4C-1 currently has a natural
-answer-query contract for LongMemEval only; MemFail and poison cases fail closed
-until separate query contracts are frozen.
+Run the P4C-4/5 zero-call structural matrix. Its GHOST arms use the real
+`GHOSTEcologyRouter`; adaptive arms update only from typed `EccRepairReceipt`,
+while `without_ecc_gate` is explicitly unsafe and cannot emit a receipt.
+
+```bash
+./run_remaining_experiment.sh p4c45 \
+  --overlay experiments/fixtures/p4c_zero_call_v1.jsonl \
+  --config experiments/fixtures/p4c45_zero_call_v1.json \
+  --output-dir artifacts/experiments/p4c45_zero_call_v1 \
+  --run-mode fresh
+```
+
+Verify the completed primary-evidence bundle. This only reads manifests and
+binds their roots; it performs no model calls.
+
+```bash
+./run_remaining_experiment.sh --verify \
+  --p4c1-run artifacts/experiments/p4c1_real_sources_v2 \
+  --p4c3-run artifacts/experiments/p4c3_native_detection_v1 \
+  --p4c45-run artifacts/experiments/p4c45_zero_call_v1
+```
+
+## Supplementary answer confirmation
+
+P4C-2/P4C-6 do not authorize commit, do not update GHOST, and do not support
+the primary claim. P4C-1 currently has a natural answer-query contract for
+LongMemEval only; MemFail and poison fail closed until separate contracts exist.
 
 ```bash
 ./run_remaining_experiment.sh p4c2 --prepare \
@@ -89,18 +120,6 @@ The first command that performs P4C paired answer calls is the following. Use
   --llm-config ~/.config/cmd-memory/live-llm.json \
   --limit 5 \
   --output artifacts/experiments/p4c2_live_efficacy_v1
-```
-
-Run the P4C-4/5 zero-call structural matrix. Its GHOST arms use the real
-`GHOSTEcologyRouter`; adaptive arms update only from typed `EccRepairReceipt`,
-while `without_ecc_gate` is explicitly unsafe and cannot emit a receipt.
-
-```bash
-./run_remaining_experiment.sh p4c45 \
-  --overlay experiments/fixtures/p4c_zero_call_v1.jsonl \
-  --config experiments/fixtures/p4c45_zero_call_v1.json \
-  --output-dir artifacts/experiments/p4c45_zero_call_v1 \
-  --run-mode fresh
 ```
 
 Finally, create the P4C-6 reference sidecar after verifying the P4C-2 seal, run
@@ -133,7 +152,7 @@ semantic judge. The evaluator writes outside P4C-2 and never updates the router.
 Every resumable stage requires unchanged roots and parameters. Use
 `--run-mode resume` only with the same output directory and frozen inputs.
 
-## Legacy four-arm calibration stage
+## Legacy four-arm answer stage
 
 The ECC memory loop remains unchanged and zero-call:
 
@@ -150,10 +169,11 @@ and `ghost`. Predictions are then sealed. The launcher does not open reference
 answers, call a live judge, update GHOST from answer quality, or replay a trace
 after deleting memory.
 
-Consequently, this run establishes live answer-generation evidence over frozen
-retrieval. It is not by itself a P4C repair-efficacy result. P4C commit authority
-still comes only from ECC receipts; benchmark accuracy belongs to a later
-sealed evaluator.
+This path is scientifically degraded because its historical context composer
+used character budgets, could truncate canonical session JSON inside a record,
+and forwarded nested message metadata such as `has_answer`. Existing prediction
+seals remain useful as wiring, firewall, and context-pathology evidence only.
+They do not support answer-quality, arm-ranking, or repair-efficacy claims.
 
 ## Prerequisites
 
@@ -209,14 +229,14 @@ artifact.
    number of questions, so the maximum answer-call budget is `4 × limit`.
 
 ```bash
-./run_remaining_experiment.sh calibration --plan --limit 5
+./run_remaining_experiment.sh legacy-answer --plan --limit 5
 ```
 
 2. Run the root/config preflight. This also performs no calls and does not create
    the experiment output directory.
 
 ```bash
-./run_remaining_experiment.sh calibration --preflight \
+./run_remaining_experiment.sh legacy-answer --preflight \
   --llm-config /absolute/path/to/cmd-live-llm.json \
   --limit 5
 ```
@@ -224,7 +244,7 @@ artifact.
 3. Explicitly authorize the live run. Start with the five-question bounded run.
 
 ```bash
-./run_remaining_experiment.sh calibration --execute \
+./run_remaining_experiment.sh legacy-answer --execute \
   --llm-config /absolute/path/to/cmd-live-llm.json \
   --limit 5 \
   --output artifacts/experiments/remaining_live_confirmation_v1
@@ -247,7 +267,7 @@ Use the identical data, retrieval run, model, prompt, temperature, context
 budget, limit, and output directory:
 
 ```bash
-./run_remaining_experiment.sh calibration --execute \
+./run_remaining_experiment.sh legacy-answer --execute \
   --llm-config /absolute/path/to/cmd-live-llm.json \
   --limit 5 \
   --run-mode resume \

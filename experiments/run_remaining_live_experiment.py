@@ -68,7 +68,8 @@ def build_plan(*, limit: int, output: Path, run_mode: str) -> dict[str, object]:
         "mode": "plan",
         "stage": "post-ECC LongMemEval live answer confirmation",
         "external_calls_authorized": False,
-        "runtime_gold_free": True,
+        "runtime_gold_free": False,
+        "strict_gold_free_status": "failed_nested_has_answer_projection",
         "router_feedback": "EccRepairReceipt-only",
         "same_trace_answer_replay": False,
         "prediction_then_seal_then_offline_audit": True,
@@ -78,9 +79,12 @@ def build_plan(*, limit: int, output: Path, run_mode: str) -> dict[str, object]:
         "local_live_judge_calls": 0,
         "output": str(output),
         "run_mode": run_mode,
+        "paper_role": "legacy",
+        "mainline": False,
+        "scientific_status": "degraded_context_pipeline_not_for_quality_claims",
         "claim_scope": (
-            "live answer confirmation over frozen retrieval; not P4C repair efficacy, "
-            "not runtime reward, and not a sealed score"
+            "legacy live wiring evidence only; not answer quality, not P4C repair "
+            "efficacy, not runtime reward, and not a sealed score"
         ),
     }
 

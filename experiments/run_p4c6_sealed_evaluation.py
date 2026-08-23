@@ -229,6 +229,8 @@ def preflight(*, p4c2_run: Path, sealed_sidecar: Path) -> tuple[Mapping[str, obj
         "sealed_sidecar_sha256": _sha(Path(sealed_sidecar)),
         "p4c2_binding": binding,
         "external_calls_authorized": False,
+        "paper_role": "supplementary",
+        "mainline_commit_authority": False,
     }
     return report, pairs
 
@@ -464,6 +466,8 @@ def evaluate(
         "metrics": _metric(outcomes),
         "groups": groups,
         "claim_scope": "paired_sealed_answer_evaluation_not_router_feedback",
+        "paper_role": "supplementary",
+        "mainline_commit_authority": False,
     }
     atomic_json_write(output / "evaluation_report.json", report, ensure_ascii=False, allow_nan=False, indent=2, trailing_newline=True)
     return report
@@ -481,6 +485,8 @@ def build_plan(*, p4c2_run: Path, sidecar: Path, output: Path, backend: str) -> 
         "external_calls_authorized": False,
         "runtime_mutated": False,
         "reference_output_policy": "hashes_and_verdicts_only",
+        "paper_role": "supplementary",
+        "mainline_commit_authority": False,
     }
 
 

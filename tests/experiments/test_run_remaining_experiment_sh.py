@@ -85,31 +85,33 @@ def _prerequisites(tmp_path: Path) -> tuple[str, ...]:
 
 def test_default_is_zero_call_plan_and_does_not_write(tmp_path: Path) -> None:
     output = tmp_path / "must-not-exist"
-    completed = _run("--output", str(output), "--limit", "2")
+    completed = _run()
     assert completed.returncode == 0, completed.stderr
     plan = json.loads(completed.stdout)
     assert plan["mode"] == "plan"
     assert plan["external_calls_authorized"] is False
     assert plan["runtime_gold_free"] is True
     assert plan["router_feedback"] == "EccRepairReceipt-only"
-    assert plan["prediction_then_seal_then_offline_audit"] is True
-    assert plan["planned_answer_calls"] == 8
+    assert plan["primary_claim"] == "gold-free memory fault correction and evolution"
+    assert [row["stage"] for row in plan["mainline_stages"]] == [
+        "p4c1", "p4c3", "p4c45"
+    ]
+    assert plan["supplementary_stages"] == ["p4c2", "p4c6"]
+    assert plan["legacy_stages"] == ["legacy-answer"]
     assert not output.exists()
 
 
-def test_help_names_explicit_live_gate_and_sealed_boundary() -> None:
+def test_help_names_primary_claim_and_zero_call_boundary() -> None:
     completed = _run("--help")
     assert completed.returncode == 0
     assert "--plan" in completed.stdout
-    assert "--preflight" in completed.stdout
-    assert "--execute" in completed.stdout
-    assert "--llm-config" in completed.stdout
-    assert "prediction seal" in completed.stdout
-    assert "never feeds GHOST" in completed.stdout
+    assert "--verify" in completed.stdout
+    assert "gold-free memory fault correction and evolution" in completed.stdout
+    assert "no commit authority" in completed.stdout
 
 
 def test_execute_requires_explicit_config() -> None:
-    completed = _run("--execute")
+    completed = _run("legacy-answer", "--execute")
     assert completed.returncode != 0
     assert "--llm-config is required" in completed.stderr
 
@@ -128,7 +130,7 @@ def test_preflight_binds_ready_artifacts_and_redacts_secret(tmp_path: Path) -> N
         encoding="utf-8",
     )
     completed = _run(
-        "--preflight", "--llm-config", str(config), "--limit", "1",
+        "legacy-answer", "--preflight", "--llm-config", str(config), "--limit", "1",
         *_prerequisites(tmp_path),
     )
     assert completed.returncode == 0, completed.stderr
@@ -204,6 +206,7 @@ def test_shell_is_syntax_valid_and_never_sources_credentials() -> None:
     assert ". $" not in source
     assert "run_remaining_experiments.sh" not in source
     assert "experiments.run_remaining_live_experiment" in source
+    assert "experiments.run_p4c_mainline" in source
     assert "experiments.run_p4c2_live_efficacy" in source
     assert "experiments.run_p4c3_native_detection" in source
     assert "experiments.run_p4c45_zero_call" in source
@@ -214,7 +217,7 @@ def test_shell_dispatches_p4c2_without_breaking_default_plan() -> None:
     stages = _run("--stages")
     assert stages.returncode == 0
     assert stages.stdout.splitlines() == [
-        "calibration", "p4c1", "p4c2", "p4c3", "p4c45", "p4c6"
+        "mainline", "p4c1", "p4c3", "p4c45", "p4c2", "p4c6", "legacy-answer"
     ]
     p4c2 = _run("p4c2", "--plan", "--limit", "2")
     assert p4c2.returncode == 0, p4c2.stderr
@@ -222,3 +225,11 @@ def test_shell_dispatches_p4c2_without_breaking_default_plan() -> None:
     assert plan["stage"] == "P4C-2 repair-vs-control paired live efficacy"
     assert plan["planned_calls"] == 4
     assert plan["external_calls_authorized"] is False
+
+    legacy = _run("legacy-answer", "--plan", "--limit", "2")
+    assert legacy.returncode == 0, legacy.stderr
+    legacy_plan = json.loads(legacy.stdout)
+    assert legacy_plan["paper_role"] == "legacy"
+    assert legacy_plan["mainline"] is False
+    assert legacy_plan["runtime_gold_free"] is False
+    assert legacy_plan["strict_gold_free_status"] == "failed_nested_has_answer_projection"
