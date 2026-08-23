@@ -133,6 +133,23 @@ def test_plan_is_zero_call_and_does_not_open_inputs(tmp_path: Path) -> None:
     assert plan["external_calls_authorized"] is False
     assert plan["planned_calls"] == 6
     assert plan["arms"] == ["control", "repaired"]
+
+
+def test_preflight_preserves_unicode_line_separators_inside_json_strings(
+    tmp_path: Path,
+) -> None:
+    p4c1, inputs = _fixture(tmp_path)
+    row = json.loads(inputs.read_text(encoding="utf-8"))
+    row["query"] = "before\u2028middle\u2029after"
+    inputs.write_text(
+        json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+    report, cases = preflight(p4c1_run=p4c1, inputs=inputs, limit=1)
+
+    assert report["eligible_case_count"] == 1
+    assert cases[0].query == "before\u2028middle\u2029after"
     assert not (tmp_path / "out").exists()
 
 

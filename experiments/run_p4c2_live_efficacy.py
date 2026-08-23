@@ -100,19 +100,24 @@ def _json_object(path: Path, label: str) -> Mapping[str, Any]:
 def _jsonl(path: Path, label: str) -> list[Mapping[str, Any]]:
     rows: list[Mapping[str, Any]] = []
     try:
-        lines = Path(path).read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
+        stream = Path(path).open(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
         raise ValueError(f"{label} is unavailable: {path}") from exc
-    for index, line in enumerate(lines, 1):
-        if not line:
-            continue
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"{label} line {index} is invalid JSON") from exc
-        if not isinstance(value, Mapping):
-            raise ValueError(f"{label} line {index} must be an object")
-        rows.append(value)
+    with stream:
+        # File iteration recognizes JSONL's physical LF/CRLF delimiters but
+        # deliberately preserves Unicode U+2028/U+2029 inside JSON strings.
+        # str.splitlines() is invalid here because it treats those content
+        # characters as record boundaries.
+        for index, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{label} line {index} is invalid JSON") from exc
+            if not isinstance(value, Mapping):
+                raise ValueError(f"{label} line {index} must be an object")
+            rows.append(value)
     return rows
 
 
@@ -296,8 +301,17 @@ def prepare_inputs(
     if not rows:
         raise ValueError("no eligible LongMemEval P4C-2 cases were prepared")
     output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists():
+        raise ValueError("P4C-2 input preparation refuses to overwrite existing output")
+    temporary = output.with_suffix(output.suffix + ".tmp")
+    if temporary.exists():
+        raise ValueError("P4C-2 input preparation found a stale staging file")
     for row in rows:
-        append_jsonl_fsync(output, row, ensure_ascii=False, allow_nan=False)
+        append_jsonl_fsync(temporary, row, ensure_ascii=False, allow_nan=False)
+    staged = _jsonl(temporary, "staged P4C-2 answer inputs")
+    if len(staged) != len(rows):
+        raise ValueError("staged P4C-2 input count mismatch")
+    temporary.replace(output)
     return {
         "schema_version": "cmd-p4c2-input-preparation-v1",
         "status": "success",
