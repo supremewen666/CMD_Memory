@@ -17,7 +17,10 @@ def _validate_prediction_seal(run_dir: Path) -> Mapping[str, object]:
     """Validate either a legacy arena seal or the v2 ECC causal seal."""
 
     raw = json.loads((Path(run_dir) / "prediction_seal.json").read_text(encoding="utf-8"))
-    if raw.get("schema_version") == "cmd-ecc-memory-benchmark-prediction-seal-v2":
+    if raw.get("schema_version") in {
+        "cmd-ecc-memory-benchmark-prediction-seal-v2",
+        "cmd-ecc-memory-benchmark-prediction-seal-v3",
+    }:
         from experiments.run_ecc_sealed_memory_benchmark import (
             validate_ecc_prediction_seal,
         )

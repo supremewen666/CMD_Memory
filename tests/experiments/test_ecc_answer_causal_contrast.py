@@ -9,6 +9,7 @@ from cmd_audit.core.state_codec import content_sha256
 from experiments.ecc_answer_causal_contrast import (
     MEMORY_HEADING,
     OPERATOR_SEMANTICS,
+    REPAIR_SEMANTICS,
     render_causal_state,
 )
 from experiments.model_context_budget import ModelContextBudget
@@ -110,3 +111,49 @@ def test_state_root_is_required_for_answer_rendering() -> None:
                 reserve_tokens=64,
             ),
         )
+
+
+@pytest.mark.parametrize("mechanism", ("state_drift", "adversarial_poison"))
+def test_nonprocess_rendering_follows_active_and_quarantine_state(
+    mechanism: str,
+) -> None:
+    before_state = _state()
+    after_state = deepcopy(before_state)
+    if mechanism == "state_drift":
+        before_state["memories"]["m2"]["active"] = False  # type: ignore[index]
+        after_state["memories"]["m1"]["active"] = False  # type: ignore[index]
+        after_state["lineage"] = [["m1", "m2"]]
+    else:
+        after_state["memories"]["m2"]["active"] = False  # type: ignore[index]
+        after_state["quarantine"] = ["m2"]
+
+    kwargs = {
+        "case": _case(),
+        "process_fault_subtype": None,
+        "mechanism": mechanism,
+        "query": "query",
+        "budget": ModelContextBudget(
+            max_model_len=4096,
+            max_output_tokens=64,
+            reserve_tokens=64,
+        ),
+    }
+    before = render_causal_state(
+        state=before_state,
+        state_root=content_sha256(before_state, ensure_ascii=False, allow_nan=False),
+        **kwargs,
+    )
+    after = render_causal_state(
+        state=after_state,
+        state_root=content_sha256(after_state, ensure_ascii=False, allow_nan=False),
+        **kwargs,
+    )
+    assert before.mechanism == mechanism
+    assert before.operator_semantics == REPAIR_SEMANTICS[mechanism]
+    assert before.budgeted.included_ids != after.budgeted.included_ids
+    if mechanism == "state_drift":
+        assert before.budgeted.included_ids == ("m1",)
+        assert after.budgeted.included_ids == ("m2",)
+    else:
+        assert before.budgeted.included_ids == ("m2", "m1")
+        assert after.budgeted.included_ids == ("m1",)

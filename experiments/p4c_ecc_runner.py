@@ -6,7 +6,7 @@ separate post-run consumer and is deliberately absent from this constructor.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 from pathlib import Path
@@ -26,7 +26,8 @@ from cmd_audit.repair.ghost_ecology import (
 from cmd_audit.repair.incident_store import IncidentLedger
 
 
-CASE_SCHEMA_VERSION = "cmd-p4c-ecc-case-v1"
+CASE_SCHEMA_VERSION = "cmd-p4c-ecc-case-v2"
+LEGACY_CASE_SCHEMA_VERSION = "cmd-p4c-ecc-case-v1"
 RUN_SCHEMA_VERSION = "cmd-p4c-ecc-run-v1"
 JOURNAL_SCHEMA_VERSION = "cmd-p4c-ecc-journal-v1"
 
@@ -66,6 +67,7 @@ class P4cEccCase:
     event_index: int
     observation: Mapping[str, object]
     candidates: tuple[P4cRepairCandidate, ...]
+    runtime_memory_texts: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.case_id:
@@ -85,11 +87,21 @@ class P4cEccCase:
             {candidate.skill_revision_id for candidate in self.candidates}
         ) != len(self.candidates):
             raise ValueError("P4C candidates must be non-empty and unique")
+        if not isinstance(self.runtime_memory_texts, Mapping) or any(
+            not isinstance(memory_id, str) or not isinstance(text, str)
+            for memory_id, text in self.runtime_memory_texts.items()
+        ):
+            raise ValueError("P4C runtime memory text view must map strings to strings")
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> "P4cEccCase":
+        schema = value.get("schema_version")
         expected = {"schema_version", "case_id", "event_index", "observation", "candidates"}
-        if set(value) != expected or value.get("schema_version") != CASE_SCHEMA_VERSION:
+        if schema == CASE_SCHEMA_VERSION:
+            expected.add("runtime_memory_texts")
+        elif schema != LEGACY_CASE_SCHEMA_VERSION:
+            raise ValueError("P4C case mapping is not closed or versioned")
+        if set(value) != expected:
             raise ValueError("P4C case mapping is not closed or versioned")
         observation = value["observation"]
         candidates = value["candidates"]
@@ -104,6 +116,11 @@ class P4cEccCase:
                 for candidate in candidates
                 if isinstance(candidate, Mapping)
             ),
+            runtime_memory_texts=(
+                dict(value["runtime_memory_texts"])
+                if isinstance(value.get("runtime_memory_texts"), Mapping)
+                else {}
+            ),
         )
 
     def to_mapping(self) -> dict[str, object]:
@@ -113,6 +130,7 @@ class P4cEccCase:
             "event_index": self.event_index,
             "observation": dict(self.observation),
             "candidates": [candidate.to_mapping() for candidate in self.candidates],
+            "runtime_memory_texts": dict(self.runtime_memory_texts),
         }
 
 
@@ -646,4 +664,3 @@ __all__ = [
     "audit_p4c_run",
     "load_p4c_cases",
 ]
-

@@ -41,11 +41,12 @@ prediction seal has been verified.
   LongMemEval-M is too long for that full-context control and should be tested
   as a memory/retrieval system rather than silently truncated.
 
-The controlled ECC track exposes `faulted_before` and `repaired_after`, not a
-mislabelled BM25-versus-ECC causal comparison. MemAudit telemetry and GHOST
-updates are completed before the answer model runs; the runtime never reads
-reference targets or scorer outputs. The scorer is a separate post-seal
-process.
+The controlled ECC track exposes `incident_before` and `repaired_after`, not a
+mislabelled BM25-versus-ECC causal comparison. Process faults, state drift and
+adversarial poison are three mechanism-isolated experiments; they must not be
+pooled into one overall score. MemAudit telemetry and GHOST updates are
+completed before the answer model runs; the runtime never reads reference
+targets or scorer outputs. The scorer is a separate post-seal process.
 
 ## Evo-Bench
 
@@ -77,8 +78,8 @@ bash run_memory_benchmarks_nohup.sh start-server \
 bash run_memory_benchmarks_nohup.sh server-status
 bash run_memory_benchmarks_nohup.sh server-smoke
 bash run_memory_benchmarks_nohup.sh run \
-  artifacts/runtime/longmemeval_ecc_causal_v2 \
-  artifacts/runtime/locomo_ecc_causal_v2
+  artifacts/runtime/longmemeval_process_fault_v3 \
+  artifacts/runtime/locomo_process_fault_v3
 tail -f artifacts/logs/memory_benchmarks.log
 ```
 
@@ -88,20 +89,23 @@ prompt exceeds that same window; every truncation is recorded in
 `runtime_ledger.jsonl`. HTTP 4xx responses retain the provider error body and
 are never reported as an unreachable endpoint.
 
-The controlled answer-efficacy protocol is v2-only. Its runtime export binds
+The controlled answer-efficacy protocol is v3. Its runtime export binds
 both `before_state` and `after_state`, including an explicit `memory_order`
 array, to the corresponding receipt roots. Both arms use the same heading,
 renderer, budget, model and generation configuration. Retrieval, injection,
 granularity and safety faults have distinct preregistered rendering semantics.
-Old v1 runtime directories are rejected and must be rebuilt into a fresh
-directory.
+State drift binds the superseding/superseded IDs and lineage transition;
+adversarial poison binds suspect IDs and quarantine transition. A v3 report and
+seal contain exactly one `mechanism`. Read-only v2 compatibility exists only
+for old process-fault artifacts; new experiments must use v3.
 
 ```bash
 # Receipt-bound prediction (requires a completed instrumented ECC runtime).
 python -m experiments.run_ecc_sealed_memory_benchmark \
   --benchmark longmemeval \
-  --runtime-dir artifacts/runtime/longmemeval_ecc_causal_v2 \
-  --output artifacts/experiments/longmemeval_ecc_causal_v2_sealed
+  --mechanism process_fault \
+  --runtime-dir artifacts/runtime/longmemeval_process_fault_v3 \
+  --output artifacts/experiments/longmemeval_process_fault_v3_sealed
 
 # Explicit legacy baseline only; not the MemAudit/GHOST system.
 python -m experiments.run_sealed_memory_benchmark \

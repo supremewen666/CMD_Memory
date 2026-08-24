@@ -115,23 +115,23 @@ case "${1:-}" in
     limit="${2:-0}"
     cd "$ROOT_DIR"
     python -m experiments.materialize_ecc_memory_benchmark_harness \
-      --benchmark longmemeval --limit "$limit" \
-      --output artifacts/harness/longmemeval_ecc_causal_v2
+      --benchmark longmemeval --mechanism process_fault --limit "$limit" \
+      --output artifacts/harness/longmemeval_process_fault_v3
     python -m experiments.run_ecc_memory_runtime \
-      --cases artifacts/harness/longmemeval_ecc_causal_v2/memaudit_cases.jsonl \
-      --bindings artifacts/harness/longmemeval_ecc_causal_v2/ghost_bindings.jsonl \
-      --states artifacts/harness/longmemeval_ecc_causal_v2/shadow_states.jsonl \
-      --ecology-ledger artifacts/harness/longmemeval_ecc_causal_v2/frozen_ecology.jsonl \
-      --output artifacts/runtime/longmemeval_ecc_causal_v2
+      --cases artifacts/harness/longmemeval_process_fault_v3/memaudit_cases.jsonl \
+      --bindings artifacts/harness/longmemeval_process_fault_v3/ghost_bindings.jsonl \
+      --states artifacts/harness/longmemeval_process_fault_v3/shadow_states.jsonl \
+      --ecology-ledger artifacts/harness/longmemeval_process_fault_v3/frozen_ecology.jsonl \
+      --output artifacts/runtime/longmemeval_process_fault_v3
     python -m experiments.materialize_ecc_memory_benchmark_harness \
-      --benchmark locomo --limit "$limit" \
-      --output artifacts/harness/locomo_ecc_causal_v2
+      --benchmark locomo --mechanism process_fault --limit "$limit" \
+      --output artifacts/harness/locomo_process_fault_v3
     python -m experiments.run_ecc_memory_runtime \
-      --cases artifacts/harness/locomo_ecc_causal_v2/memaudit_cases.jsonl \
-      --bindings artifacts/harness/locomo_ecc_causal_v2/ghost_bindings.jsonl \
-      --states artifacts/harness/locomo_ecc_causal_v2/shadow_states.jsonl \
-      --ecology-ledger artifacts/harness/locomo_ecc_causal_v2/frozen_ecology.jsonl \
-      --output artifacts/runtime/locomo_ecc_causal_v2
+      --cases artifacts/harness/locomo_process_fault_v3/memaudit_cases.jsonl \
+      --bindings artifacts/harness/locomo_process_fault_v3/ghost_bindings.jsonl \
+      --states artifacts/harness/locomo_process_fault_v3/shadow_states.jsonl \
+      --ecology-ledger artifacts/harness/locomo_process_fault_v3/frozen_ecology.jsonl \
+      --output artifacts/runtime/locomo_process_fault_v3
     ;;
   runtime-build-status)
     if [[ -f "$ECC_BUILD_PID_FILE" ]] && kill -0 "$(<"$ECC_BUILD_PID_FILE")" 2>/dev/null; then
@@ -207,12 +207,14 @@ case "${1:-}" in
     printf 'worker_mode=ecc\nworker_pid=%s\n' "$$"
     python -m experiments.run_ecc_sealed_memory_benchmark \
       --benchmark longmemeval \
+      --mechanism process_fault \
       --runtime-dir "$long_runtime" \
-      --output artifacts/experiments/longmemeval_ecc_causal_v2_sealed
+      --output artifacts/experiments/longmemeval_process_fault_v3_sealed
     python -m experiments.run_ecc_sealed_memory_benchmark \
       --benchmark locomo \
+      --mechanism process_fault \
       --runtime-dir "$locomo_runtime" \
-      --output artifacts/experiments/locomo_ecc_causal_v2_sealed
+      --output artifacts/experiments/locomo_process_fault_v3_sealed
     ;;
   run-legacy)
     curl -fsS "$BASE_URL/models" >/dev/null

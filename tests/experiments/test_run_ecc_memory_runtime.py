@@ -131,9 +131,13 @@ def test_runtime_cli_uses_memaudit_ghost_receipt_and_exports_committed_state(
     receipt = json.loads((output / "runtime" / "repair_receipts.jsonl").read_text())
     assert report["runtime_uses_gold"] is False
     assert report["same_trace_answer_replay"] is False
+    assert report["schema_version"] == "cmd-ecc-memory-runtime-report-v3"
+    assert report["mechanism_counts"] == {"process_fault": 1}
     assert receipt["committed"] is True
     assert causal["before_state"]["pipeline"]["retrieval"] is False
     assert causal["after_state"]["pipeline"]["retrieval"] is True
+    assert causal["mechanism"] == "process_fault"
+    assert causal["repair_semantics"] == "retrieval-outage-empty-result-v1"
     assert causal["before_root"] == receipt["before_root"]
     assert causal["after_root"] == receipt["after_root"]
     assert causal["receipt_sha256"]

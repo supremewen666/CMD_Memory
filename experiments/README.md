@@ -186,18 +186,18 @@ result is explicitly marked `controlled-structural-stress-not-native-official`:
 ```bash
 python -m experiments.materialize_ecc_memory_benchmark_harness \
   --benchmark longmemeval \
-  --output artifacts/harness/longmemeval_ecc_causal_v2
+  --mechanism process_fault \
+  --output artifacts/harness/longmemeval_process_fault_v3
 
 python -m experiments.run_ecc_memory_runtime \
-  --cases artifacts/harness/longmemeval_ecc_causal_v2/memaudit_cases.jsonl \
-  --bindings artifacts/harness/longmemeval_ecc_causal_v2/ghost_bindings.jsonl \
-  --states artifacts/harness/longmemeval_ecc_causal_v2/shadow_states.jsonl \
-  --ecology-ledger artifacts/harness/longmemeval_ecc_causal_v2/frozen_ecology.jsonl \
-  --output artifacts/runtime/longmemeval_ecc_causal_v2
+  --cases artifacts/harness/longmemeval_process_fault_v3/memaudit_cases.jsonl \
+  --bindings artifacts/harness/longmemeval_process_fault_v3/ghost_bindings.jsonl \
+  --states artifacts/harness/longmemeval_process_fault_v3/shadow_states.jsonl \
+  --ecology-ledger artifacts/harness/longmemeval_process_fault_v3/frozen_ecology.jsonl \
+  --output artifacts/runtime/longmemeval_process_fault_v3
 ```
 
-For LoCoMo, replace `longmemeval` with `locomo` and use
-`artifacts/harness/locomo_ecc_causal_v2` / `artifacts/runtime/locomo_ecc_causal_v2`. The
+For LoCoMo, replace `longmemeval` with `locomo`. The
 materializer projects only retrieved runtime memories and deterministically
 cycles controlled retrieval, injection, granularity, and safety pipeline
 faults. It does not infer incidents from reference targets. A real deployed
@@ -221,17 +221,18 @@ tail -f artifacts/logs/ecc_runtime_build.log
 An optional integer argument limits each benchmark for a smoke run, for
 example `build-runtimes 4`. Omit it for the complete streams.
 
-The v2 runtime exports `causal_states.jsonl`.  Every row contains a root-bound
-`before_state` and receipt-bound `after_state`, the controlled process-fault
-subtype, its preregistered answer-time semantics, and an explicit
-`memory_order` list.  JSON object key order is never used as retrieval order.
-The v2 runner rejects v1 committed-state exports; rebuild into a fresh output
-directory instead of silently mixing protocols.
+The v3 runtime exports `causal_states.jsonl`. Every row contains a root-bound
+`before_state`, receipt-bound `after_state`, exactly one ECC `mechanism`, its
+typed repair evidence, and an explicit `memory_order` list. JSON object key
+order is never used as retrieval order. Fresh v3 runtimes are mechanism-
+isolated: `process_fault`, `state_drift`, and `adversarial_poison` cannot be
+mixed into one runtime report or prediction seal. The answer runner retains
+read-only v2 process-fault compatibility.
 
 Only after this causal-state export exists may the answer model produce the
 two pipeline-symmetric official-shape `{question_id,hypothesis}` files:
 
-- `faulted_before`: renders the actual faulted `before_state`;
+- `incident_before`: renders the actual typed incident `before_state`;
 - `repaired_after`: renders the receipt-bound committed `after_state`.
 
 Both arms use the same `Retrieved memory` heading, ordered-item renderer,
@@ -243,9 +244,29 @@ controlled process-fault semantics are fixed before answering:
 - granularity: deterministic coarse representations;
 - safety: per-item safety-gate redactions.
 
-All roots, subtype/semantics, source order, included IDs, rendered-item hashes,
-context hashes, truncation and generation-config hash are recorded in
-`runtime_ledger.jsonl` and bound by the v2 prediction seal.
+For `state_drift`, the controlled fixture creates a content-hash-bound
+superseding revision and the repair switches active state plus lineage. For
+`adversarial_poison`, it creates an independently bound untrusted override and
+the repair makes it inactive plus quarantined. These are controlled structural
+stress fixtures, not native benchmark telemetry. Their results must be sealed
+and scored in two separate output directories.
+
+All roots, mechanism evidence, subtype/semantics, source order, included IDs,
+rendered-item hashes, context hashes, truncation and generation-config hash are
+recorded in `runtime_ledger.jsonl` and bound by the v3 prediction seal. The seal
+fails if token counts are implausibly small, exceed the prompt budget, or a
+retrieval repair restores IDs without increasing its token count.
+
+Before model execution, a four-case process-fault token smoke can be sealed
+without making answer calls:
+
+```bash
+python -m experiments.run_ecc_process_fault_token_smoke \
+  --benchmark locomo \
+  --runtime-dir artifacts/experiments/process_fault_smoke/runtime \
+  --output artifacts/experiments/process_fault_smoke/token_smoke_seal \
+  --limit 4
+```
 
 ```bash
 export LLM_BASE_URL=http://127.0.0.1:8000/v1
@@ -255,8 +276,9 @@ export LLM_MAX_MODEL_LEN=32768
 export LLM_MAX_TOKENS=512
 python -m experiments.run_ecc_sealed_memory_benchmark \
   --benchmark longmemeval \
-  --runtime-dir artifacts/runtime/longmemeval_ecc_causal_v2 \
-  --output artifacts/experiments/longmemeval_ecc_causal_v2_sealed
+  --mechanism process_fault \
+  --runtime-dir artifacts/runtime/longmemeval_process_fault_v3 \
+  --output artifacts/experiments/longmemeval_process_fault_v3_sealed
 ```
 
 LoCoMo uses the same receipt-bound prediction stage:
@@ -264,9 +286,14 @@ LoCoMo uses the same receipt-bound prediction stage:
 ```bash
 python -m experiments.run_ecc_sealed_memory_benchmark \
   --benchmark locomo \
-  --runtime-dir artifacts/runtime/locomo_ecc_causal_v2 \
-  --output artifacts/experiments/locomo_ecc_causal_v2_sealed
+  --mechanism process_fault \
+  --runtime-dir artifacts/runtime/locomo_process_fault_v3 \
+  --output artifacts/experiments/locomo_process_fault_v3_sealed
 ```
+
+Run `state_drift` and `adversarial_poison` with their matching `--mechanism`
+and distinct runtime/output directories; the CLI rejects a mechanism/runtime
+mismatch.
 
 Official-shape means file compatibility, not an official score and not that a
 controlled stress arm is the native benchmark condition. The prediction seal
@@ -287,14 +314,14 @@ called or official LoCoMo references are opened:
 ```bash
 python -m experiments.run_official_memory_scoring \
   --benchmark longmemeval \
-  --run-dir artifacts/experiments/longmemeval_ecc_causal_v2_sealed \
+  --run-dir artifacts/experiments/longmemeval_process_fault_v3_sealed \
   --official-root /path/to/LongMemEval \
   --oracle data/external/longmemeval/oracle/longmemeval_oracle.json \
   --judge-model gpt-4o --execute
 
 python -m experiments.run_official_memory_scoring \
   --benchmark locomo \
-  --run-dir artifacts/experiments/locomo_ecc_causal_v2_sealed \
+  --run-dir artifacts/experiments/locomo_process_fault_v3_sealed \
   --official-root /path/to/locomo \
   --dataset data/ghost_live_v2/raw_sources/locomo10.json --execute
 ```

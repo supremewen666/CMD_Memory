@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import os
-from typing import Sequence
+from numbers import Integral
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,7 @@ class ModelContextBudget:
             tokenize=True,
             add_generation_prompt=True,
         )
-        return len(encoded)
+        return _single_sequence_token_count(encoded)
 
     def fit_memory_items(
         self,
@@ -128,6 +129,38 @@ def _render_context(heading: str, items: Sequence[tuple[str, str]]) -> str:
 
 def _answer_prompt(query: str, context: str) -> str:
     return "\n\n".join(("CONTEXT:", context, "QUERY:", query, "ANSWER:"))
+
+
+def _single_sequence_token_count(encoded: object) -> int:
+    """Return the token length of one chat-template encoding.
+
+    Transformers versions may return a flat token-ID list, a one-row batch,
+    a tensor/array, or a ``BatchEncoding`` mapping.  Calling ``len`` on the
+    mapping counts fields such as ``input_ids`` and ``attention_mask`` rather
+    than tokens, which can silently collapse every prompt length to two.
+    """
+
+    if isinstance(encoded, Mapping):
+        if "input_ids" not in encoded:
+            raise ValueError("chat-template encoding does not contain input_ids")
+        return _single_sequence_token_count(encoded["input_ids"])
+
+    tolist = getattr(encoded, "tolist", None)
+    if callable(tolist):
+        return _single_sequence_token_count(tolist())
+
+    if isinstance(encoded, Sequence) and not isinstance(encoded, (str, bytes, bytearray)):
+        if not encoded:
+            return 0
+        if all(isinstance(token, Integral) for token in encoded):
+            return len(encoded)
+        if len(encoded) == 1:
+            return _single_sequence_token_count(encoded[0])
+        raise ValueError("chat-template encoding unexpectedly contains multiple sequences")
+
+    raise TypeError(
+        f"unsupported chat-template encoding type: {type(encoded).__name__}"
+    )
 
 
 __all__ = ["BudgetedContext", "ModelContextBudget"]

@@ -1,5 +1,30 @@
 # GHOST Router V1 Implementation Report
 
+## ECC three-mechanism isolated causal protocol v3 (2026-08-25)
+
+- Fixed chat-template token accounting for flat IDs, one-row batches,
+  tensor-like encodings and `BatchEncoding.input_ids`; mapping field count can
+  no longer silently become the prompt token count.
+- Added a zero-model-call four-case process-fault token smoke seal. Observed
+  `(before, after)` counts were retrieval `(356, 15906)`, injection
+  `(535, 23511)`, granularity `(701, 19192)`, and safety `(545, 19054)` under
+  the recorded UTF-8 byte upper-bound fallback. All four restored five ordered
+  memories after repair; the seal validator passed.
+- Extended causal-state, renderer, runtime report and prediction seal to
+  `process_fault`, `state_drift`, and `adversarial_poison`. Fresh v3 runtime
+  reports and seals contain exactly one mechanism and reject pooled runs.
+- Generated separate four-case controlled LoCoMo runtimes for state drift and
+  adversarial poison. Each committed `4/4` with `0` rollback. State drift uses
+  a hash-bound superseding revision plus lineage; poison uses an independent
+  untrusted override plus quarantine. Neither construction reads targets,
+  labels or scorer output.
+- Verification: 77 focused ECC/GHOST tests passed; full suite `1479 passed,
+  1 skipped, 1 warning, 58246 subtests passed`; Ruff, compile, shell syntax and
+  diff checks passed. State-drift and poison prediction seals were not generated because no
+  answer-model endpoint/tokenizer is configured in this environment. Their
+  isolated runtimes are ready for the v3 prediction command and must be scored
+  separately.
+
 ## ECC answer causal contrast v2 (2026-08-24)
 
 - Replaced the confounded BM25-versus-committed-state answer rendering with

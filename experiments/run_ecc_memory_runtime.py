@@ -13,10 +13,11 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+from collections import Counter
 from typing import Mapping
 
 from cmd_audit.core.state_codec import atomic_json_write, content_sha256
-from cmd_audit.repair.ecc import EccRepairReceipt
+from cmd_audit.repair.ecc import EccRepairReceipt, MemAuditEccAdapter
 from cmd_audit.repair.ghost_ecology import (
     EcologyLedger,
     GhostEcology,
@@ -30,13 +31,13 @@ from experiments.ecc_memory_runtime import (
     StructuralMemoryStore,
     load_ecc_runtime_cases,
 )
-from experiments.ecc_answer_causal_contrast import OPERATOR_SEMANTICS
+from experiments.ecc_answer_causal_contrast import OPERATOR_SEMANTICS, REPAIR_SEMANTICS
 
 
 BINDING_SCHEMA = "cmd-ecc-ghost-binding-v1"
 STATE_SCHEMA = "cmd-ecc-structural-scenario-v2"
-CAUSAL_STATE_SCHEMA = "cmd-ecc-causal-state-pair-v2"
-RUNTIME_REPORT_SCHEMA = "cmd-ecc-memory-runtime-report-v2"
+CAUSAL_STATE_SCHEMA = "cmd-ecc-causal-state-pair-v3"
+RUNTIME_REPORT_SCHEMA = "cmd-ecc-memory-runtime-report-v3"
 
 
 def _jsonl(path: Path) -> tuple[Mapping[str, object], ...]:
@@ -159,14 +160,34 @@ def _write_causal_states(
         if receipt.before_root != before_root or receipt.after_root != after_root:
             raise ValueError(f"ECC causal state pair does not bind receipt roots: {case_id}")
         observation = getattr(case, "observation")
-        subtype = str(observation.get("process_fault_subtype"))
-        if subtype not in OPERATOR_SEMANTICS:
-            raise ValueError(f"ECC answer contrast requires a process-fault subtype: {case_id}")
+        syndrome = MemAuditEccAdapter().decode(observation)
+        mechanism = syndrome.mechanism.value
+        subtype = (
+            None
+            if syndrome.process_fault_subtype is None
+            else syndrome.process_fault_subtype.value
+        )
+        semantics = (
+            OPERATOR_SEMANTICS[subtype]
+            if subtype is not None
+            else REPAIR_SEMANTICS[mechanism]
+        )
+        overrides = getattr(case, "runtime_memory_texts", {})
+        if not isinstance(overrides, Mapping) or any(
+            not isinstance(memory_id, str) or not isinstance(text, str)
+            for memory_id, text in overrides.items()
+        ):
+            raise ValueError(f"ECC controlled memory text view is invalid: {case_id}")
         rows.append({
             "schema_version": CAUSAL_STATE_SCHEMA,
             "case_id": case_id,
+            "mechanism": mechanism,
             "process_fault_subtype": subtype,
-            "operator_semantics": OPERATOR_SEMANTICS[subtype],
+            "repair_semantics": semantics,
+            "superseding_memory_id": syndrome.superseding_memory_id,
+            "superseded_memory_id": syndrome.superseded_memory_id,
+            "suspect_ids": list(syndrome.suspect_ids),
+            "memory_text_overrides": dict(overrides),
             "before_root": before_root,
             "before_state": before_state,
             "after_root": after_root,
@@ -233,7 +254,9 @@ def main(argv: list[str] | None = None) -> int:
             "frozen_ecology.jsonl": input_roots["ecology"],
         }
         if (
-            bundle_manifest.get("schema_version") != "cmd-ecc-harness-bundle-v2"
+            bundle_manifest.get("schema_version") not in {
+                "cmd-ecc-harness-bundle-v2", "cmd-ecc-harness-bundle-v3"
+            }
             or not isinstance(expected_roots, Mapping)
             or dict(expected_roots) != actual_roots
         ):
@@ -242,6 +265,7 @@ def main(argv: list[str] | None = None) -> int:
             "harness_profile": bundle_manifest.get("profile"),
             "benchmark_track": bundle_manifest.get("benchmark_track"),
             "harness_binding_root": bundle_manifest.get("binding_root"),
+            "harness_mechanism": bundle_manifest.get("mechanism", "process_fault"),
         }
 
     if args.output.exists() and any(args.output.iterdir()):
@@ -285,6 +309,13 @@ def main(argv: list[str] | None = None) -> int:
         before_states,
         receipts,
     )
+    mechanism_counts = Counter(
+        MemAuditEccAdapter().decode(case.observation).mechanism.value for case in cases
+    )
+    if len(mechanism_counts) != 1:
+        raise ValueError(
+            "one ECC runtime experiment must contain exactly one incident mechanism"
+        )
     report: dict[str, object] = {
         "schema_version": RUNTIME_REPORT_SCHEMA,
         "status": "success",
@@ -299,6 +330,9 @@ def main(argv: list[str] | None = None) -> int:
             runtime["committed"] == runtime["case_count"]
             and runtime["rolled_back"] == 0
         ),
+        "mechanism": next(iter(mechanism_counts)),
+        "mechanism_counts": dict(sorted(mechanism_counts.items())),
+        "causal_experiment_kind": "single-mechanism",
         "input_roots": input_roots,
         "runtime_uses_gold": False,
         "runtime_uses_labels": False,
