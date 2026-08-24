@@ -214,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
         "prediction_file_roots": roots,
         "runtime_report_binding_root": runtime_report["binding_root"],
         "runtime_receipt_root": runtime_report["receipt_root"],
+        "harness_profile": runtime_report.get("harness_profile", "external-native-telemetry"),
+        "benchmark_track": runtime_report.get("benchmark_track", "native-instrumented-runtime"),
         "runtime_ledger_sha256": hashlib.sha256((args.output / "runtime_ledger.jsonl").read_bytes()).hexdigest(),
         "dataset_sha256": hashlib.sha256(Path(dataset_path).read_bytes()).hexdigest(),
         "runtime_uses_gold": False,
@@ -227,6 +229,10 @@ def main(argv: list[str] | None = None) -> int:
         },
         "sealed": True,
     }
+    if runtime_report.get("benchmark_track") == "controlled-structural-stress-not-native-official":
+        seal["reporting_warning"] = (
+            "Controlled structural stress predictions are not the native official benchmark arm."
+        )
     seal["binding_root"] = content_sha256(seal)
     atomic_json_write(
         args.output / "prediction_seal.json",

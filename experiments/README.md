@@ -55,13 +55,14 @@ action telemetry and the decoupling audit, its machine gate remains blocked and
 CMD/GHOST abstain. Current P4A MemFail has no root-bound candidate cache, so its
 P4B receipt is explicitly unavailable rather than reconstructed.
 
-## Retired P4C zero-call program (historical)
+## ECC runtime core and P4C provenance
 
-The P4C runner family, fixtures, tests and `run_remaining_experiment.sh` were
-removed on 2026-08-24. Its source projection and structural ECC outcomes did
-not measure answer quality and cannot stand in for LoCoMo/LongMemEval model
-evaluation. The remainder of this section is retained only to explain old
-artifact schemas; none of its commands are active entrypoints.
+The receipt runtime originally landed under the P4C experiment name. Its
+generic active interface is now `experiments.ecc_memory_runtime` plus
+`experiments.run_ecc_memory_runtime`; P4C names remain as implementation
+provenance and compatibility aliases. Structural ECC outcomes still do not
+measure answer quality and cannot stand in for LoCoMo/LongMemEval model
+evaluation.
 
 `experiments.p4c_ecc_runner` is the isolated P4C execution layer. It does not
 extend the legacy V4 prequential runner: P4B remains a negative typed-evidence
@@ -176,20 +177,49 @@ scope is structural live-ABI wiring only, not task-answer accuracy.
 
 ## MemAudit/ECC memory benchmark execution
 
-The headline runtime path is receipt-bound and has two isolated stages.  First,
-an instrumented memory harness exports deployment-visible MemAudit telemetry,
-GHOST bindings, structural shadow states, and a frozen three-layer ecology
-ledger.  Runtime selection and updates consume only `EccRepairReceipt`; they do
-not call an answer model or open benchmark references:
+The headline runtime path is receipt-bound and has isolated runtime,
+prediction, and official-scoring stages. LoCoMo and LongMemEval are QA
+benchmarks and do **not** ship native MemAudit incident telemetry. For a
+controlled structural stress run, first materialize a gold-free harness. The
+result is explicitly marked `controlled-structural-stress-not-native-official`:
 
 ```bash
+python -m experiments.materialize_ecc_memory_benchmark_harness \
+  --benchmark longmemeval \
+  --output artifacts/harness/longmemeval_ecc
+
 python -m experiments.run_ecc_memory_runtime \
-  --cases /path/to/harness/memaudit_cases.jsonl \
-  --bindings /path/to/harness/ghost_bindings.jsonl \
-  --states /path/to/harness/shadow_states.jsonl \
-  --ecology-ledger /path/to/harness/frozen_ecology.jsonl \
+  --cases artifacts/harness/longmemeval_ecc/memaudit_cases.jsonl \
+  --bindings artifacts/harness/longmemeval_ecc/ghost_bindings.jsonl \
+  --states artifacts/harness/longmemeval_ecc/shadow_states.jsonl \
+  --ecology-ledger artifacts/harness/longmemeval_ecc/frozen_ecology.jsonl \
   --output artifacts/runtime/longmemeval_ecc
 ```
+
+For LoCoMo, replace `longmemeval` with `locomo` and use
+`artifacts/harness/locomo_ecc` / `artifacts/runtime/locomo_ecc`. The
+materializer projects only retrieved runtime memories and deterministically
+cycles controlled retrieval, injection, granularity, and safety pipeline
+faults. It does not infer incidents from reference targets. A real deployed
+harness should instead export its own MemAudit observations into the same
+closed four-file ABI.
+
+The frozen ecology ledger is the durable three-layer GHOST sedimentation:
+failure deposits, pattern revisions, and skill revisions, bound by a sealed
+registry. Runtime selection and updates consume only `EccRepairReceipt`; they
+do not call an answer model or open benchmark references.
+
+To build both controlled harnesses and runtimes under `nohup` instead of
+running the commands manually:
+
+```bash
+bash run_memory_benchmarks_nohup.sh build-runtimes
+bash run_memory_benchmarks_nohup.sh runtime-build-status
+tail -f artifacts/logs/ecc_runtime_build.log
+```
+
+An optional integer argument limits each benchmark for a smoke run, for
+example `build-runtimes 4`. Omit it for the complete streams.
 
 Only after the runtime report and committed states exist may the answer model
 consume the committed memory view and seal official-shape
@@ -215,6 +245,11 @@ python -m experiments.run_ecc_sealed_memory_benchmark \
   --runtime-dir artifacts/runtime/locomo_ecc \
   --output artifacts/experiments/locomo_ecc_sealed
 ```
+
+Official-shape means file compatibility, not that a controlled stress arm is
+the native official benchmark result. The prediction seal propagates
+`benchmark_track` and a reporting warning. Only an actual instrumented harness
+with native telemetry may be reported as the native MemAudit runtime arm.
 
 `experiments.run_sealed_memory_benchmark` is retained only as an explicit
 legacy static-action baseline.  It enumerates `seed:*` answer-replay operators

@@ -141,6 +141,54 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
+    inputs = {
+        "cases": args.cases,
+        "bindings": args.bindings,
+        "states": args.states,
+        "ecology ledger": args.ecology_ledger,
+    }
+    missing = [f"{name}={path}" for name, path in inputs.items() if not path.is_file()]
+    if missing:
+        placeholder_hint = (
+            " The /path/to/... values in documentation are placeholders; first run "
+            "`python -m experiments.materialize_ecc_memory_benchmark_harness`."
+            if any(str(path).startswith("/path/to/") for path in inputs.values())
+            else ""
+        )
+        raise FileNotFoundError(
+            "ECC runtime input file(s) do not exist: " + ", ".join(missing) + "." + placeholder_hint
+        )
+
+    input_roots = {
+        "cases": hashlib.sha256(args.cases.read_bytes()).hexdigest(),
+        "bindings": hashlib.sha256(args.bindings.read_bytes()).hexdigest(),
+        "states": hashlib.sha256(args.states.read_bytes()).hexdigest(),
+        "ecology": hashlib.sha256(args.ecology_ledger.read_bytes()).hexdigest(),
+    }
+    bundle_metadata: dict[str, object] = {}
+    bundle_manifest_path = args.cases.parent / "manifest.json"
+    if (
+        args.bindings.parent == args.cases.parent
+        and args.states.parent == args.cases.parent
+        and args.ecology_ledger.parent == args.cases.parent
+        and bundle_manifest_path.is_file()
+    ):
+        bundle_manifest = json.loads(bundle_manifest_path.read_text(encoding="utf-8"))
+        expected_roots = bundle_manifest.get("file_roots")
+        actual_roots = {
+            "memaudit_cases.jsonl": input_roots["cases"],
+            "ghost_bindings.jsonl": input_roots["bindings"],
+            "shadow_states.jsonl": input_roots["states"],
+            "frozen_ecology.jsonl": input_roots["ecology"],
+        }
+        if not isinstance(expected_roots, Mapping) or dict(expected_roots) != actual_roots:
+            raise ValueError("ECC harness bundle files do not match manifest roots")
+        bundle_metadata = {
+            "harness_profile": bundle_manifest.get("profile"),
+            "benchmark_track": bundle_manifest.get("benchmark_track"),
+            "harness_binding_root": bundle_manifest.get("binding_root"),
+        }
+
     if args.output.exists() and any(args.output.iterdir()):
         raise ValueError("fresh ECC runtime refuses a non-empty output directory")
     args.output.mkdir(parents=True, exist_ok=True)
@@ -170,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     ).run()
     committed_path = args.output / "committed_states.jsonl"
     committed_root = _write_committed_states(committed_path, stores)
-    report = {
+    report: dict[str, object] = {
         "schema_version": "cmd-ecc-memory-runtime-report-v1",
         "status": "success",
         "runtime_manifest_sha256": runtime["run_manifest_sha256"],
@@ -179,21 +227,13 @@ def main(argv: list[str] | None = None) -> int:
         "committed": runtime["committed"],
         "rolled_back": runtime["rolled_back"],
         "committed_states_sha256": committed_root,
-        "input_roots": {
-            "cases": hashlib.sha256(args.cases.read_bytes()).hexdigest(),
-            "bindings": hashlib.sha256(args.bindings.read_bytes()).hexdigest(),
-            "states": hashlib.sha256(args.states.read_bytes()).hexdigest(),
-            "ecology": hashlib.sha256(args.ecology_ledger.read_bytes()).hexdigest(),
-        },
+        "input_roots": input_roots,
         "runtime_uses_gold": False,
         "runtime_uses_labels": False,
         "same_trace_answer_replay": False,
-        "binding_root": content_sha256({
-            "runtime_manifest_sha256": runtime["run_manifest_sha256"],
-            "receipt_root": runtime["receipt_root"],
-            "committed_states_sha256": committed_root,
-        }),
     }
+    report.update(bundle_metadata)
+    report["binding_root"] = content_sha256(report)
     atomic_json_write(
         args.output / "report.json",
         report,

@@ -6,6 +6,7 @@ RUNTIME_DIR="$ROOT_DIR/artifacts/runtime"
 LOG_DIR="$ROOT_DIR/artifacts/logs"
 SERVER_PID_FILE="$RUNTIME_DIR/vllm.pid"
 BENCH_PID_FILE="$RUNTIME_DIR/memory_benchmarks.pid"
+ECC_BUILD_PID_FILE="$RUNTIME_DIR/ecc_runtime_build.pid"
 MODEL_PATH_FILE="$RUNTIME_DIR/vllm_model_path"
 MODEL_LEN_FILE="$RUNTIME_DIR/vllm_max_model_len"
 PORT="${VLLM_PORT:-8000}"
@@ -27,6 +28,8 @@ usage() {
     "  $0 start-server MODEL_PATH [MAX_MODEL_LEN]" \
     "  $0 server-status" \
     "  $0 server-smoke" \
+    "  $0 build-runtimes [LIMIT]" \
+    "  $0 runtime-build-status" \
     "  $0 run LONGMEMEVAL_ECC_RUNTIME LOCOMO_ECC_RUNTIME" \
     "  $0 run-legacy" \
     "  $0 benchmark-status" \
@@ -97,6 +100,45 @@ case "${1:-}" in
     if [[ "$http_status" != "200" ]]; then
       exit 1
     fi
+    ;;
+  build-runtimes)
+    limit="${2:-0}"
+    build_log="$LOG_DIR/ecc_runtime_build.log"
+    nohup bash "$ROOT_DIR/$(basename "$0")" build-runtimes-worker "$limit" \
+      >"$build_log" 2>&1 &
+    printf '%s\n' "$!" >"$ECC_BUILD_PID_FILE"
+    printf 'ECC harness/runtime build queued: pid=%s log=%s\n' "$!" "$build_log"
+    printf 'watch progress: tail -f %q\n' "$build_log"
+    ;;
+  build-runtimes-worker)
+    limit="${2:-0}"
+    cd "$ROOT_DIR"
+    python -m experiments.materialize_ecc_memory_benchmark_harness \
+      --benchmark longmemeval --limit "$limit" \
+      --output artifacts/harness/longmemeval_ecc
+    python -m experiments.run_ecc_memory_runtime \
+      --cases artifacts/harness/longmemeval_ecc/memaudit_cases.jsonl \
+      --bindings artifacts/harness/longmemeval_ecc/ghost_bindings.jsonl \
+      --states artifacts/harness/longmemeval_ecc/shadow_states.jsonl \
+      --ecology-ledger artifacts/harness/longmemeval_ecc/frozen_ecology.jsonl \
+      --output artifacts/runtime/longmemeval_ecc
+    python -m experiments.materialize_ecc_memory_benchmark_harness \
+      --benchmark locomo --limit "$limit" \
+      --output artifacts/harness/locomo_ecc
+    python -m experiments.run_ecc_memory_runtime \
+      --cases artifacts/harness/locomo_ecc/memaudit_cases.jsonl \
+      --bindings artifacts/harness/locomo_ecc/ghost_bindings.jsonl \
+      --states artifacts/harness/locomo_ecc/shadow_states.jsonl \
+      --ecology-ledger artifacts/harness/locomo_ecc/frozen_ecology.jsonl \
+      --output artifacts/runtime/locomo_ecc
+    ;;
+  runtime-build-status)
+    if [[ -f "$ECC_BUILD_PID_FILE" ]] && kill -0 "$(<"$ECC_BUILD_PID_FILE")" 2>/dev/null; then
+      printf 'runtime_build_running=1 coordinator_pid=%s\n' "$(<"$ECC_BUILD_PID_FILE")"
+    else
+      printf 'runtime_build_running=0\n'
+    fi
+    tail -n 30 "$LOG_DIR/ecc_runtime_build.log" 2>/dev/null || true
     ;;
   run)
     curl -fsS "$BASE_URL/models" >/dev/null
