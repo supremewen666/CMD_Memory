@@ -1,5 +1,20 @@
 # GHOST Router V1 Implementation Report
 
+## ECC answer causal contrast v2 (2026-08-24)
+
+- Replaced the confounded BM25-versus-committed-state answer rendering with
+  receipt-bound `faulted_before` versus `repaired_after` arms.
+- State roots now include an explicit `memory_order`; runtime exports both
+  before/after states and rejects old v1 artifacts.
+- Added distinct preregistered retrieval, injection, granularity and safety
+  answer-time semantics under one shared prompt/budget/generation scaffold.
+- Verification: 18 focused tests passed; full suite observed
+  `1470 passed, 1 skipped, 1 warning, 58246 subtests passed in 33.11s`.
+- No model/API call or official scorer was run. The controlled stress track
+  remains non-native; answer recovery is unverified.
+- Full implementation record:
+  `artifacts/design/ecc_answer_causal_contrast_fix_20260824.md`.
+
 ## Prospective live experiment wiring (2026-08-14)
 
 - Added a fail-closed V2 prospective freeze for non-empty `ghost_dev`, `ghost_cal`,

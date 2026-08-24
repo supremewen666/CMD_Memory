@@ -37,6 +37,23 @@ selection, context construction, receipt creation, or online router updates.
 Any result that cannot prove this separation is protocol-invalid and cannot
 support a runtime, causal, or headline claim.
 
+## Answer-efficacy causal contrast
+
+A typed repair effect may be tested only by rendering the receipt's exact
+`before_root` and `after_root`. The exported states must include a stable,
+root-bound `memory_order`; JSON mapping iteration order is not evidence of
+retrieval order. The before and after answer arms must share the same heading,
+ordered-item renderer, system prompt, token budget, model and generation
+parameters. Their only permitted state delta is the preregistered repair
+operator recorded in the receipt-bound transition row.
+
+For the controlled process-fault stress track, retrieval, injection,
+granularity and safety have separate deterministic answer-time semantics. The
+track must remain labelled
+`controlled-structural-stress-not-native-official`. Prediction sealing precedes
+and is independent from any official benchmark scorer; scorer outcomes cannot
+retroactively construct state, select an operator, or update GHOST.
+
 ## P4C execution binding
 
 The compatibility implementation of this contract is

@@ -6,6 +6,7 @@ RUNTIME_DIR="$ROOT_DIR/artifacts/runtime"
 LOG_DIR="$ROOT_DIR/artifacts/logs"
 SERVER_PID_FILE="$RUNTIME_DIR/vllm.pid"
 BENCH_PID_FILE="$RUNTIME_DIR/memory_benchmarks.pid"
+BENCH_INFO_FILE="$RUNTIME_DIR/memory_benchmarks.info"
 ECC_BUILD_PID_FILE="$RUNTIME_DIR/ecc_runtime_build.pid"
 MODEL_PATH_FILE="$RUNTIME_DIR/vllm_model_path"
 MODEL_LEN_FILE="$RUNTIME_DIR/vllm_max_model_len"
@@ -30,7 +31,7 @@ usage() {
     "  $0 server-smoke" \
     "  $0 build-runtimes [LIMIT]" \
     "  $0 runtime-build-status" \
-    "  $0 run LONGMEMEVAL_ECC_RUNTIME LOCOMO_ECC_RUNTIME" \
+    "  $0 run LONGMEMEVAL_ECC_RUNTIME LOCOMO_ECC_RUNTIME [TOKENIZER_PATH] [MAX_MODEL_LEN]" \
     "  $0 run-legacy" \
     "  $0 benchmark-status" \
     "  $0 stop-server" \
@@ -115,22 +116,22 @@ case "${1:-}" in
     cd "$ROOT_DIR"
     python -m experiments.materialize_ecc_memory_benchmark_harness \
       --benchmark longmemeval --limit "$limit" \
-      --output artifacts/harness/longmemeval_ecc
+      --output artifacts/harness/longmemeval_ecc_causal_v2
     python -m experiments.run_ecc_memory_runtime \
-      --cases artifacts/harness/longmemeval_ecc/memaudit_cases.jsonl \
-      --bindings artifacts/harness/longmemeval_ecc/ghost_bindings.jsonl \
-      --states artifacts/harness/longmemeval_ecc/shadow_states.jsonl \
-      --ecology-ledger artifacts/harness/longmemeval_ecc/frozen_ecology.jsonl \
-      --output artifacts/runtime/longmemeval_ecc
+      --cases artifacts/harness/longmemeval_ecc_causal_v2/memaudit_cases.jsonl \
+      --bindings artifacts/harness/longmemeval_ecc_causal_v2/ghost_bindings.jsonl \
+      --states artifacts/harness/longmemeval_ecc_causal_v2/shadow_states.jsonl \
+      --ecology-ledger artifacts/harness/longmemeval_ecc_causal_v2/frozen_ecology.jsonl \
+      --output artifacts/runtime/longmemeval_ecc_causal_v2
     python -m experiments.materialize_ecc_memory_benchmark_harness \
       --benchmark locomo --limit "$limit" \
-      --output artifacts/harness/locomo_ecc
+      --output artifacts/harness/locomo_ecc_causal_v2
     python -m experiments.run_ecc_memory_runtime \
-      --cases artifacts/harness/locomo_ecc/memaudit_cases.jsonl \
-      --bindings artifacts/harness/locomo_ecc/ghost_bindings.jsonl \
-      --states artifacts/harness/locomo_ecc/shadow_states.jsonl \
-      --ecology-ledger artifacts/harness/locomo_ecc/frozen_ecology.jsonl \
-      --output artifacts/runtime/locomo_ecc
+      --cases artifacts/harness/locomo_ecc_causal_v2/memaudit_cases.jsonl \
+      --bindings artifacts/harness/locomo_ecc_causal_v2/ghost_bindings.jsonl \
+      --states artifacts/harness/locomo_ecc_causal_v2/shadow_states.jsonl \
+      --ecology-ledger artifacts/harness/locomo_ecc_causal_v2/frozen_ecology.jsonl \
+      --output artifacts/runtime/locomo_ecc_causal_v2
     ;;
   runtime-build-status)
     if [[ -f "$ECC_BUILD_PID_FILE" ]] && kill -0 "$(<"$ECC_BUILD_PID_FILE")" 2>/dev/null; then
@@ -144,23 +145,47 @@ case "${1:-}" in
     curl -fsS "$BASE_URL/models" >/dev/null
     long_runtime="${2:-${CMD_ECC_RUNTIME_LONGMEMEVAL:-}}"
     locomo_runtime="${3:-${CMD_ECC_RUNTIME_LOCOMO:-}}"
+    tokenizer_arg="${4:-}"
+    max_model_len_arg="${5:-}"
     if [[ -z "$long_runtime" || -z "$locomo_runtime" ]]; then
       printf '%s\n' \
         'ECC runtime directories are required.' \
-        'Usage: run_memory_benchmarks_nohup.sh run LONGMEMEVAL_ECC_RUNTIME LOCOMO_ECC_RUNTIME' >&2
+        'Usage: run_memory_benchmarks_nohup.sh run LONGMEMEVAL_ECC_RUNTIME LOCOMO_ECC_RUNTIME [TOKENIZER_PATH] [MAX_MODEL_LEN]' >&2
       exit 2
     fi
-    if [[ -z "${LLM_TOKENIZER_PATH:-}" && ! -f "$MODEL_PATH_FILE" ]]; then
-      printf 'LLM_TOKENIZER_PATH is required when vLLM was started outside this script\n' >&2
+    if [[ -z "$tokenizer_arg" && -z "${LLM_TOKENIZER_PATH:-}" && ! -f "$MODEL_PATH_FILE" ]]; then
+      printf '%s\n' \
+        'Tokenizer path is required because vLLM was started outside this script.' \
+        'Pass it as the fourth argument or export LLM_TOKENIZER_PATH.' >&2
       exit 2
     fi
-    if [[ -z "${LLM_MAX_MODEL_LEN:-}" && ! -f "$MODEL_LEN_FILE" ]]; then
-      printf 'LLM_MAX_MODEL_LEN is required when vLLM was started outside this script\n' >&2
+    if [[ -z "$max_model_len_arg" && -z "${LLM_MAX_MODEL_LEN:-}" && ! -f "$MODEL_LEN_FILE" ]]; then
+      printf '%s\n' \
+        'Maximum model length is required because vLLM was started outside this script.' \
+        'Pass it as the fifth argument or export LLM_MAX_MODEL_LEN.' >&2
       exit 2
     fi
-    tokenizer_path="${LLM_TOKENIZER_PATH:-$(<"$MODEL_PATH_FILE")}"
-    max_model_len="${LLM_MAX_MODEL_LEN:-$(<"$MODEL_LEN_FILE")}"
+    if [[ -n "$tokenizer_arg" ]]; then
+      tokenizer_path="$tokenizer_arg"
+    elif [[ -n "${LLM_TOKENIZER_PATH:-}" ]]; then
+      tokenizer_path="$LLM_TOKENIZER_PATH"
+    else
+      tokenizer_path="$(<"$MODEL_PATH_FILE")"
+    fi
+    if [[ ! -d "$tokenizer_path" ]]; then
+      printf 'tokenizer/model directory does not exist: %s\n' "$tokenizer_path" >&2
+      exit 2
+    fi
+    if [[ -n "$max_model_len_arg" ]]; then
+      max_model_len="$max_model_len_arg"
+    elif [[ -n "${LLM_MAX_MODEL_LEN:-}" ]]; then
+      max_model_len="$LLM_MAX_MODEL_LEN"
+    else
+      max_model_len="$(<"$MODEL_LEN_FILE")"
+    fi
     bench_log="$LOG_DIR/memory_benchmarks.log"
+    printf 'launcher_mode=ecc\nentrypoint=experiments.run_ecc_sealed_memory_benchmark\n' \
+      >"$bench_log"
     nohup env \
       LLM_BASE_URL="$BASE_URL" \
       LLM_MODEL="$SERVED_MODEL_NAME" \
@@ -168,8 +193,10 @@ case "${1:-}" in
       LLM_MAX_MODEL_LEN="$max_model_len" \
       LLM_MAX_TOKENS="${LLM_MAX_TOKENS:-512}" \
       bash "$ROOT_DIR/$(basename "$0")" run-ecc-worker "$long_runtime" "$locomo_runtime" \
-      >"$bench_log" 2>&1 &
+      >>"$bench_log" 2>&1 &
     printf '%s\n' "$!" >"$BENCH_PID_FILE"
+    printf 'mode=ecc\npid=%s\nqueued_at=%s\nlog=%s\n' \
+      "$!" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$bench_log" >"$BENCH_INFO_FILE"
     printf 'benchmarks queued sequentially: pid=%s log=%s\n' "$!" "$bench_log"
     printf 'watch progress: tail -f %q\n' "$bench_log"
     ;;
@@ -177,24 +204,29 @@ case "${1:-}" in
     long_runtime="${2:?LongMemEval ECC runtime directory is required}"
     locomo_runtime="${3:?LoCoMo ECC runtime directory is required}"
     cd "$ROOT_DIR"
+    printf 'worker_mode=ecc\nworker_pid=%s\n' "$$"
     python -m experiments.run_ecc_sealed_memory_benchmark \
       --benchmark longmemeval \
       --runtime-dir "$long_runtime" \
-      --output artifacts/experiments/longmemeval_ecc_sealed
+      --output artifacts/experiments/longmemeval_ecc_causal_v2_sealed
     python -m experiments.run_ecc_sealed_memory_benchmark \
       --benchmark locomo \
       --runtime-dir "$locomo_runtime" \
-      --output artifacts/experiments/locomo_ecc_sealed
+      --output artifacts/experiments/locomo_ecc_causal_v2_sealed
     ;;
   run-legacy)
     curl -fsS "$BASE_URL/models" >/dev/null
     bench_log="$LOG_DIR/memory_benchmarks_legacy.log"
+    printf 'launcher_mode=legacy\nentrypoint=experiments.run_sealed_memory_benchmark\n' \
+      >"$bench_log"
     nohup env \
       LLM_BASE_URL="$BASE_URL" \
       LLM_MODEL="$SERVED_MODEL_NAME" \
       bash "$ROOT_DIR/$(basename "$0")" run-legacy-worker --no-full-context \
-      >"$bench_log" 2>&1 &
+      >>"$bench_log" 2>&1 &
     printf '%s\n' "$!" >"$BENCH_PID_FILE"
+    printf 'mode=legacy\npid=%s\nqueued_at=%s\nlog=%s\n' \
+      "$!" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$bench_log" >"$BENCH_INFO_FILE"
     printf 'legacy static-action baseline queued: pid=%s log=%s\n' "$!" "$bench_log"
     ;;
   run-legacy-worker)
@@ -215,7 +247,15 @@ case "${1:-}" in
     else
       printf 'benchmark_running=0\n'
     fi
-    tail -n 30 "$LOG_DIR/memory_benchmarks.log" 2>/dev/null || true
+    if [[ -f "$BENCH_INFO_FILE" ]]; then
+      cat "$BENCH_INFO_FILE"
+      current_log="$(sed -n 's/^log=//p' "$BENCH_INFO_FILE" | tail -n 1)"
+      if [[ -n "$current_log" ]]; then
+        tail -n 30 "$current_log" 2>/dev/null || true
+      fi
+    else
+      printf 'no benchmark metadata for this script version; old log is stale and was not displayed\n'
+    fi
     ;;
   stop-server)
     if [[ ! -f "$SERVER_PID_FILE" ]]; then

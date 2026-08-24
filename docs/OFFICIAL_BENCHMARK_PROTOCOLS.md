@@ -19,9 +19,11 @@ are invoked without changing their split, metric or budget.
   retrieval/memory-system baselines. Those additions must be labeled with the
   exact judge model and are not the original LoCoMo metric.
 
-CMD's headline arm answers from the root-bound state committed by the
-MemAudit/ECC/GHOST runtime. BM25 is retained as the matched retrieval control.
-The legacy `seed:*` static-action arena is not reported as CMD. The upstream
+For native runs, BM25 may be retained as a separately declared retrieval
+baseline.  It is not the causal control for the controlled ECC stress track.
+That track compares a root-bound faulted before-state with the receipt-bound
+repaired after-state under an otherwise identical answer pipeline. The legacy
+`seed:*` static-action arena is not reported as CMD. The upstream
 `task_eval.evaluation.eval_question_answering` is imported only after the
 prediction seal has been verified.
 
@@ -39,10 +41,11 @@ prediction seal has been verified.
   LongMemEval-M is too long for that full-context control and should be tested
   as a memory/retrieval system rather than silently truncated.
 
-CMD exposes BM25 top-5 and a root-bound ECC committed-state arm. MemAudit
-telemetry and GHOST updates are completed before the answer model runs; the
-runtime never reads `answer` or `answer_session_ids`. The scorer is a separate
-post-seal process.
+The controlled ECC track exposes `faulted_before` and `repaired_after`, not a
+mislabelled BM25-versus-ECC causal comparison. MemAudit telemetry and GHOST
+updates are completed before the answer model runs; the runtime never reads
+reference targets or scorer outputs. The scorer is a separate post-seal
+process.
 
 ## Evo-Bench
 
@@ -74,8 +77,8 @@ bash run_memory_benchmarks_nohup.sh start-server \
 bash run_memory_benchmarks_nohup.sh server-status
 bash run_memory_benchmarks_nohup.sh server-smoke
 bash run_memory_benchmarks_nohup.sh run \
-  artifacts/runtime/longmemeval_ecc \
-  artifacts/runtime/locomo_ecc
+  artifacts/runtime/longmemeval_ecc_causal_v2 \
+  artifacts/runtime/locomo_ecc_causal_v2
 tail -f artifacts/logs/memory_benchmarks.log
 ```
 
@@ -85,12 +88,20 @@ prompt exceeds that same window; every truncation is recorded in
 `runtime_ledger.jsonl`. HTTP 4xx responses retain the provider error body and
 are never reported as an unreachable endpoint.
 
+The controlled answer-efficacy protocol is v2-only. Its runtime export binds
+both `before_state` and `after_state`, including an explicit `memory_order`
+array, to the corresponding receipt roots. Both arms use the same heading,
+renderer, budget, model and generation configuration. Retrieval, injection,
+granularity and safety faults have distinct preregistered rendering semantics.
+Old v1 runtime directories are rejected and must be rebuilt into a fresh
+directory.
+
 ```bash
 # Receipt-bound prediction (requires a completed instrumented ECC runtime).
 python -m experiments.run_ecc_sealed_memory_benchmark \
   --benchmark longmemeval \
-  --runtime-dir artifacts/runtime/longmemeval_ecc \
-  --output artifacts/experiments/longmemeval_ecc_sealed
+  --runtime-dir artifacts/runtime/longmemeval_ecc_causal_v2 \
+  --output artifacts/experiments/longmemeval_ecc_causal_v2_sealed
 
 # Explicit legacy baseline only; not the MemAudit/GHOST system.
 python -m experiments.run_sealed_memory_benchmark \

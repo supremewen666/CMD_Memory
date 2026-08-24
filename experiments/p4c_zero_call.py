@@ -16,7 +16,14 @@ from experiments.p4c_ecc_runner import P4cEccCase, P4cEccRunner
 
 
 _STATE_FIELDS = frozenset(
-    {"pipeline", "memories", "lineage", "quarantine", "protected_ids"}
+    {
+        "pipeline",
+        "memories",
+        "memory_order",
+        "lineage",
+        "quarantine",
+        "protected_ids",
+    }
 )
 
 
@@ -170,6 +177,16 @@ class StructuralMemoryStore:
             for memory_id, record in memories.items()
         ):
             raise ValueError("zero-call memory records are invalid")
+        memory_order = state.get("memory_order")
+        if (
+            not isinstance(memory_order, list)
+            or any(not isinstance(memory_id, str) for memory_id in memory_order)
+            or len(set(memory_order)) != len(memory_order)
+            or set(memory_order) != set(memories)
+        ):
+            raise ValueError(
+                "zero-call memory_order must be a unique complete ordering of memories"
+            )
         for name in ("lineage", "quarantine", "protected_ids"):
             value = state.get(name)
             if not isinstance(value, list):
@@ -389,4 +406,3 @@ __all__ = [
     "StructuralEccEvaluator",
     "StructuralMemoryStore",
 ]
-

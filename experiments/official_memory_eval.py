@@ -13,6 +13,19 @@ from cmd_audit.core.state_codec import atomic_json_write
 from experiments.sealed_memory_benchmark import validate_seal
 
 
+def _validate_prediction_seal(run_dir: Path) -> Mapping[str, object]:
+    """Validate either a legacy arena seal or the v2 ECC causal seal."""
+
+    raw = json.loads((Path(run_dir) / "prediction_seal.json").read_text(encoding="utf-8"))
+    if raw.get("schema_version") == "cmd-ecc-memory-benchmark-prediction-seal-v2":
+        from experiments.run_ecc_sealed_memory_benchmark import (
+            validate_ecc_prediction_seal,
+        )
+
+        return validate_ecc_prediction_seal(run_dir)
+    return validate_seal(run_dir)
+
+
 def longmemeval_commands(
     *,
     run_dir: Path,
@@ -21,7 +34,7 @@ def longmemeval_commands(
     judge_model: str,
 ) -> list[list[str]]:
     """Return the upstream ICLR-2025 evaluator command for every sealed arm."""
-    seal = validate_seal(run_dir)
+    seal = _validate_prediction_seal(run_dir)
     if seal.get("benchmark") != "longmemeval":
         raise ValueError("LongMemEval scorer requires a LongMemEval seal")
     script = Path(official_root) / "src" / "evaluation" / "evaluate_qa.py"
@@ -82,7 +95,7 @@ def score_locomo_official(
     official_root: Path,
 ) -> Mapping[str, object]:
     """Call upstream ``eval_question_answering`` on sealed predictions."""
-    seal = validate_seal(run_dir)
+    seal = _validate_prediction_seal(run_dir)
     if seal.get("benchmark") != "locomo":
         raise ValueError("LoCoMo scorer requires a LoCoMo seal")
     if _sha_file(dataset) != seal.get("dataset_sha256"):

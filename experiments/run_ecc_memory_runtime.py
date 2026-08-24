@@ -16,6 +16,7 @@ import shutil
 from typing import Mapping
 
 from cmd_audit.core.state_codec import atomic_json_write, content_sha256
+from cmd_audit.repair.ecc import EccRepairReceipt
 from cmd_audit.repair.ghost_ecology import (
     EcologyLedger,
     GhostEcology,
@@ -29,11 +30,13 @@ from experiments.ecc_memory_runtime import (
     StructuralMemoryStore,
     load_ecc_runtime_cases,
 )
+from experiments.ecc_answer_causal_contrast import OPERATOR_SEMANTICS
 
 
 BINDING_SCHEMA = "cmd-ecc-ghost-binding-v1"
-STATE_SCHEMA = "cmd-ecc-structural-scenario-v1"
-COMMITTED_STATE_SCHEMA = "cmd-ecc-committed-state-v1"
+STATE_SCHEMA = "cmd-ecc-structural-scenario-v2"
+CAUSAL_STATE_SCHEMA = "cmd-ecc-causal-state-pair-v2"
+RUNTIME_REPORT_SCHEMA = "cmd-ecc-memory-runtime-report-v2"
 
 
 def _jsonl(path: Path) -> tuple[Mapping[str, object], ...]:
@@ -109,18 +112,66 @@ def load_stores(path: Path) -> dict[str, StructuralMemoryStore]:
     return result
 
 
-def _write_committed_states(
+def _load_receipts_by_case(runtime_dir: Path) -> dict[str, EccRepairReceipt]:
+    completions = [
+        json.loads(line)
+        for line in (runtime_dir / "case_completions.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line
+    ]
+    receipts = [
+        EccRepairReceipt.from_mapping(json.loads(line))
+        for line in (runtime_dir / "repair_receipts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line
+    ]
+    if len(completions) != len(receipts):
+        raise ValueError("ECC runtime receipt/completion coverage differs")
+    result: dict[str, EccRepairReceipt] = {}
+    for completion, receipt in zip(completions, receipts, strict=True):
+        case_id = str(completion.get("case_id"))
+        if completion.get("receipt_sha256") != receipt.content_hash:
+            raise ValueError("ECC completion does not bind its repair receipt")
+        if case_id in result:
+            raise ValueError("ECC runtime contains duplicate case completions")
+        result[case_id] = receipt
+    return result
+
+
+def _write_causal_states(
     path: Path,
+    cases: tuple[object, ...],
     stores: Mapping[str, StructuralMemoryStore],
+    before_states: Mapping[str, Mapping[str, object]],
+    receipts: Mapping[str, EccRepairReceipt],
 ) -> str:
     rows = []
-    for case_id in sorted(stores):
+    for case in cases:
+        case_id = str(getattr(case, "case_id"))
         store = stores[case_id]
+        before_state = dict(before_states[case_id])
+        after_state = dict(store.committed_state())
+        receipt = receipts[case_id]
+        before_root = content_sha256(before_state, ensure_ascii=False, allow_nan=False)
+        after_root = content_sha256(after_state, ensure_ascii=False, allow_nan=False)
+        if receipt.before_root != before_root or receipt.after_root != after_root:
+            raise ValueError(f"ECC causal state pair does not bind receipt roots: {case_id}")
+        observation = getattr(case, "observation")
+        subtype = str(observation.get("process_fault_subtype"))
+        if subtype not in OPERATOR_SEMANTICS:
+            raise ValueError(f"ECC answer contrast requires a process-fault subtype: {case_id}")
         rows.append({
-            "schema_version": COMMITTED_STATE_SCHEMA,
+            "schema_version": CAUSAL_STATE_SCHEMA,
             "case_id": case_id,
-            "state_root": store.snapshot_root(),
-            "state": dict(store.committed_state()),
+            "process_fault_subtype": subtype,
+            "operator_semantics": OPERATOR_SEMANTICS[subtype],
+            "before_root": before_root,
+            "before_state": before_state,
+            "after_root": after_root,
+            "after_state": after_state,
+            "receipt_sha256": receipt.content_hash,
         })
     path.write_text(
         "".join(
@@ -181,7 +232,11 @@ def main(argv: list[str] | None = None) -> int:
             "shadow_states.jsonl": input_roots["states"],
             "frozen_ecology.jsonl": input_roots["ecology"],
         }
-        if not isinstance(expected_roots, Mapping) or dict(expected_roots) != actual_roots:
+        if (
+            bundle_manifest.get("schema_version") != "cmd-ecc-harness-bundle-v2"
+            or not isinstance(expected_roots, Mapping)
+            or dict(expected_roots) != actual_roots
+        ):
             raise ValueError("ECC harness bundle files do not match manifest roots")
         bundle_metadata = {
             "harness_profile": bundle_manifest.get("profile"),
@@ -208,6 +263,9 @@ def main(argv: list[str] | None = None) -> int:
     for case in cases:
         if stores[case.case_id].snapshot_root() != case.observation["state_root"]:
             raise ValueError(f"ECC state root mismatch for {case.case_id}")
+    before_states = {
+        case.case_id: dict(stores[case.case_id].committed_state()) for case in cases
+    }
 
     runtime = EccRuntimeRunner(
         cases,
@@ -216,17 +274,31 @@ def main(argv: list[str] | None = None) -> int:
         store_factory=lambda case: stores[case.case_id],
         evaluator_factory=lambda case: StructuralEccEvaluator(stores[case.case_id]),
     ).run()
-    committed_path = args.output / "committed_states.jsonl"
-    committed_root = _write_committed_states(committed_path, stores)
+    receipts = _load_receipts_by_case(args.output / "runtime")
+    if set(receipts) != case_ids:
+        raise ValueError("ECC runtime receipt coverage differs from causal state stream")
+    causal_states_path = args.output / "causal_states.jsonl"
+    causal_states_root = _write_causal_states(
+        causal_states_path,
+        cases,
+        stores,
+        before_states,
+        receipts,
+    )
     report: dict[str, object] = {
-        "schema_version": "cmd-ecc-memory-runtime-report-v1",
+        "schema_version": RUNTIME_REPORT_SCHEMA,
         "status": "success",
         "runtime_manifest_sha256": runtime["run_manifest_sha256"],
         "receipt_root": runtime["receipt_root"],
         "case_count": runtime["case_count"],
         "committed": runtime["committed"],
         "rolled_back": runtime["rolled_back"],
-        "committed_states_sha256": committed_root,
+        "causal_states_sha256": causal_states_root,
+        "causal_state_schema": CAUSAL_STATE_SCHEMA,
+        "answer_contrast_ready": bool(
+            runtime["committed"] == runtime["case_count"]
+            and runtime["rolled_back"] == 0
+        ),
         "input_roots": input_roots,
         "runtime_uses_gold": False,
         "runtime_uses_labels": False,

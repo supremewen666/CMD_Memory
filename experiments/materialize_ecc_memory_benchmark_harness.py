@@ -33,10 +33,10 @@ from experiments.run_ecc_memory_runtime import BINDING_SCHEMA, STATE_SCHEMA
 from experiments.run_sealed_memory_benchmark import DEFAULTS
 
 
-PROFILE = "controlled-process-fault-v1"
+PROFILE = "controlled-process-fault-v2"
 TRACK = "controlled-structural-stress-not-native-official"
 CASE_SCHEMA = "cmd-p4c-ecc-case-v1"
-MANIFEST_SCHEMA = "cmd-ecc-harness-bundle-v1"
+MANIFEST_SCHEMA = "cmd-ecc-harness-bundle-v2"
 SUBTYPES = ("retrieval", "injection", "granularity", "safety")
 
 
@@ -62,6 +62,10 @@ def _baseline_ids(case: ArenaCase) -> tuple[str, ...]:
     ids = baseline.get("retrieved_memory_ids")
     if not isinstance(ids, list) or any(not isinstance(row, str) for row in ids):
         raise ValueError(f"benchmark retrieval IDs are malformed: {case.case_id}")
+    if not ids or len(set(ids)) != len(ids):
+        raise ValueError(
+            f"controlled process-fault contrast requires non-empty unique retrieval IDs: {case.case_id}"
+        )
     return tuple(ids)
 
 
@@ -250,6 +254,9 @@ def materialize_bundle(
         state = {
             "pipeline": {name: name != subtype for name in SUBTYPES},
             "memories": _memory_state(case, dataset_sha256),
+            # This list, not JSON object iteration order, is the authoritative
+            # retrieval order and is covered by both before_root and after_root.
+            "memory_order": list(_baseline_ids(case)),
             "lineage": [],
             "quarantine": [],
             "protected_ids": [],

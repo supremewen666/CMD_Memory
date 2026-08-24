@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from experiments.materialize_ecc_memory_benchmark_harness import materialize_bundle
+from experiments.locomo_arena import load_locomo_arena_cases
 from experiments.run_ecc_memory_runtime import main as run_runtime
 
 
@@ -35,6 +36,32 @@ def test_materialized_controlled_harness_runs_through_receipt_runtime(tmp_path: 
     ).read_text(encoding="utf-8").splitlines()} == {
         "retrieval", "injection", "granularity", "safety"
     }
+    state_rows = [
+        json.loads(line)
+        for line in (bundle / "shadow_states.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    # JSON mappings are serialized with sort_keys=True, but the explicit list
+    # remains the authoritative retrieval order.
+    selected = load_locomo_arena_cases(
+        source,
+        include_adversarial=True,
+        seed=24,
+        limit=4,
+        retrieval_top_k=5,
+        candidate_pool_k=10,
+    )
+    expected_orders = {
+        case.case_id: case.raw["baseline_outputs"][0]["retrieved_memory_ids"]
+        for case in selected
+    }
+    assert all(
+        row["state"]["memory_order"] == expected_orders[row["case_id"]]
+        for row in state_rows
+    )
+    assert all(
+        set(row["state"]["memory_order"]) == set(row["state"]["memories"])
+        for row in state_rows
+    )
 
     runtime = tmp_path / "runtime"
     assert run_runtime([
@@ -47,6 +74,8 @@ def test_materialized_controlled_harness_runs_through_receipt_runtime(tmp_path: 
     report = json.loads((runtime / "report.json").read_text(encoding="utf-8"))
     assert report["committed"] == 4
     assert report["rolled_back"] == 0
+    assert report["schema_version"] == "cmd-ecc-memory-runtime-report-v2"
+    assert report["answer_contrast_ready"] is True
     assert report["harness_binding_root"] == manifest["binding_root"]
     assert report["benchmark_track"] == manifest["benchmark_track"]
 

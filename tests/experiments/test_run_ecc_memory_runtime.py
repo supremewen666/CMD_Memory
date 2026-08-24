@@ -64,6 +64,7 @@ def test_runtime_cli_uses_memaudit_ghost_receipt_and_exports_committed_state(
             "safety": True,
         },
         "memories": {},
+        "memory_order": [],
         "lineage": [],
         "quarantine": [],
         "protected_ids": [],
@@ -110,7 +111,7 @@ def test_runtime_cli_uses_memaudit_ghost_receipt_and_exports_committed_state(
     }) + "\n", encoding="utf-8")
     states = tmp_path / "states.jsonl"
     states.write_text(json.dumps({
-        "schema_version": "cmd-ecc-structural-scenario-v1",
+        "schema_version": "cmd-ecc-structural-scenario-v2",
         "case_id": "case-1",
         "state": state,
         "operators": {skill.skill_revision_id: {"kind": "pipeline_patch"}},
@@ -126,19 +127,23 @@ def test_runtime_cli_uses_memaudit_ghost_receipt_and_exports_committed_state(
     ]) == 0
 
     report = json.loads((output / "report.json").read_text())
-    committed = json.loads((output / "committed_states.jsonl").read_text())
+    causal = json.loads((output / "causal_states.jsonl").read_text())
     receipt = json.loads((output / "runtime" / "repair_receipts.jsonl").read_text())
     assert report["runtime_uses_gold"] is False
     assert report["same_trace_answer_replay"] is False
     assert receipt["committed"] is True
-    assert committed["state"]["pipeline"]["retrieval"] is True
-    assert committed["state_root"] == receipt["after_root"]
+    assert causal["before_state"]["pipeline"]["retrieval"] is False
+    assert causal["after_state"]["pipeline"]["retrieval"] is True
+    assert causal["before_root"] == receipt["before_root"]
+    assert causal["after_root"] == receipt["after_root"]
+    assert causal["receipt_sha256"]
+    assert report["answer_contrast_ready"] is True
 
 
 def test_state_root_helper_matches_runtime_codec() -> None:
     state = {
         "pipeline": {"retrieval": True, "injection": True, "granularity": True, "safety": True},
-        "memories": {}, "lineage": [], "quarantine": [], "protected_ids": [],
+        "memories": {}, "memory_order": [], "lineage": [], "quarantine": [], "protected_ids": [],
     }
     store = StructuralMemoryStore(state=state, operators={"skill": {"kind": "pipeline_patch"}})
     assert store.snapshot_root() == content_sha256(state, ensure_ascii=False, allow_nan=False)
