@@ -39,8 +39,10 @@ support a runtime, causal, or headline claim.
 
 ## P4C execution binding
 
-The P4C implementation of this contract is
-`experiments/p4c_ecc_runner.py`. Its runtime input is a closed incident overlay,
+The compatibility implementation of this contract is
+`experiments/p4c_ecc_runner.py`; its public, non-phase-specific API is exported
+from `experiments/ecc_memory_runtime.py`, and the runnable harness entrypoint is
+`experiments/run_ecc_memory_runtime.py`. Its runtime input is a closed incident overlay,
 not the raw dataset or sealed sidecar. Its durable completion authority binds
 the frozen case-stream root, each `EccRepairReceipt`, the incident-ledger head,
 and the receipt-only router snapshot. `audit_p4c_run` is a separate post-runtime

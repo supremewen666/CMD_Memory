@@ -13,11 +13,17 @@ environment into these assertions.
 """
 
 import os
+from io import BytesIO
 import json
 import unittest
 from unittest.mock import patch
+import urllib.error
 
-from cmd_audit.core.llm_client import LLMClient, LLMClientConfig
+from cmd_audit.core.llm_client import (
+    LLMClient,
+    LLMClientConfig,
+    LLMResponseError,
+)
 
 
 class LLMClientConfigForRoleTest(unittest.TestCase):
@@ -135,6 +141,7 @@ class LLMClientStructuredOutputTest(unittest.TestCase):
         request = urlopen.call_args.args[0]
         payload = json.loads(request.data.decode("utf-8"))
         self.assertEqual(result, '{"relation":"unrelated"}')
+        self.assertEqual(payload["max_tokens"], 512)
         self.assertEqual(
             payload["response_format"],
             {
@@ -146,6 +153,32 @@ class LLMClientStructuredOutputTest(unittest.TestCase):
                 },
             },
         )
+
+    def test_http_400_exposes_provider_body_and_is_not_unreachable(self):
+        client = LLMClient(
+            LLMClientConfig(
+                base_url="http://localhost:8000/v1",
+                model="qwen",
+            )
+        )
+        error = urllib.error.HTTPError(
+            "http://localhost:8000/v1/chat/completions",
+            400,
+            "Bad Request",
+            {},
+            BytesIO(json.dumps({
+                "error": {
+                    "message": "maximum context length is 32768 tokens"
+                }
+            }).encode("utf-8")),
+        )
+
+        with patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                LLMResponseError,
+                "HTTP 400: maximum context length is 32768 tokens",
+            ):
+                client.generate("too long")
 
 
 if __name__ == "__main__":

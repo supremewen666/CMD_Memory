@@ -19,8 +19,10 @@ are invoked without changing their split, metric or budget.
   retrieval/memory-system baselines. Those additions must be labeled with the
   exact judge model and are not the original LoCoMo metric.
 
-CMD runs BM25, CMD and full-context with the same answer model, then imports
-the upstream `task_eval.evaluation.eval_question_answering` only after the
+CMD's headline arm answers from the root-bound state committed by the
+MemAudit/ECC/GHOST runtime. BM25 is retained as the matched retrieval control.
+The legacy `seed:*` static-action arena is not reported as CMD. The upstream
+`task_eval.evaluation.eval_question_answering` is imported only after the
 prediction seal has been verified.
 
 ## LongMemEval (ICLR 2025)
@@ -37,9 +39,10 @@ prediction seal has been verified.
   LongMemEval-M is too long for that full-context control and should be tested
   as a memory/retrieval system rather than silently truncated.
 
-CMD exposes BM25 top-5, a bounded top-10 repair pool, and full context on S.
-The runtime projection excludes `answer` and `answer_session_ids`; the scorer
-is a separate post-seal process.
+CMD exposes BM25 top-5 and a root-bound ECC committed-state arm. MemAudit
+telemetry and GHOST updates are completed before the answer model runs; the
+runtime never reads `answer` or `answer_session_ids`. The scorer is a separate
+post-seal process.
 
 ## Evo-Bench
 
@@ -67,27 +70,32 @@ name and must not be used as a substitute for starting the server.
 
 ```bash
 bash run_memory_benchmarks_nohup.sh start-server \
-  "$HOME/pretrained_lms/Qwen2.5-7B-Instruct" 32768
+  /path/to/Qwen2.5-7B-Instruct 65536
 bash run_memory_benchmarks_nohup.sh server-status
-bash run_memory_benchmarks_nohup.sh run
+bash run_memory_benchmarks_nohup.sh server-smoke
+bash run_memory_benchmarks_nohup.sh run \
+  artifacts/runtime/longmemeval_ecc \
+  artifacts/runtime/locomo_ecc
 tail -f artifacts/logs/memory_benchmarks.log
 ```
 
-The detached runner defaults to `--no-full-context`. To include the ICLR-style
-full-context control, launch a server with a context budget that fits the data
-and GPU, then run with `CMD_FULL_CONTEXT=1`.
+The detached runner saves the served tokenizer path and context window. The
+prediction process drops complete lowest-priority memory items before the
+prompt exceeds that same window; every truncation is recorded in
+`runtime_ledger.jsonl`. HTTP 4xx responses retain the provider error body and
+are never reported as an unreachable endpoint.
 
 ```bash
-# Validate complete local dataset projections without an API call.
-python -m experiments.run_sealed_memory_benchmark \
-  --benchmark locomo --output /tmp/unused --validate-only
-python -m experiments.run_sealed_memory_benchmark \
-  --benchmark longmemeval --output /tmp/unused --validate-only
+# Receipt-bound prediction (requires a completed instrumented ECC runtime).
+python -m experiments.run_ecc_sealed_memory_benchmark \
+  --benchmark longmemeval \
+  --runtime-dir artifacts/runtime/longmemeval_ecc \
+  --output artifacts/experiments/longmemeval_ecc_sealed
 
-# Real prediction (requires LLM_BASE_URL and LLM_MODEL).
+# Explicit legacy baseline only; not the MemAudit/GHOST system.
 python -m experiments.run_sealed_memory_benchmark \
   --benchmark longmemeval \
-  --output artifacts/experiments/longmemeval_sealed
+  --output artifacts/experiments/longmemeval_legacy_static
 
 # Inspect an official Evo-Bench formal command without spending resources.
 python -m experiments.run_evobench_official --stage evolve \

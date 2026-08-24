@@ -86,6 +86,9 @@ class LLMClientConfig:
     )
     max_retries: int = 1
     temperature: float = 0.0
+    max_tokens: int = field(
+        default_factory=lambda: int(os.environ.get("LLM_MAX_TOKENS", "512"))
+    )
 
     @property
     def chat_endpoint(self) -> str:
@@ -136,11 +139,15 @@ class LLMClientConfig:
             or os.environ.get("DEEPSEEK_API_KEY")
             or ""
         )
+        max_tokens_raw = os.environ.get("LLM_JUDGE_MAX_TOKENS") or os.environ.get(
+            "LLM_MAX_TOKENS", "512"
+        )
         return cls(
             base_url=base_url,
             model=model,
             timeout_seconds=float(timeout_raw),
             api_key=api_key,
+            max_tokens=int(max_tokens_raw),
         )
 
 
@@ -248,6 +255,7 @@ class LLMClient:
             "model": self._config.model,
             "messages": messages,
             "temperature": self._config.temperature,
+            "max_tokens": self._config.max_tokens,
             "stream": False,
         }
         if top_logprobs is not None:
@@ -285,6 +293,12 @@ class LLMClient:
                     return json.loads(resp.read().decode("utf-8"))
             except (LLMClientError, LLMEmptyResponseError):
                 raise
+            except urllib.error.HTTPError as exc:
+                detail = _http_error_detail(exc)
+                raise LLMResponseError(
+                    f"LLM request rejected by {self._config.chat_endpoint}: "
+                    f"HTTP {exc.code}{': ' + detail if detail else ''}"
+                ) from exc
             except urllib.error.URLError as exc:
                 last_error = exc
             except (OSError, ValueError) as exc:
@@ -299,6 +313,30 @@ class LLMClient:
                 f"LLM endpoint unreachable: {last_error}"
             ) from last_error
         raise LLMUnavailableError(f"LLM request failed: {last_error}") from last_error
+
+
+def _http_error_detail(error: urllib.error.HTTPError) -> str:
+    """Return a bounded provider error message without misclassifying HTTP as I/O."""
+    try:
+        raw = error.read(8192)
+    except (OSError, ValueError):
+        raw = b""
+    if not raw:
+        return str(error.reason or "").strip()
+    text = raw.decode("utf-8", errors="replace").strip()
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if isinstance(payload, Mapping):
+        nested = payload.get("error")
+        if isinstance(nested, Mapping) and nested.get("message"):
+            return str(nested["message"])
+        if payload.get("message"):
+            return str(payload["message"])
+        if payload.get("detail"):
+            return str(payload["detail"])
+    return text
 
 
 def _extract_content(body: dict) -> str:

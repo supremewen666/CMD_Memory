@@ -6,6 +6,8 @@ RUNTIME_DIR="$ROOT_DIR/artifacts/runtime"
 LOG_DIR="$ROOT_DIR/artifacts/logs"
 SERVER_PID_FILE="$RUNTIME_DIR/vllm.pid"
 BENCH_PID_FILE="$RUNTIME_DIR/memory_benchmarks.pid"
+MODEL_PATH_FILE="$RUNTIME_DIR/vllm_model_path"
+MODEL_LEN_FILE="$RUNTIME_DIR/vllm_max_model_len"
 PORT="${VLLM_PORT:-8000}"
 SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-qwen2.5-7b-instruct}"
 BASE_URL="http://127.0.0.1:${PORT}/v1"
@@ -24,12 +26,13 @@ usage() {
     "Usage:" \
     "  $0 start-server MODEL_PATH [MAX_MODEL_LEN]" \
     "  $0 server-status" \
-    "  $0 run" \
+    "  $0 server-smoke" \
+    "  $0 run LONGMEMEVAL_ECC_RUNTIME LOCOMO_ECC_RUNTIME" \
+    "  $0 run-legacy" \
     "  $0 benchmark-status" \
     "  $0 stop-server" \
     "" \
-    "Defaults: VLLM_PORT=8000, MAX_MODEL_LEN=32768, full-context disabled." \
-    "Set CMD_FULL_CONTEXT=1 only with a server that can accommodate 128K prompts."
+    "Defaults: VLLM_PORT=8000, MAX_MODEL_LEN=32768, LLM_MAX_TOKENS=512."
 }
 
 case "${1:-}" in
@@ -70,6 +73,8 @@ case "${1:-}" in
         >"$server_log" 2>&1 &
     fi
     printf '%s\n' "$!" >"$SERVER_PID_FILE"
+    printf '%s\n' "$model_path" >"$MODEL_PATH_FILE"
+    printf '%s\n' "$max_model_len" >"$MODEL_LEN_FILE"
     printf 'vLLM starting: pid=%s log=%s model=%s\n' "$!" "$server_log" "$SERVED_MODEL_NAME"
     printf 'watch startup: tail -f %q\n' "$server_log"
     ;;
@@ -81,23 +86,76 @@ case "${1:-}" in
       exit 1
     fi
     ;;
+  server-smoke)
+    smoke_body="$RUNTIME_DIR/vllm_http_smoke.json"
+    http_status="$(curl -sS -o "$smoke_body" -w '%{http_code}' \
+      -H 'Content-Type: application/json' \
+      -d "{\"model\":\"$SERVED_MODEL_NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK.\"}],\"temperature\":0,\"max_tokens\":8}" \
+      "$BASE_URL/chat/completions")"
+    cat "$smoke_body"
+    printf '\nhttp_status=%s\n' "$http_status"
+    if [[ "$http_status" != "200" ]]; then
+      exit 1
+    fi
+    ;;
   run)
     curl -fsS "$BASE_URL/models" >/dev/null
-    full_context_flag="--no-full-context"
-    if [[ "${CMD_FULL_CONTEXT:-0}" == "1" ]]; then
-      full_context_flag="--full-context"
+    long_runtime="${2:-${CMD_ECC_RUNTIME_LONGMEMEVAL:-}}"
+    locomo_runtime="${3:-${CMD_ECC_RUNTIME_LOCOMO:-}}"
+    if [[ -z "$long_runtime" || -z "$locomo_runtime" ]]; then
+      printf '%s\n' \
+        'ECC runtime directories are required.' \
+        'Usage: run_memory_benchmarks_nohup.sh run LONGMEMEVAL_ECC_RUNTIME LOCOMO_ECC_RUNTIME' >&2
+      exit 2
     fi
+    if [[ -z "${LLM_TOKENIZER_PATH:-}" && ! -f "$MODEL_PATH_FILE" ]]; then
+      printf 'LLM_TOKENIZER_PATH is required when vLLM was started outside this script\n' >&2
+      exit 2
+    fi
+    if [[ -z "${LLM_MAX_MODEL_LEN:-}" && ! -f "$MODEL_LEN_FILE" ]]; then
+      printf 'LLM_MAX_MODEL_LEN is required when vLLM was started outside this script\n' >&2
+      exit 2
+    fi
+    tokenizer_path="${LLM_TOKENIZER_PATH:-$(<"$MODEL_PATH_FILE")}"
+    max_model_len="${LLM_MAX_MODEL_LEN:-$(<"$MODEL_LEN_FILE")}"
     bench_log="$LOG_DIR/memory_benchmarks.log"
     nohup env \
       LLM_BASE_URL="$BASE_URL" \
       LLM_MODEL="$SERVED_MODEL_NAME" \
-      "$0" run-worker "$full_context_flag" \
+      LLM_TOKENIZER_PATH="$tokenizer_path" \
+      LLM_MAX_MODEL_LEN="$max_model_len" \
+      LLM_MAX_TOKENS="${LLM_MAX_TOKENS:-512}" \
+      bash "$ROOT_DIR/$(basename "$0")" run-ecc-worker "$long_runtime" "$locomo_runtime" \
       >"$bench_log" 2>&1 &
     printf '%s\n' "$!" >"$BENCH_PID_FILE"
     printf 'benchmarks queued sequentially: pid=%s log=%s\n' "$!" "$bench_log"
     printf 'watch progress: tail -f %q\n' "$bench_log"
     ;;
-  run-worker)
+  run-ecc-worker)
+    long_runtime="${2:?LongMemEval ECC runtime directory is required}"
+    locomo_runtime="${3:?LoCoMo ECC runtime directory is required}"
+    cd "$ROOT_DIR"
+    python -m experiments.run_ecc_sealed_memory_benchmark \
+      --benchmark longmemeval \
+      --runtime-dir "$long_runtime" \
+      --output artifacts/experiments/longmemeval_ecc_sealed
+    python -m experiments.run_ecc_sealed_memory_benchmark \
+      --benchmark locomo \
+      --runtime-dir "$locomo_runtime" \
+      --output artifacts/experiments/locomo_ecc_sealed
+    ;;
+  run-legacy)
+    curl -fsS "$BASE_URL/models" >/dev/null
+    bench_log="$LOG_DIR/memory_benchmarks_legacy.log"
+    nohup env \
+      LLM_BASE_URL="$BASE_URL" \
+      LLM_MODEL="$SERVED_MODEL_NAME" \
+      bash "$ROOT_DIR/$(basename "$0")" run-legacy-worker --no-full-context \
+      >"$bench_log" 2>&1 &
+    printf '%s\n' "$!" >"$BENCH_PID_FILE"
+    printf 'legacy static-action baseline queued: pid=%s log=%s\n' "$!" "$bench_log"
+    ;;
+  run-legacy-worker)
     full_context_flag="${2:---no-full-context}"
     cd "$ROOT_DIR"
     python -m experiments.run_sealed_memory_benchmark \

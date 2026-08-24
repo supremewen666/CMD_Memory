@@ -174,29 +174,51 @@ The P4C-1 manifest binds all source roots, the visible projection, incident
 overlay, runtime receipts, ecology head, and final router snapshot. Its claim
 scope is structural live-ABI wiring only, not task-answer accuracy.
 
-## P3 LongMemEval execution
+## MemAudit/ECC memory benchmark execution
 
-The current paper path is `experiments.run_sealed_memory_benchmark`, not P4C.
-It runs a real OpenAI-compatible answer endpoint and reference-free selector,
-compares BM25, CMD and an optional full-context arm, then seals official-shape
-`{question_id,hypothesis}` JSONL files before any reference is opened:
+The headline runtime path is receipt-bound and has two isolated stages.  First,
+an instrumented memory harness exports deployment-visible MemAudit telemetry,
+GHOST bindings, structural shadow states, and a frozen three-layer ecology
+ledger.  Runtime selection and updates consume only `EccRepairReceipt`; they do
+not call an answer model or open benchmark references:
+
+```bash
+python -m experiments.run_ecc_memory_runtime \
+  --cases /path/to/harness/memaudit_cases.jsonl \
+  --bindings /path/to/harness/ghost_bindings.jsonl \
+  --states /path/to/harness/shadow_states.jsonl \
+  --ecology-ledger /path/to/harness/frozen_ecology.jsonl \
+  --output artifacts/runtime/longmemeval_ecc
+```
+
+Only after the runtime report and committed states exist may the answer model
+consume the committed memory view and seal official-shape
+`{question_id,hypothesis}` predictions:
 
 ```bash
 export LLM_BASE_URL=http://127.0.0.1:8000/v1
 export LLM_MODEL=your-answer-model
-python -m experiments.run_sealed_memory_benchmark \
+export LLM_TOKENIZER_PATH=/path/to/the/served/model
+export LLM_MAX_MODEL_LEN=32768
+export LLM_MAX_TOKENS=512
+python -m experiments.run_ecc_sealed_memory_benchmark \
   --benchmark longmemeval \
-  --output artifacts/experiments/longmemeval_sealed
+  --runtime-dir artifacts/runtime/longmemeval_ecc \
+  --output artifacts/experiments/longmemeval_ecc_sealed
 ```
 
-LoCoMo uses the same runner and all 1,986 annotated QA items (including the
-446 adversarial items unless `--no-include-adversarial` is passed):
+LoCoMo uses the same receipt-bound prediction stage:
 
 ```bash
-python -m experiments.run_sealed_memory_benchmark \
+python -m experiments.run_ecc_sealed_memory_benchmark \
   --benchmark locomo \
-  --output artifacts/experiments/locomo_sealed
+  --runtime-dir artifacts/runtime/locomo_ecc \
+  --output artifacts/experiments/locomo_ecc_sealed
 ```
+
+`experiments.run_sealed_memory_benchmark` is retained only as an explicit
+legacy static-action baseline.  It enumerates `seed:*` answer-replay operators
+and is not MemAudit, GHOST, Failure Memory, or the live ECC runtime.
 
 Official scoring is deliberately a second command. Point it at a checkout of
 the benchmark authors' repository; `--execute` is required before a judge is
@@ -205,14 +227,14 @@ called or official LoCoMo references are opened:
 ```bash
 python -m experiments.run_official_memory_scoring \
   --benchmark longmemeval \
-  --run-dir artifacts/experiments/longmemeval_sealed \
+  --run-dir artifacts/experiments/longmemeval_ecc_sealed \
   --official-root /path/to/LongMemEval \
   --oracle data/external/longmemeval/oracle/longmemeval_oracle.json \
   --judge-model gpt-4o --execute
 
 python -m experiments.run_official_memory_scoring \
   --benchmark locomo \
-  --run-dir artifacts/experiments/locomo_sealed \
+  --run-dir artifacts/experiments/locomo_ecc_sealed \
   --official-root /path/to/locomo \
   --dataset data/ghost_live_v2/raw_sources/locomo10.json --execute
 ```
