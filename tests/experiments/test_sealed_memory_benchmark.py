@@ -115,3 +115,7 @@ def test_locomo_official_adapter_scores_only_after_seal(tmp_path: Path) -> None:
     )
     assert report["arms"]["cmd"]["official_f1"] == 1.0
     assert report["arms"]["bm25"]["official_f1"] == 0.0
+    assert report["schema_version"] == "cmd-locomo-official-score-v2"
+    assert report["arms"]["cmd"]["per_case"] == [{
+        "question_id": "s:q0000", "category": 4, "official_f1": 1.0,
+    }]

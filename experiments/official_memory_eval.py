@@ -126,7 +126,7 @@ def score_locomo_official(
                 case_id = f"{sample_id}:q{index:04d}"
                 if case_id not in predictions:
                     continue
-                rows.append({**qa, "prediction": predictions[case_id]})
+                rows.append({**qa, "prediction": predictions[case_id], "_cmd_case_id": case_id})
                 categories.append(int(qa["category"]))
         if len(rows) != int(seal["case_count"]):
             raise ValueError("LoCoMo official scoring coverage differs from seal")
@@ -134,6 +134,14 @@ def score_locomo_official(
         grouped: dict[int, list[float]] = defaultdict(list)
         for category, score in zip(categories, scores, strict=True):
             grouped[category].append(float(score))
+        per_case = [
+            {
+                "question_id": str(row["_cmd_case_id"]),
+                "category": category,
+                "official_f1": float(score),
+            }
+            for row, category, score in zip(rows, categories, scores, strict=True)
+        ]
         report_arms[str(arm)] = {
             "count": len(scores),
             "official_f1": sum(scores) / len(scores) if scores else None,
@@ -144,9 +152,10 @@ def score_locomo_official(
                 }
                 for category, values in sorted(grouped.items())
             },
+            "per_case": per_case,
         }
     report = {
-        "schema_version": "cmd-locomo-official-score-v1",
+        "schema_version": "cmd-locomo-official-score-v2",
         "official_evaluator": True,
         "prediction_seal": str(Path(run_dir) / "prediction_seal.json"),
         "category_mapping": {

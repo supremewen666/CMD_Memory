@@ -99,6 +99,12 @@ adversarial poison binds suspect IDs and quarantine transition. A v3 report and
 seal contain exactly one `mechanism`. Read-only v2 compatibility exists only
 for old process-fault artifacts; new experiments must use v3.
 
+The confirmatory follow-up, including immutable state-update events, poison
+calibration, per-case official scores, paired bootstrap analysis, and the
+restartable three-track controller, is specified in
+`docs/ECC_CONFIRMATORY_EXPERIMENT.md`. The controller never produces a pooled
+cross-mechanism score.
+
 ```bash
 # Receipt-bound prediction (requires a completed instrumented ECC runtime).
 python -m experiments.run_ecc_sealed_memory_benchmark \

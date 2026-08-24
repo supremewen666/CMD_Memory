@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from cmd_audit.core.state_codec import content_sha256
 from experiments.materialize_ecc_memory_benchmark_harness import materialize_bundle
 from experiments.locomo_arena import load_locomo_arena_cases
 from experiments.run_ecc_memory_runtime import main as run_runtime
@@ -148,3 +149,57 @@ def test_placeholder_paths_produce_materializer_hint(tmp_path: Path) -> None:
         assert "materialize_ecc_memory_benchmark_harness" in str(exc)
     else:
         raise AssertionError("placeholder paths must be rejected")
+
+
+def test_state_drift_event_spec_selects_cases_and_replaces_marker_fixture(
+    tmp_path: Path,
+) -> None:
+    source = Path("data/ghost_live_v2/raw_sources/locomo10.json")
+    selected = load_locomo_arena_cases(
+        source, include_adversarial=True, seed=24, limit=1,
+        retrieval_top_k=5, candidate_pool_k=10,
+    )[0]
+    old_id = selected.raw["baseline_outputs"][0]["retrieved_memory_ids"][0]
+    event_id = "event:update:1"
+    revision = "DATE: 2026-08-25\nUSER: My current city is Kyoto."
+    intervention = tmp_path / "state.jsonl"
+    intervention.write_text(json.dumps({
+        "schema_version": "cmd-ecc-runtime-intervention-v1",
+        "case_id": selected.case_id,
+        "mechanism": "state_drift",
+        "source_event_id": event_id,
+        "source_event_sha256": content_sha256({"event_id": event_id, "text": revision}),
+        "superseded_memory_id": old_id,
+        "superseding_text": revision,
+    }) + "\n", encoding="utf-8")
+    bundle = tmp_path / "bundle"
+    manifest = materialize_bundle(
+        benchmark="locomo", dataset_path=source, output=bundle,
+        mechanism="state_drift", interventions_path=intervention,
+    )
+    assert manifest["case_count"] == 1
+    assert manifest["fixture_semantics"] == "immutable-superseding-event"
+    assert manifest["efficacy_ready"] is True
+    case = json.loads((bundle / "memaudit_cases.jsonl").read_text(encoding="utf-8"))
+    assert list(case["runtime_memory_texts"].values()) == [revision]
+    assert "controlled-superseding-revision" not in json.dumps(case)
+
+
+def test_runtime_intervention_spec_rejects_evaluator_fields(tmp_path: Path) -> None:
+    source = Path("data/ghost_live_v2/raw_sources/locomo10.json")
+    intervention = tmp_path / "bad.jsonl"
+    intervention.write_text(json.dumps({
+        "schema_version": "cmd-ecc-runtime-intervention-v1",
+        "case_id": "not-used",
+        "mechanism": "state_drift",
+        "source_event_id": "event:1",
+        "source_event_sha256": "0" * 64,
+        "superseded_memory_id": "memory:1",
+        "superseding_text": "new event",
+        "new_value": "forbidden evaluator label",
+    }) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="not closed"):
+        materialize_bundle(
+            benchmark="locomo", dataset_path=source, output=tmp_path / "bundle",
+            mechanism="state_drift", interventions_path=intervention,
+        )

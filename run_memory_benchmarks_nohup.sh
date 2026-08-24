@@ -8,6 +8,7 @@ SERVER_PID_FILE="$RUNTIME_DIR/vllm.pid"
 BENCH_PID_FILE="$RUNTIME_DIR/memory_benchmarks.pid"
 BENCH_INFO_FILE="$RUNTIME_DIR/memory_benchmarks.info"
 ECC_BUILD_PID_FILE="$RUNTIME_DIR/ecc_runtime_build.pid"
+ECC_FULL_PID_FILE="$RUNTIME_DIR/ecc_full_program.pid"
 MODEL_PATH_FILE="$RUNTIME_DIR/vllm_model_path"
 MODEL_LEN_FILE="$RUNTIME_DIR/vllm_max_model_len"
 PORT="${VLLM_PORT:-8000}"
@@ -31,6 +32,8 @@ usage() {
     "  $0 server-smoke" \
     "  $0 build-runtimes [LIMIT]" \
     "  $0 runtime-build-status" \
+    "  $0 full-program STAGE STATE_INTERVENTIONS STATE_LABELS POISON_INTERVENTIONS [OUTPUT_ROOT] [LIMIT]" \
+    "  $0 full-program-status" \
     "  $0 run LONGMEMEVAL_ECC_RUNTIME LOCOMO_ECC_RUNTIME [TOKENIZER_PATH] [MAX_MODEL_LEN]" \
     "  $0 run-legacy" \
     "  $0 benchmark-status" \
@@ -140,6 +143,77 @@ case "${1:-}" in
       printf 'runtime_build_running=0\n'
     fi
     tail -n 30 "$LOG_DIR/ecc_runtime_build.log" 2>/dev/null || true
+    ;;
+  full-program)
+    stage="${2:?STAGE is required: build|predict|score|analyze|all}"
+    state_interventions="${3:?STATE_INTERVENTIONS is required}"
+    state_labels="${4:?STATE_LABELS is required}"
+    poison_interventions="${5:?POISON_INTERVENTIONS is required}"
+    output_root="${6:-artifacts/experiments/ecc_confirmatory_v1}"
+    limit="${7:-0}"
+    for required_path in "$state_interventions" "$state_labels" "$poison_interventions"; do
+      if [[ ! -f "$required_path" ]]; then
+        printf 'full-program input does not exist: %s\n' "$required_path" >&2
+        exit 2
+      fi
+    done
+    if [[ "$stage" == "predict" || "$stage" == "all" ]]; then
+      curl -fsS "$BASE_URL/models" >/dev/null
+      if [[ -z "${LLM_TOKENIZER_PATH:-}" && ! -f "$MODEL_PATH_FILE" ]]; then
+        printf 'export LLM_TOKENIZER_PATH or start vLLM through this script first\n' >&2
+        exit 2
+      fi
+      if [[ -z "${LLM_MAX_MODEL_LEN:-}" && ! -f "$MODEL_LEN_FILE" ]]; then
+        printf 'export LLM_MAX_MODEL_LEN or start vLLM through this script first\n' >&2
+        exit 2
+      fi
+    fi
+    full_tokenizer_path="${LLM_TOKENIZER_PATH:-}"
+    full_max_model_len="${LLM_MAX_MODEL_LEN:-}"
+    if [[ -z "$full_tokenizer_path" && -f "$MODEL_PATH_FILE" ]]; then
+      full_tokenizer_path="$(<"$MODEL_PATH_FILE")"
+    fi
+    if [[ -z "$full_max_model_len" && -f "$MODEL_LEN_FILE" ]]; then
+      full_max_model_len="$(<"$MODEL_LEN_FILE")"
+    fi
+    full_log="$LOG_DIR/ecc_full_program.log"
+    nohup env \
+      LLM_BASE_URL="${LLM_BASE_URL:-$BASE_URL}" \
+      LLM_MODEL="${LLM_MODEL:-$SERVED_MODEL_NAME}" \
+      LLM_TOKENIZER_PATH="$full_tokenizer_path" \
+      LLM_MAX_MODEL_LEN="$full_max_model_len" \
+      LLM_MAX_TOKENS="${LLM_MAX_TOKENS:-512}" \
+      bash "$ROOT_DIR/$(basename "$0")" full-program-worker \
+        "$stage" "$state_interventions" "$state_labels" "$poison_interventions" \
+        "$output_root" "$limit" >"$full_log" 2>&1 &
+    printf '%s\n' "$!" >"$ECC_FULL_PID_FILE"
+    printf 'ECC full program queued: stage=%s pid=%s log=%s\n' "$stage" "$!" "$full_log"
+    ;;
+  full-program-worker)
+    stage="${2:?STAGE is required}"
+    state_interventions="${3:?STATE_INTERVENTIONS is required}"
+    state_labels="${4:?STATE_LABELS is required}"
+    poison_interventions="${5:?POISON_INTERVENTIONS is required}"
+    output_root="${6:?OUTPUT_ROOT is required}"
+    limit="${7:-0}"
+    cd "$ROOT_DIR"
+    python -m experiments.run_ecc_full_program \
+      --stage "$stage" \
+      --state-interventions "$state_interventions" \
+      --state-labels "$state_labels" \
+      --poison-interventions "$poison_interventions" \
+      --output-root "$output_root" \
+      --limit "$limit" \
+      --locomo-official-root "${LOCOMO_OFFICIAL_ROOT:-third_party/locomo}" \
+      --longmemeval-official-root "${LONGMEMEVAL_OFFICIAL_ROOT:-third_party/LongMemEval}"
+    ;;
+  full-program-status)
+    if [[ -f "$ECC_FULL_PID_FILE" ]] && kill -0 "$(<"$ECC_FULL_PID_FILE")" 2>/dev/null; then
+      printf 'full_program_running=1 coordinator_pid=%s\n' "$(<"$ECC_FULL_PID_FILE")"
+    else
+      printf 'full_program_running=0\n'
+    fi
+    tail -n 40 "$LOG_DIR/ecc_full_program.log" 2>/dev/null || true
     ;;
   run)
     curl -fsS "$BASE_URL/models" >/dev/null

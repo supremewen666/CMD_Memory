@@ -360,14 +360,27 @@ def main(argv: list[str] | None = None) -> int:
         "--mechanism",
         choices=("process_fault", "state_drift", "adversarial_poison"),
     )
+    parser.add_argument(
+        "--case-selection",
+        choices=("arguments", "runtime"),
+        default="arguments",
+        help=(
+            "Use --limit/seed selection, or load the complete benchmark and select "
+            "the exact case IDs bound by the isolated runtime."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.output.exists() and any(path.is_file() for path in args.output.rglob("*")):
         raise ValueError("fresh ECC prediction refuses a non-empty output directory")
 
     dataset_path = args.cases or DEFAULTS[args.benchmark]
+    receipts, states, runtime_report = _load_runtime(args.runtime_dir)
+    mechanism = str(next(iter(states.values()))["mechanism"])
+    if args.mechanism is not None and args.mechanism != mechanism:
+        raise ValueError("requested mechanism does not match the isolated ECC runtime")
     kwargs = {
         "seed": args.seed,
-        "limit": args.limit,
+        "limit": 0 if args.case_selection == "runtime" else args.limit,
         "retrieval_top_k": args.retrieval_top_k,
         "candidate_pool_k": args.candidate_pool_k,
     }
@@ -376,10 +389,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.benchmark == "locomo"
         else load_longmemeval_arena_cases(dataset_path, **kwargs)
     )
-    receipts, states, runtime_report = _load_runtime(args.runtime_dir)
-    mechanism = str(next(iter(states.values()))["mechanism"])
-    if args.mechanism is not None and args.mechanism != mechanism:
-        raise ValueError("requested mechanism does not match the isolated ECC runtime")
+    if args.case_selection == "runtime":
+        cases = tuple(case for case in cases if case.case_id in states)
     case_ids = {case.case_id for case in cases}
     if set(states) != case_ids:
         raise ValueError(
