@@ -83,6 +83,7 @@ def runtime_projection(case: ArenaCase) -> dict[str, object]:
         "raw_events": raw["raw_events"],
         "extracted_memory": raw["extracted_memory"],
         "baseline_outputs": raw["baseline_outputs"],
+        "full_context": raw["full_context"],
     }
 
 
@@ -145,6 +146,7 @@ def _build_case(
                 "injected_context": injected,
             }
         ],
+        "full_context": _format_retrieved_context(all_items),
         # Scorer-only: VLLMDualScoreArenaBackend._shadow_score is the sole
         # runtime-backend reader.  The runtime projection deliberately omits it.
         "gold_answer": gold_answer,

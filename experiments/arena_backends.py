@@ -193,10 +193,15 @@ class VLLMDualScoreArenaBackend:
         shadow_verifier: Any | None = None,
         validate_endpoints: bool = True,
         max_reference_free_retries: int = 1,
+        enable_shadow_scoring: bool = True,
     ) -> None:
         if answer_client is None or judge_client is None:
             if validate_endpoints:
-                assert_live_llm_env_configured()
+                assert_live_llm_env_configured(
+                    roles=("answer", "judge")
+                    if enable_shadow_scoring
+                    else ("answer",)
+                )
             built_answer, built_judge = build_clients()
             answer_client = answer_client or built_answer
             judge_client = judge_client or built_judge
@@ -205,7 +210,7 @@ class VLLMDualScoreArenaBackend:
         # This keeps runtime argmax and reported outcome measurement from
         # optimizing the same judge signal.
         selection_judge_client = selection_judge_client or answer_client
-        if validate_endpoints:
+        if validate_endpoints and enable_shadow_scoring:
             _assert_distinct_judge_identities(
                 selection_judge_client,
                 judge_client,
@@ -217,10 +222,13 @@ class VLLMDualScoreArenaBackend:
         self.answer_client = answer_client
         self.selection_judge_client = selection_judge_client
         self.judge_client = judge_client
-        self.shadow_verifier = shadow_verifier or build_answer_verifier(
-            judge_client,
-            answer_mode="answer-rubric",
-        )
+        self.enable_shadow_scoring = bool(enable_shadow_scoring)
+        self.shadow_verifier = None
+        if self.enable_shadow_scoring:
+            self.shadow_verifier = shadow_verifier or build_answer_verifier(
+                judge_client,
+                answer_mode="answer-rubric",
+            )
         self.reference_free_scorer = ReferenceFreeAnswerScorer(
             selection_judge_client,
             max_retries=max_reference_free_retries,
@@ -258,6 +266,16 @@ class VLLMDualScoreArenaBackend:
         with self._counter_guard:
             counts = self._cmd_call_counts.get(case.case_id, [0, 0])
             return counts[0], counts[1]
+
+    def answer_context(
+        self,
+        case: ArenaCase,
+        context: str,
+        *,
+        purpose: str = "benchmark_control",
+    ) -> str:
+        """Generate one answer for a frozen control context without scoring."""
+        return self._answer(case, context, purpose=purpose)
 
     def candidates(self, case: ArenaCase) -> Sequence[SkillCandidate]:
         view = self._runtime_view(case)
@@ -376,9 +394,10 @@ class VLLMDualScoreArenaBackend:
         shadow_gain: float | None = None
         try:
             # Shadow scoring happens only after runtime scores are materialized.
-            baseline_shadow = self._shadow_score(case, baseline_answer)
-            repaired_shadow = self._shadow_score(case, repaired_answer)
-            shadow_gain = repaired_shadow - baseline_shadow
+            if self.enable_shadow_scoring:
+                baseline_shadow = self._shadow_score(case, baseline_answer)
+                repaired_shadow = self._shadow_score(case, repaired_answer)
+                shadow_gain = repaired_shadow - baseline_shadow
         except Exception as exc:
             _logger.warning(
                 "arena shadow score failed case=%s skill=%s: %s",
@@ -394,6 +413,8 @@ class VLLMDualScoreArenaBackend:
             shadow_gold_gain=shadow_gain,
             execution_cost=3.0,
             status=status,
+            baseline_hypothesis=baseline_answer,
+            repaired_hypothesis=repaired_answer,
         )
 
     def deposit_composite(self, event: ChainDepositionEvent) -> None:

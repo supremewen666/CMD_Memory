@@ -1,5 +1,24 @@
 # Baseline Results — P4A no-Mem0 retrieval confirmation
 
+## 2026-08-24 real benchmark baseline contract
+
+The active end-to-end matrix is now BM25 control vs CMD vs full context under
+the same answer model, prompt, dataset order and scoring code. LoCoMo includes
+all five official categories and reports per-category scores; LongMemEval uses
+the official `{question_id,hypothesis}` evaluator and reports the five ability
+types. The live prediction environment is not configured in this workspace, so
+no answer-quality number is claimed here yet. The completed retrieval-only
+numbers below remain valid diagnostics but are not substitutes for that matrix.
+
+| Baseline | LoCoMo | LongMemEval | Answer model | Scorer | Status |
+|---|---|---|---|---|---|
+| BM25 top-5 | full 1,986 QA | full 500 | frozen/shared | official post-seal | ready, not run |
+| CMD, BM25 pool top-10 | full 1,986 QA | full 500 | frozen/shared | official post-seal | ready, not run |
+| Full context | full 1,986 QA | S only when context fits | frozen/shared | official post-seal | ready, not run |
+
+Prediction and selection are gold-free; reference answers are opened only by
+`run_official_memory_scoring` after `prediction_seal.json` is validated.
+
 ## Evaluation Contract
 
 - dataset/workload: LongMemEval-S (500 questions) and the official local

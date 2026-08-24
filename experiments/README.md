@@ -55,7 +55,13 @@ action telemetry and the decoupling audit, its machine gate remains blocked and
 CMD/GHOST abstain. Current P4A MemFail has no root-bound candidate cache, so its
 P4B receipt is explicitly unavailable rather than reconstructed.
 
-## P4C gold-free ECC live execution
+## Retired P4C zero-call program (historical)
+
+The P4C runner family, fixtures, tests and `run_remaining_experiment.sh` were
+removed on 2026-08-24. Its source projection and structural ECC outcomes did
+not measure answer quality and cannot stand in for LoCoMo/LongMemEval model
+evaluation. The remainder of this section is retained only to explain old
+artifact schemas; none of its commands are active entrypoints.
 
 `experiments.p4c_ecc_runner` is the isolated P4C execution layer. It does not
 extend the legacy V4 prequential runner: P4B remains a negative typed-evidence
@@ -170,6 +176,47 @@ scope is structural live-ABI wiring only, not task-answer accuracy.
 
 ## P3 LongMemEval execution
 
+The current paper path is `experiments.run_sealed_memory_benchmark`, not P4C.
+It runs a real OpenAI-compatible answer endpoint and reference-free selector,
+compares BM25, CMD and an optional full-context arm, then seals official-shape
+`{question_id,hypothesis}` JSONL files before any reference is opened:
+
+```bash
+export LLM_BASE_URL=http://127.0.0.1:8000/v1
+export LLM_MODEL=your-answer-model
+python -m experiments.run_sealed_memory_benchmark \
+  --benchmark longmemeval \
+  --output artifacts/experiments/longmemeval_sealed
+```
+
+LoCoMo uses the same runner and all 1,986 annotated QA items (including the
+446 adversarial items unless `--no-include-adversarial` is passed):
+
+```bash
+python -m experiments.run_sealed_memory_benchmark \
+  --benchmark locomo \
+  --output artifacts/experiments/locomo_sealed
+```
+
+Official scoring is deliberately a second command. Point it at a checkout of
+the benchmark authors' repository; `--execute` is required before a judge is
+called or official LoCoMo references are opened:
+
+```bash
+python -m experiments.run_official_memory_scoring \
+  --benchmark longmemeval \
+  --run-dir artifacts/experiments/longmemeval_sealed \
+  --official-root /path/to/LongMemEval \
+  --oracle data/external/longmemeval/oracle/longmemeval_oracle.json \
+  --judge-model gpt-4o --execute
+
+python -m experiments.run_official_memory_scoring \
+  --benchmark locomo \
+  --run-dir artifacts/experiments/locomo_sealed \
+  --official-root /path/to/locomo \
+  --dataset data/ghost_live_v2/raw_sources/locomo10.json --execute
+```
+
 P3A emits per-arm retrieval snapshots before its scorer-only oracle sidecar.
 P3C consumes those snapshots and enforces `retrieve frozen -> predict-only ->
 prediction seal -> score-only`.  It is offline by default:
@@ -186,14 +233,27 @@ The fake result is only wiring smoke.  Live OpenAI-compatible execution is
 explicitly opt-in via `--answerer-backend openai-compatible --llm-config ...`;
 official judge scoring is exported as an interface, not claimed locally.
 
-The guarded post-P4C live entrypoint is `./run_remaining_experiment.sh`. It is
-plan-only by default, binds successful P4C-1 and mixed-GHOST prior artifacts in
-preflight, and requires explicit `--execute` before the answer endpoint is
-contacted. See `docs/RUN_REMAINING_EXPERIMENT.md` for configuration, call
-budget, resume, prediction-seal, and offline-evaluator instructions. The older
-plural `run_remaining_experiments.sh` remains the legacy Route A/V4 controller.
+The plural `run_remaining_experiments.sh` remains the legacy Route A/V4
+controller and is not part of this sealed memory-benchmark protocol.
 
 ## P3D Evo-Bench harness governance
+
+This local module is governance-only and **does not produce an official
+Evo-Bench score**. Formal evaluation must use the upstream CLI through
+`experiments.run_evobench_official`. Its generated commands preserve the
+canonical 160-validation/448-evaluation split, 20-iteration/1,000-step/48-hour
+budget, General-domain three trials and post-freeze evaluation boundary.
+
+```bash
+python -m experiments.run_evobench_official \
+  --stage evolve --official-root /path/to/Evo-Bench \
+  --policy-config /path/to/policy.json \
+  --judge-config /path/to/judge.json \
+  --evolver-config /path/to/evolver.json
+```
+
+The command above is plan-only. Formal execution additionally requires
+`EVOBENCH_EXECUTION_MODE=e2b` and `--execute`.
 
 `experiments.run_evobench_harness` is a provider-neutral, offline governance
 runner for the separate harness-evolution track. It parses the public 160-task

@@ -1,5 +1,12 @@
 # Experiment Results — Counterfactual Memory Evolution Governance
 
+> 2026-08-24 status: the P4C program documented immediately below is archived.
+> Its zero-call structural counts are historical mechanism checks, not
+> LoCoMo/LongMemEval answer-quality evidence. The corresponding runners and
+> fixtures were removed and replaced by a real model prediction seal plus the
+> benchmark authors' scorers. No new accuracy is reported because this
+> workspace has no configured live answer or judge endpoint.
+
 ## P4C gold-free mainline v2 implementation verification (2026-08-23)
 
 The v1 case/metric audit and the corrected zero-call verification are recorded

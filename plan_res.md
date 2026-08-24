@@ -1,5 +1,11 @@
 # Implementation Plan — B 方案：治理、生态位可识别性与参数化路由
 
+> 2026-08-24 supersession note: this zero-call plan is retained as the
+> governance/identifiability diagnostic track only. It is no longer the paper's
+> answer-quality mainline. The active mainline is the sealed real-model
+> LoCoMo/LongMemEval protocol in `docs/OFFICIAL_BENCHMARK_PROTOCOLS.md`; formal
+> Evo-Bench execution uses the upstream adapter.
+
 本计划只接线现有实现，不新增机制或数据集。证据文件：`cmd_audit/repair/ghost_ecology.py`（hash-chain ledger、discovery pressure、niche snapshot/transition）、`cmd_audit/eval/telemetry_cmis.py`（zero-call typed telemetry）、`experiments/niche_evolution_runner.py`、`cmd_audit/eval/niche_gates.py`、`cmd_audit/eval/descriptor_policy_value.py` 及对应 tests。`plan_res_c1c2c3.md` 中“niche 仅 appendix”的 Plan A 已废止。
 
 ## 1. Dataset / substrate

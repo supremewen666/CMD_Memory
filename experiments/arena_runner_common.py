@@ -92,6 +92,11 @@ class DualScoreExecution:
     shadow_gold_gain: float | None
     execution_cost: float
     status: str = "ok"
+    # Optional prediction payloads for the sealed benchmark path.  They are
+    # never used for candidate selection; the benchmark writer persists them
+    # only after the gold-free argmax has been committed.
+    baseline_hypothesis: str | None = None
+    repaired_hypothesis: str | None = None
 
 
 @dataclass(frozen=True)
