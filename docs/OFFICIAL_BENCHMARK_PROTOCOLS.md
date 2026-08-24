@@ -61,6 +61,22 @@ only the latter path can produce an Evo-Bench score.
 
 ## Reproduction entrypoints
 
+For a local vLLM deployment, the repository includes a detached launcher. A
+model path loads weights only in `start-server`; `LLM_MODEL` is the served API
+name and must not be used as a substitute for starting the server.
+
+```bash
+bash run_memory_benchmarks_nohup.sh start-server \
+  "$HOME/pretrained_lms/Qwen2.5-7B-Instruct" 32768
+bash run_memory_benchmarks_nohup.sh server-status
+bash run_memory_benchmarks_nohup.sh run
+tail -f artifacts/logs/memory_benchmarks.log
+```
+
+The detached runner defaults to `--no-full-context`. To include the ICLR-style
+full-context control, launch a server with a context budget that fits the data
+and GPU, then run with `CMD_FULL_CONTEXT=1`.
+
 ```bash
 # Validate complete local dataset projections without an API call.
 python -m experiments.run_sealed_memory_benchmark \

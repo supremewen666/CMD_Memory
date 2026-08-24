@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from experiments.arena_backends import VLLMDualScoreArenaBackend
 from experiments.locomo_arena import load_locomo_arena_cases
@@ -16,6 +18,35 @@ DEFAULTS = {
     "locomo": Path("data/ghost_live_v2/raw_sources/locomo10.json"),
     "longmemeval": Path("data/external/longmemeval/input/longmemeval_s_cleaned.json"),
 }
+
+
+def preflight_openai_endpoint(backend: VLLMDualScoreArenaBackend) -> dict[str, object]:
+    """Fail once, before dataset loading, when the model server is unavailable."""
+    config = backend.answer_client.config
+    models_url = config.base_url.rstrip("/") + "/models"
+    headers = {"Accept": "application/json"}
+    if config.api_key:
+        headers["Authorization"] = f"Bearer {config.api_key}"
+    try:
+        with urlopen(Request(models_url, headers=headers), timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"OpenAI-compatible endpoint is not ready at {models_url}: {exc}. "
+            "Setting LLM_MODEL does not start vLLM; launch `vllm serve` first."
+        ) from exc
+    model_ids = [
+        str(row.get("id"))
+        for row in payload.get("data", [])
+        if isinstance(row, dict) and row.get("id")
+    ] if isinstance(payload, dict) else []
+    if config.model not in model_ids:
+        raise RuntimeError(
+            f"LLM_MODEL={config.model!r} is not served by {models_url}; "
+            f"available model ids={model_ids!r}. Set LLM_MODEL to the "
+            "--served-model-name value."
+        )
+    return {"models_url": models_url, "model": config.model, "available": model_ids}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args(argv)
     path = args.cases or DEFAULTS[args.benchmark]
+    backend = None
+    if not args.validate_only:
+        backend = VLLMDualScoreArenaBackend(enable_shadow_scoring=False)
+        preflight_openai_endpoint(backend)
     kwargs = {
         "seed": args.seed,
         "limit": args.limit,
@@ -51,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
             "first_case_id": cases[0].case_id if cases else None,
         }, sort_keys=True))
         return 0
-    backend = VLLMDualScoreArenaBackend(enable_shadow_scoring=False)
+    assert backend is not None
     seal = predict_and_seal(
         benchmark=args.benchmark,
         cases=cases,

@@ -44,10 +44,9 @@ def predict_and_seal(
     if candidate_limit is not None and candidate_limit < 1:
         raise ValueError("candidate_limit must be positive")
     output = Path(output)
-    if output.exists() and any(output.iterdir()):
+    if output.exists() and any(path.is_file() for path in output.rglob("*")):
         raise ValueError("fresh prediction refuses a non-empty output directory")
     predictions_dir = output / "predictions"
-    predictions_dir.mkdir(parents=True, exist_ok=True)
     arm_rows: dict[str, list[dict[str, str]]] = {"bm25": [], "cmd": []}
     if include_full_context:
         arm_rows["full_context"] = []
@@ -74,7 +73,12 @@ def predict_and_seal(
             None,
         )
         if baseline is None:
-            raise ValueError("prediction backend did not expose baseline hypothesis")
+            statuses = sorted({row.status for row in executions})
+            raise RuntimeError(
+                "answer endpoint produced no baseline hypothesis; "
+                f"candidate statuses={statuses}. Verify LLM_BASE_URL /models "
+                "and that LLM_MODEL matches a served model name."
+            )
         viable = [
             row for row in executions
             if row.repaired_hypothesis is not None
@@ -120,6 +124,7 @@ def predict_and_seal(
         row_hash = content_sha256(payload)
         ledger_rows.append({**payload, "row_hash": row_hash})
         previous = row_hash
+    predictions_dir.mkdir(parents=True, exist_ok=True)
     for arm, rows in arm_rows.items():
         _write_jsonl(predictions_dir / f"{arm}.jsonl", rows)
     _write_jsonl(output / "selection_ledger.jsonl", ledger_rows)
