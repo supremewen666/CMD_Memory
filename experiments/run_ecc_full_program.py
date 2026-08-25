@@ -125,6 +125,17 @@ def _commands(args: argparse.Namespace) -> dict[str, dict[str, list[list[str]]]]
                 "--poison-asr-max", str(args.poison_asr_max),
             ))
         result[mechanism] = {
+            "prepare": [[
+                sys.executable, "-m", "experiments.project_longmemeval_state_drift",
+                "--dataset", str(args.longmemeval_cases),
+                "--interventions-output", str(args.state_interventions),
+                "--labels-output", str(args.state_labels),
+                "--manifest-output", str(args.state_projection_manifest),
+                "--seed", str(args.seed),
+                "--retrieval-top-k", str(args.retrieval_top_k),
+                "--candidate-pool-k", str(args.candidate_pool_k),
+                "--limit", str(args.limit),
+            ]] if mechanism == "state_drift" else [],
             "build": [materialize, runtime],
             "predict": [predict],
             "score": [score],
@@ -133,29 +144,44 @@ def _commands(args: argparse.Namespace) -> dict[str, dict[str, list[list[str]]]]
     return result
 
 
-def _preflight(args: argparse.Namespace) -> None:
+def _preflight(args: argparse.Namespace, *, strict: bool = True) -> list[str]:
     required: dict[str, Path] = {}
+    absent: list[str] = []
     if {"process_fault", "adversarial_poison"} & set(args.mechanisms):
         required["LoCoMo dataset"] = args.locomo_cases
     if "state_drift" in args.mechanisms:
         required["LongMemEval dataset"] = args.longmemeval_cases
         if args.state_interventions is None or args.state_labels is None:
-            raise ValueError("state_drift requires --state-interventions and --state-labels")
-        required["state-drift runtime interventions"] = args.state_interventions
-        required["state-drift scorer labels"] = args.state_labels
+            absent.extend(
+                name for name, value in (
+                    ("state-drift runtime interventions", args.state_interventions),
+                    ("state-drift scorer labels", args.state_labels),
+                ) if value is None
+            )
+            if strict:
+                raise ValueError("state_drift requires " + ", ".join(absent))
+        elif args.stage not in {"plan", "prepare", "all"}:
+            required["state-drift runtime interventions"] = args.state_interventions
+            required["state-drift scorer labels"] = args.state_labels
     if "adversarial_poison" in args.mechanisms:
         if args.poison_interventions is None:
-            raise ValueError("adversarial_poison requires --poison-interventions")
-        required["poison runtime interventions"] = args.poison_interventions
+            absent.append("poison runtime interventions=NOT_PROVIDED")
+            if strict:
+                raise ValueError("adversarial_poison requires --poison-interventions")
+        else:
+            required["poison runtime interventions"] = args.poison_interventions
     if args.stage in {"score", "all"}:
         if {"process_fault", "adversarial_poison"} & set(args.mechanisms):
             required["LoCoMo official evaluator"] = args.locomo_official_root / "task_eval" / "evaluation.py"
         if "state_drift" in args.mechanisms:
             required["LongMemEval official evaluator"] = args.longmemeval_official_root / "src" / "evaluation" / "evaluate_qa.py"
             required["LongMemEval oracle"] = args.longmemeval_oracle
-    missing = [f"{name}={path}" for name, path in required.items() if not Path(path).is_file()]
-    if missing:
+    missing = absent + [
+        f"{name}={path}" for name, path in required.items() if not Path(path).is_file()
+    ]
+    if missing and strict:
         raise FileNotFoundError("full ECC program input(s) missing: " + ", ".join(missing))
+    return missing
 
 
 def _write_program_manifest(args: argparse.Namespace) -> None:
@@ -203,13 +229,14 @@ def _write_program_manifest(args: argparse.Namespace) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("plan", "build", "predict", "score", "analyze", "all"), required=True)
+    parser.add_argument("--stage", choices=("plan", "prepare", "build", "predict", "score", "analyze", "all"), required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--mechanisms", nargs="+", choices=MECHANISMS, default=list(MECHANISMS))
     parser.add_argument("--locomo-cases", type=Path, default=Path("data/ghost_live_v2/raw_sources/locomo10.json"))
     parser.add_argument("--longmemeval-cases", type=Path, default=Path("data/external/longmemeval/input/longmemeval_s_cleaned.json"))
-    parser.add_argument("--state-interventions", type=Path)
-    parser.add_argument("--state-labels", type=Path)
+    parser.add_argument("--state-interventions", type=Path, default=Path("protocol/state_drift_interventions.jsonl"))
+    parser.add_argument("--state-labels", type=Path, default=Path("protocol/state_drift_labels.jsonl"))
+    parser.add_argument("--state-projection-manifest", type=Path, default=Path("protocol/state_drift_projection_manifest.json"))
     parser.add_argument("--poison-interventions", type=Path)
     parser.add_argument("--locomo-official-root", type=Path, default=Path("third_party/locomo"))
     parser.add_argument("--longmemeval-official-root", type=Path, default=Path("third_party/LongMemEval"))
@@ -227,13 +254,33 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if len(set(args.mechanisms)) != len(args.mechanisms):
         parser.error("--mechanisms must be unique")
-    _preflight(args)
+    missing = _preflight(args, strict=args.stage != "plan")
     commands = _commands(args)
     if args.stage == "plan":
-        print(json.dumps(commands, ensure_ascii=False, indent=2, sort_keys=True))
+        print(json.dumps({
+            "commands": commands,
+            "missing_prerequisites": missing,
+            "ready_to_build": not missing,
+            "generated_by_prepare": [
+                str(path) for path in (args.state_interventions, args.state_labels, args.state_projection_manifest)
+            ] if "state_drift" in args.mechanisms else [],
+        }, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
-    stages = ("build", "predict", "score", "analyze") if args.stage == "all" else (args.stage,)
+    stages = ("prepare", "build", "predict", "score", "analyze") if args.stage == "all" else (args.stage,)
     for stage in stages:
+        if stage == "prepare" and args.stage == "all" and "state_drift" in args.mechanisms:
+            projection_outputs = (
+                args.state_interventions, args.state_labels, args.state_projection_manifest,
+            )
+            existing = [path.is_file() for path in projection_outputs]
+            if all(existing):
+                print("+ reuse sealed LongMemEval state-drift projection", flush=True)
+                continue
+            if any(existing):
+                raise FileNotFoundError(
+                    "partial state-drift projection exists; require all or none of: "
+                    + ", ".join(map(str, projection_outputs))
+                )
         for mechanism in args.mechanisms:
             for command in commands[mechanism][stage]:
                 _run(command)

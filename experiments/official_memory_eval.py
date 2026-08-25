@@ -116,18 +116,38 @@ def score_locomo_official(
         raise ValueError("official LoCoMo evaluator lacks eval_question_answering")
     samples = json.loads(Path(dataset).read_text(encoding="utf-8"))
     report_arms: dict[str, object] = {}
+    normalization_counts: list[int] = []
     for arm in seal["arms"]:
         predictions = _predictions(Path(run_dir) / "predictions" / f"{arm}.jsonl")
         rows = []
         categories = []
+        arm_normalization_count = 0
         for sample in samples:
             sample_id = str(sample["sample_id"])
             for index, qa in enumerate(sample["qa"]):
                 case_id = f"{sample_id}:q{index:04d}"
                 if case_id not in predictions:
                     continue
-                rows.append({**qa, "prediction": predictions[case_id], "_cmd_case_id": case_id})
-                categories.append(int(qa["category"]))
+                category = int(qa["category"])
+                official_row = dict(qa)
+                if "answer" not in official_row:
+                    if category != 5:
+                        raise ValueError(
+                            f"LoCoMo non-adversarial QA lacks answer: {case_id}"
+                        )
+                    # Upstream locomo10 stores only ``adversarial_answer`` for
+                    # most category-5 rows, while upstream evaluation.py reads
+                    # ``answer`` before entering its category-5 branch.  That
+                    # branch ignores the value and scores refusal wording only.
+                    official_row["answer"] = ""
+                    arm_normalization_count += 1
+                rows.append({
+                    **official_row,
+                    "prediction": predictions[case_id],
+                    "_cmd_case_id": case_id,
+                })
+                categories.append(category)
+        normalization_counts.append(arm_normalization_count)
         if len(rows) != int(seal["case_count"]):
             raise ValueError("LoCoMo official scoring coverage differs from seal")
         scores, _lengths, _recall = scorer(rows, "prediction")
@@ -154,9 +174,16 @@ def score_locomo_official(
             },
             "per_case": per_case,
         }
+    if len(set(normalization_counts)) != 1:
+        raise ValueError("LoCoMo arms required inconsistent compatibility normalization")
     report = {
         "schema_version": "cmd-locomo-official-score-v2",
         "official_evaluator": True,
+        "compatibility_normalization": {
+            "category5_missing_answer_filled_for_upstream_call": normalization_counts[0],
+            "source_dataset_modified": False,
+            "prediction_seal_modified": False,
+        },
         "prediction_seal": str(Path(run_dir) / "prediction_seal.json"),
         "category_mapping": {
             "1": "multi_hop",

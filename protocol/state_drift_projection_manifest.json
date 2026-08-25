@@ -1,0 +1,29 @@
+{
+  "binding_root": "2e47aabf3f317153bd4add409a0b3b2602d89680036a7f205f1d7da61a4e4bf0",
+  "candidate_pool_k": 10,
+  "cohort_selector": "question_type=knowledge-update (offline only)",
+  "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+  "excluded_cases": [
+    {
+      "case_id": "0977f2af",
+      "reason": "superseded-memory-outside-frozen-recall"
+    }
+  ],
+  "interventions_sha256": "8b7e150c19bc8d5e29c84d3bf1fe966f91f9768c7252c71ecc8d9ddeac57cfce",
+  "labels_sha256": "2a8b4dfe70c52a4d0ab92defc9bc73d6fc384e23897c0e38e6ed373000fb04c6",
+  "old_value_labels_complete": false,
+  "retrieval_top_k": 5,
+  "runtime_case_count": 77,
+  "runtime_forbidden_fields": [
+    "answer",
+    "answer_session_ids",
+    "question_type",
+    "has_answer",
+    "old_value",
+    "new_value"
+  ],
+  "runtime_projection_uses_reference_targets": false,
+  "schema_version": "cmd-longmemeval-state-drift-projection-v1",
+  "scorer_label_count": 77,
+  "seed": 24
+}

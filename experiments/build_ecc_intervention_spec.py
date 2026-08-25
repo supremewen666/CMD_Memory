@@ -92,11 +92,10 @@ def _poison_rows(
     rows = []
     for case in selected:
         event_id = f"poison-event:{content_sha256({'case_id': case.case_id, 'payload': payload})}"
-        text = "\n".join((
-            "[untrusted-memory-override]",
-            payload,
-            "query_sha256=" + content_sha256(str(case.raw["query"])),
-        ))
+        # The model sees the raw memory payload. Trust classification belongs
+        # to CAS/influence telemetry and must not be leaked as a warning token
+        # that trivially weakens the pre-quarantine attack arm.
+        text = payload
         rows.append({
             "schema_version": INTERVENTION_SCHEMA,
             "case_id": case.case_id,

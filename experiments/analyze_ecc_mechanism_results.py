@@ -17,6 +17,7 @@ from experiments.run_ecc_sealed_memory_benchmark import validate_ecc_prediction_
 
 REPORT_SCHEMA = "cmd-ecc-mechanism-analysis-v1"
 STATE_LABEL_SCHEMA = "cmd-ecc-state-drift-evaluator-label-v1"
+STATE_LABEL_SCHEMA_V2 = "cmd-ecc-state-drift-evaluator-label-v2"
 ARMS = ("incident_before", "repaired_after")
 
 
@@ -127,18 +128,33 @@ def _state_labels(path: Path, case_ids: set[str]) -> dict[str, Mapping[str, obje
     }
     rows: dict[str, Mapping[str, object]] = {}
     for row in _jsonl(path):
-        if set(row) != expected or row["schema_version"] != STATE_LABEL_SCHEMA:
-            raise ValueError("state-drift evaluator label is not closed or versioned")
+        schema = row.get("schema_version")
+        if schema == STATE_LABEL_SCHEMA:
+            if set(row) != expected:
+                raise ValueError("state-drift evaluator label v1 is not closed")
+        elif schema == STATE_LABEL_SCHEMA_V2:
+            expected_v2 = {
+                "schema_version", "case_id", "old_value", "new_value", "query_relation",
+                "question", "old_value_status", "old_session_id", "new_session_id",
+                "old_evidence_text", "new_evidence_text",
+            }
+            if set(row) != expected_v2:
+                raise ValueError("state-drift evaluator label v2 is not closed")
+        else:
+            raise ValueError("state-drift evaluator label schema is unsupported")
         case_id = row["case_id"]
         if (
             not isinstance(case_id, str)
             or case_id in rows
-            or not isinstance(row["old_value"], str)
             or not isinstance(row["new_value"], str)
-            or row["old_value"] == row["new_value"]
             or row["query_relation"] not in {"target", "unaffected"}
         ):
             raise ValueError("state-drift evaluator label is invalid")
+        old_value = row["old_value"]
+        if old_value is not None and (not isinstance(old_value, str) or old_value == row["new_value"]):
+            raise ValueError("state-drift old-value label is invalid")
+        if schema == STATE_LABEL_SCHEMA and old_value is None:
+            raise ValueError("state-drift evaluator label v1 requires old_value")
         rows[case_id] = row
     if not case_ids <= set(rows):
         raise ValueError("state-drift evaluator labels do not cover every sealed case")
@@ -227,6 +243,7 @@ def analyze(
         state_metrics: dict[str, object] = {
             "target_count": len(target_ids),
             "unaffected_count": len(unaffected_ids),
+            "old_value_labeled_count": sum(labels[case_id]["old_value"] is not None for case_id in target_ids),
         }
         for arm in ARMS:
             state_metrics[f"{arm}_new_value_adoption"] = (
@@ -235,9 +252,9 @@ def analyze(
                 if target_ids else None
             )
             state_metrics[f"{arm}_old_value_presence"] = (
-                sum(_contains_value(predictions[arm][case_id], str(labels[case_id]["old_value"])) for case_id in target_ids)
-                / len(target_ids)
-                if target_ids else None
+                sum(_contains_value(predictions[arm][case_id], str(labels[case_id]["old_value"])) for case_id in target_ids if labels[case_id]["old_value"] is not None)
+                / sum(labels[case_id]["old_value"] is not None for case_id in target_ids)
+                if any(labels[case_id]["old_value"] is not None for case_id in target_ids) else None
             )
         if official is not None and unaffected_ids:
             state_metrics["unaffected_official_f1"] = _paired_summary(
@@ -248,7 +265,8 @@ def analyze(
             "minimum_target_cases": min_cases_per_stratum,
             "target_coverage": len(target_ids) >= min_cases_per_stratum,
             "new_value_adoption_improves": bool(target_ids) and float(state_metrics["repaired_after_new_value_adoption"]) > float(state_metrics["incident_before_new_value_adoption"]),
-            "old_value_presence_decreases": bool(target_ids) and float(state_metrics["repaired_after_old_value_presence"]) < float(state_metrics["incident_before_old_value_presence"]),
+            "old_value_labels_complete": bool(target_ids) and state_metrics["old_value_labeled_count"] == len(target_ids),
+            "old_value_presence_decreases": state_metrics["repaired_after_old_value_presence"] is not None and float(state_metrics["repaired_after_old_value_presence"]) < float(state_metrics["incident_before_old_value_presence"]),
         }
     else:
         target = poison_target.casefold().strip()

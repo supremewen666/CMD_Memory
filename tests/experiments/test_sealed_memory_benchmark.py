@@ -119,3 +119,42 @@ def test_locomo_official_adapter_scores_only_after_seal(tmp_path: Path) -> None:
     assert report["arms"]["cmd"]["per_case"] == [{
         "question_id": "s:q0000", "category": 4, "official_f1": 1.0,
     }]
+
+
+def test_locomo_category5_missing_answer_is_normalized_only_for_upstream_call(
+    tmp_path: Path,
+) -> None:
+    dataset = tmp_path / "locomo.json"
+    source = [{
+        "sample_id": "s",
+        "qa": [{
+            "question": "unanswerable", "adversarial_answer": "distractor",
+            "category": 5, "evidence": [],
+        }],
+    }]
+    dataset.write_text(json.dumps(source), encoding="utf-8")
+    run = tmp_path / "run"
+    predict_and_seal(
+        benchmark="locomo", cases=[_case("unused")], backend=_Backend(),
+        dataset_path=dataset, output=run, include_full_context=False,
+    )
+    official = tmp_path / "official/task_eval"
+    official.mkdir(parents=True)
+    (official / "evaluation.py").write_text(
+        "def eval_question_answering(rows, key):\n"
+        "    scores = []\n"
+        "    for row in rows:\n"
+        "        _ = str(row['answer'])\n"
+        "        scores.append(1.0 if 'no information available' in row[key].lower() else 0.0)\n"
+        "    return scores, 0.0, []\n",
+        encoding="utf-8",
+    )
+    report = score_locomo_official(
+        run_dir=run, dataset=dataset, official_root=tmp_path / "official",
+    )
+    assert report["compatibility_normalization"] == {
+        "category5_missing_answer_filled_for_upstream_call": 1,
+        "source_dataset_modified": False,
+        "prediction_seal_modified": False,
+    }
+    assert json.loads(dataset.read_text(encoding="utf-8")) == source
