@@ -185,6 +185,41 @@ def test_state_drift_event_spec_selects_cases_and_replaces_marker_fixture(
     assert "controlled-superseding-revision" not in json.dumps(case)
 
 
+def test_state_drift_event_can_supersede_nonfirst_frozen_recall_item(
+    tmp_path: Path,
+) -> None:
+    source = Path("data/ghost_live_v2/raw_sources/locomo10.json")
+    selected = load_locomo_arena_cases(
+        source, include_adversarial=True, seed=24, limit=1,
+        retrieval_top_k=5, candidate_pool_k=10,
+    )[0]
+    recalled = selected.raw["baseline_outputs"][0]["retrieved_memory_ids"]
+    assert len(recalled) > 1
+    old_id = recalled[1]
+    event_id = "event:update:nonfirst"
+    revision = "DATE: 2026-08-25\nUSER: The revised value is current."
+    intervention = tmp_path / "state.jsonl"
+    intervention.write_text(json.dumps({
+        "schema_version": "cmd-ecc-runtime-intervention-v1",
+        "case_id": selected.case_id,
+        "mechanism": "state_drift",
+        "source_event_id": event_id,
+        "source_event_sha256": content_sha256({"event_id": event_id, "text": revision}),
+        "superseded_memory_id": old_id,
+        "superseding_text": revision,
+    }) + "\n", encoding="utf-8")
+    bundle = tmp_path / "bundle"
+    manifest = materialize_bundle(
+        benchmark="locomo", dataset_path=source, output=bundle,
+        mechanism="state_drift", interventions_path=intervention,
+    )
+    assert manifest["case_count"] == 1
+    state = json.loads((bundle / "shadow_states.jsonl").read_text())
+    order = state["state"]["memory_order"]
+    assert len(order) == len(set(order)) == len(state["state"]["memories"])
+    assert order[0] == old_id
+
+
 def test_runtime_intervention_spec_rejects_evaluator_fields(tmp_path: Path) -> None:
     source = Path("data/ghost_live_v2/raw_sources/locomo10.json")
     intervention = tmp_path / "bad.jsonl"

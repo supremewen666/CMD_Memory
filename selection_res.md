@@ -259,3 +259,94 @@ Full V4, SGD and a CORRAL fallback on sealed represented and unseen streams.
 - Acceptance: beat global Thompson on represented utility while meeting Full V4
   non-inferiority on unseen utility and harm; otherwise activate the CORRAL
   fallback route.
+
+---
+
+# Dataset Route Selection Addendum — Causal Core + External Transfer + Sealed Confirmation
+
+## Project Goal
+
+- Build a repair benchmark that can score incident detection, causal localization,
+  legal repair, transactional verification, locality, receipt correctness, and
+  online routing without leaking offline labels into the runtime path.
+- Support a defensible state-of-the-art claim on hidden distributions, rather than
+  a self-authored benchmark win.
+- Treat the existing MemTrace-protocol, MemFail, and STALE-derived assets as
+  inspected development evidence, not untouched confirmation.
+
+## Candidate Options
+
+| Route | Core idea | Strengths | Risks | Cost | Basis |
+|---|---|---|---|---|---|
+| A. Self-built only | Generate clean event streams and all three incident types locally | Exact causal and repair ground truth | Generator shortcuts; benchmark overfitting; weak external validity | Medium | OmniBench-style programmatic construction; current STALE falsification |
+| B. Public-benchmark overlay only | Inject faults into LoCoMo, LongMemEval, MemFail, and HaluMem-derived streams | Strong semantic realism and comparability | No native receipt/locality/repair oracle; derivative-license limits; task/fault mismatch | Medium | LoCoMo/LongMemEval transfer practice; current external adapters |
+| C. Three-layer hybrid | Executable causal core, third-party overlay transfer, sealed independent confirmation | Exact ground truth plus external validity and claim separation | Highest governance burden; requires frozen generator and untouched source | High | PrefEval/OmniBench-style curated synthesis, LiveBench-style contamination control, current provenance discipline |
+
+## Chosen Route
+
+Choose Route C with three non-interchangeable layers:
+
+1. **Causal core:** a programmatic immutable-event simulator creates clean state,
+   applies one root-cause injection, and emits executable syndrome, legal-repair
+   equivalence class, locality budget, expected commit/rollback, and receipt oracle.
+2. **External transfer:** preserve third-party semantic content, inject faults only
+   through a versioned overlay, and report clean/corrupted/repaired paired results.
+   MemTrace-protocol and STALE-derived rows are development/calibration domains;
+   MemFail is external-source evidence but is already inspected in this repository.
+3. **Sealed confirmation:** acquire a new source after the generator, schemas,
+   operators, thresholds, baselines, and metrics are frozen. Keep labels in a
+   scorer-only sidecar and burn the hidden set once.
+
+The public core uses mutually exclusive single-root incidents. A hidden stress
+track adds composite and unknown incidents with abstention, because real failures
+need not be mutually exclusive.
+
+## Required Anti-Shortcut Design
+
+- Split by base trace, persona/entity graph, template family, and generator seed;
+  never split derived rows independently.
+- Randomize IDs, timestamps, ordering, lexical realization, and payload values
+  independently of incident labels.
+- Build matched counterfactual groups that preserve semantics while swapping every
+  non-causal metadata field.
+- Require a decoupling audit: a sensor whose performance collapses after a
+  non-causal metadata permutation is invalidated.
+- Keep clean controls, plausible no-op repairs, and adversarial repairs that pass
+  shallow checks but violate lineage/locality.
+- No `gold_*`, injection label, generator branch, or scorer output may enter
+  MemAudit, GHOST, runtime retrieval, candidate generation, or router updates.
+
+## SOTA Claim Gate
+
+A headline win is authorized only if, on the sealed independent set:
+
+- each incident mechanism is reported separately;
+- paired family-blocked bootstrap lower confidence bounds beat the strongest
+  same-budget baseline for repair recovery;
+- critical safety violations do not increase and false commits remain below the
+  preregistered limit;
+- unseen-family performance is non-inferior to the strongest conservative baseline;
+- the advantage survives metadata decoupling, surface-realization, and cross-source
+  transfer tests;
+- all baselines share the answer model, candidate budget, context budget, scorer,
+  and tool-call budget.
+
+## Rejected Routes
+
+- Route A alone is rejected for headline claims because the method and benchmark
+  would share the same inductive bias.
+- Route B alone is rejected because QA correctness cannot identify the causal fault,
+  minimal legal repair, collateral mutation, or receipt validity.
+
+## Fallback Route
+
+If a genuinely untouched source cannot be obtained, use Route B as an explicitly
+labelled transfer study and limit the paper claim to controlled causal recovery on
+the synthetic core. Do not call the inspected transfer domains confirmatory.
+
+## Next Step
+
+- Write and freeze a dataset specification before generating rows: schemas,
+  injection grammar, repair equivalence oracle, split keys, label firewall,
+  metadata-decoupling tests, metrics, baselines, hashes, and release boundary.
+- Then generate only a small pilot and run the anti-shortcut audit before scaling.

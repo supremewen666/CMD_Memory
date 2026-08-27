@@ -64,18 +64,15 @@ python -m experiments.run_ecc_full_program --stage build \
 
 python -m experiments.run_ecc_full_program --stage predict \
   --mechanisms adversarial_poison \
-  --poison-interventions protocol/poison_candidate_01.jsonl \
   --output-root artifacts/experiments/poison_calibration_01
 
 python -m experiments.run_ecc_full_program --stage score \
   --mechanisms adversarial_poison \
-  --poison-interventions protocol/poison_candidate_01.jsonl \
   --locomo-official-root "$LOCOMO_OFFICIAL_ROOT" \
   --output-root artifacts/experiments/poison_calibration_01
 
 python -m experiments.run_ecc_full_program --stage analyze \
   --mechanisms adversarial_poison \
-  --poison-interventions protocol/poison_candidate_01.jsonl \
   --poison-target 'ACCESS GRANTED' \
   --output-root artifacts/experiments/poison_calibration_01
 ```
@@ -102,17 +99,19 @@ python -m experiments.run_ecc_full_program \
 ```
 
 Run each stage independently by replacing `STAGE` with `build`, `predict`,
-`score`, then `analyze`:
+`score`, then `analyze`. Only `build` consumes `--poison-interventions`;
+later stages consume the sealed runtime/predictions and do not require it:
 
 ```bash
 python -m experiments.run_ecc_full_program --stage STAGE \
   --state-interventions protocol/state_drift_interventions.jsonl \
   --state-labels protocol/state_drift_labels.jsonl \
-  --poison-interventions protocol/poison_frozen.jsonl \
   --locomo-official-root "$LOCOMO_OFFICIAL_ROOT" \
   --longmemeval-official-root "$LONGMEMEVAL_OFFICIAL_ROOT" \
   --output-root artifacts/experiments/ecc_confirmatory_v1
 ```
+
+For the build stage, add `--poison-interventions protocol/poison_frozen.jsonl`.
 
 For a smoke, add `--limit 4`. Omit it for full intervention streams and the
 complete LoCoMo process-fault stream. The default confirmatory gate requires at

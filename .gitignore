@@ -29,8 +29,16 @@ IMPROVEMENT_SPEC_B_DEPLOYMENT.md
 RESEARCH_SURVEY_RSI_2026-07.md
 SKILL_EVOLUTION_DESIGN.md
 SKILL_MODE_DEPLOYMENT.md
+data/
 data/raw_cases/
 data/external/
+!data/external/
+!data/external/group_b/
+data/external/group_b/*
+!data/external/group_b/DATASET_INVENTORY.json
+!data/external/group_b/*/
+data/external/group_b/*/*
+!data/external/group_b/*/dataset_manifest.json
 data/probe_cases.bak.*/
 data/probe_cases/T1_T2_400_FULL.json
 papers/

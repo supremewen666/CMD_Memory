@@ -60,7 +60,7 @@ def test_loader_retrieves_over_all_sessions_instead_of_first_two(tmp_path):
 
     baseline = case.raw["baseline_outputs"][0]
     assert baseline["retrieved_memory_ids"] == [
-        "session:0002:answer-session"
+        "case:q-1:session:0002:answer-session"
     ]
     assert "Master of Science in Robotics" in case.base_context
     assert len(case.raw["extracted_memory"]) == 2

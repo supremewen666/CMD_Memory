@@ -1,5 +1,5 @@
 {
-  "binding_root": "2e47aabf3f317153bd4add409a0b3b2602d89680036a7f205f1d7da61a4e4bf0",
+  "binding_root": "798ae69248989dcf5e83ee0490d340eb0b51e056aad0af6023b7dc0d40417067",
   "candidate_pool_k": 10,
   "cohort_selector": "question_type=knowledge-update (offline only)",
   "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
@@ -9,7 +9,7 @@
       "reason": "superseded-memory-outside-frozen-recall"
     }
   ],
-  "interventions_sha256": "8b7e150c19bc8d5e29c84d3bf1fe966f91f9768c7252c71ecc8d9ddeac57cfce",
+  "interventions_sha256": "83a3d03fbf4fed5cde359f2a84d07002f96ff4e7d47148a6a8019f734c784bed",
   "labels_sha256": "2a8b4dfe70c52a4d0ab92defc9bc73d6fc384e23897c0e38e6ed373000fb04c6",
   "old_value_labels_complete": false,
   "retrieval_top_k": 5,
