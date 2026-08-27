@@ -113,7 +113,6 @@ def test_provider_accepts_vllm_message_extension_fields() -> None:
 
 @pytest.mark.parametrize("content", [
     {"candidates": [{"operator_id": "unknown", "skill_key": "bad"}]},
-    {"candidates": [{"operator_id": "process_restore", "skill_key": "BAD"}]},
     {"candidates": [{"operator_id": "process_restore", "skill_key": "ok", "extra": 1}]},
     {"candidates": []},
 ])
@@ -122,6 +121,17 @@ def test_provider_rejects_closed_output_and_unknown_operators(content: object) -
     provider, _ = _provider(_response(content))
     with pytest.raises(SkillDiscoveryProviderError):
         provider.candidates(bundle, event_index=0, failure=_failure(bundle))
+
+
+def test_provider_normalizes_non_executable_model_skill_labels() -> None:
+    bundle = _bundle()
+    provider, _ = _provider(_response({"candidates": [
+        {"operator_id": "process_restore", "skill_key": "Restore Projection / V1"},
+    ]}))
+
+    skill = provider.candidates(bundle, event_index=0, failure=_failure(bundle))[0]
+
+    assert skill.skill_id == "catalog:process_restore:restore-projection-v1"
 
 
 def test_non_loopback_requires_key_and_response_fingerprint_is_strict() -> None:

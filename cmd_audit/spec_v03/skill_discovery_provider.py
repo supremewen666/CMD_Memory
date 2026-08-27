@@ -285,6 +285,8 @@ def build_skill_discovery_prompt(bundle: RuntimeBundle, *, event_index: int, fai
         "output_contract": {
             "type": "object", "required": ["candidates"], "additionalProperties": False,
             "candidate_fields": ["operator_id", "skill_key"], "candidate_additional_properties": False,
+            "skill_key_pattern": "[a-z][a-z0-9_-]{0,79}",
+            "skill_key_example": "restore-projection-from-source-log",
             "max_candidates": 8,
         },
     }
@@ -308,17 +310,33 @@ def _parse_candidates(value: object) -> tuple[tuple[str, str], ...]:
         raise SkillDiscoveryProviderError("discovery output candidates must contain 1..8 entries")
     legal = {spec.operator_id for spec in operator_catalog()}
     result: list[tuple[str, str]] = []
+    raw_rows: set[tuple[str, str]] = set()
+    normalized_rows: set[tuple[str, str]] = set()
     for row in rows:
         if not isinstance(row, Mapping) or set(row) != {"operator_id", "skill_key"}:
             raise SkillDiscoveryProviderError("discovery candidate must be closed operator_id/skill_key")
         operator_id, skill_key = row["operator_id"], row["skill_key"]
         if not isinstance(operator_id, str) or operator_id not in legal:
             raise SkillDiscoveryProviderError("discovery candidate names an unknown legal operator")
-        if not isinstance(skill_key, str) or not _KEY_RE.fullmatch(skill_key):
-            raise SkillDiscoveryProviderError("discovery skill_key must match [a-z][a-z0-9_-]{0,79}")
-        result.append((operator_id, skill_key))
-    if len(set(result)) != len(result):
-        raise SkillDiscoveryProviderError("discovery candidates must be unique")
+        if not isinstance(skill_key, str) or not skill_key.strip() or len(skill_key) > 512:
+            raise SkillDiscoveryProviderError("discovery skill_key must be a non-empty string of at most 512 characters")
+        raw_pair = (operator_id, skill_key)
+        if raw_pair in raw_rows:
+            raise SkillDiscoveryProviderError("discovery candidates must be unique")
+        raw_rows.add(raw_pair)
+        normalized = re.sub(r"[^a-z0-9]+", "-", skill_key.casefold()).strip("-")
+        if not normalized or not normalized[0].isalpha():
+            normalized = f"skill-{normalized}" if normalized else f"skill-{operator_id}"
+        normalized = normalized[:80].rstrip("-")
+        pair = (operator_id, normalized)
+        if pair in normalized_rows:
+            suffix = canonical_sha256({"operator_id": operator_id, "skill_key": skill_key})[:12]
+            normalized = f"{normalized[:67].rstrip('-')}-{suffix}"
+            pair = (operator_id, normalized)
+        if not _KEY_RE.fullmatch(normalized):
+            raise SkillDiscoveryProviderError("normalized discovery skill_key violates the local slug contract")
+        normalized_rows.add(pair)
+        result.append(pair)
     return tuple(result)
 
 
