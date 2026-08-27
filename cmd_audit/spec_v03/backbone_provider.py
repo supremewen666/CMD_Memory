@@ -28,6 +28,9 @@ from .syndrome_runtime import audit_structural_telemetry
 
 _DEVELOPMENT = "DEVELOPMENT"
 _PRODUCTION = "PRODUCTION"
+_RESPONSE_FINGERPRINT = "response_fingerprint"
+_EXTERNAL_MANIFEST = "external_manifest"
+_SNAPSHOT_BINDINGS = {_RESPONSE_FINGERPRINT, _EXTERNAL_MANIFEST}
 
 
 class BackboneProviderError(RuntimeError):
@@ -111,6 +114,7 @@ class BackboneProviderConfig:
     endpoint: str | None = "https://api.openai.com/v1"
     api_key: str | None = None
     max_context_events: int = 32
+    snapshot_binding: str = _RESPONSE_FINGERPRINT
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str) or not self.model_id.strip():
@@ -127,10 +131,16 @@ class BackboneProviderConfig:
             raise ValueError("temperature must be non-negative")
         if not isinstance(self.timeout_seconds, (int, float)) or not math.isfinite(float(self.timeout_seconds)) or self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive and finite")
+        if self.snapshot_binding not in _SNAPSHOT_BINDINGS:
+            raise ValueError(
+                "snapshot_binding must be response_fingerprint or external_manifest"
+            )
         if self.environment == _PRODUCTION:
             parsed = urlparse(str(self.endpoint))
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 raise ValueError("PRODUCTION provider requires an HTTP(S) endpoint")
+            if not self.api_key and not _is_loopback_endpoint(parsed):
+                raise ValueError("PRODUCTION public endpoint requires an api_key")
         if isinstance(self.max_context_events, bool) or not isinstance(self.max_context_events, int) or self.max_context_events < 1:
             raise ValueError("max_context_events must be a positive integer")
 
@@ -150,6 +160,7 @@ class BackboneCallAudit:
     call_index: int
     model_id: str
     snapshot: str
+    snapshot_binding: str
     decision_sha256: str
     memory_state_sha256: str
     candidate_skill_revision_ids: tuple[str, ...]
@@ -165,6 +176,14 @@ class OpenAICompatibleTransport(Protocol):
     """Injectable stdlib-compatible HTTP boundary; tests never need a network."""
 
     def post_json(self, *, url: str, headers: Mapping[str, str], body: Mapping[str, object], timeout_seconds: float) -> Mapping[str, object]: ...
+
+
+def _is_loopback_endpoint(parsed: object) -> bool:
+    """Return true only for local OpenAI-compatible servers such as vLLM."""
+    hostname = getattr(parsed, "hostname", None)
+    if not isinstance(hostname, str):
+        return False
+    return hostname.lower() == "localhost" or hostname in {"127.0.0.1", "::1"}
 
 
 class BackboneProvider(Protocol):
@@ -377,6 +396,7 @@ class _BaseBackboneProvider:
         self._usage = self._usage.plus(usage)
         self._audits.append(BackboneCallAudit(
             self.provider_kind, len(self._audits), self.config.model_id, self.config.snapshot,
+            self.config.snapshot_binding,
             decision.content_sha256, state.root, tuple(sorted(candidate_ids)), canonical_sha256(prompt),
             self.config.config_sha256, canonical_sha256(request), canonical_sha256(response),
             prediction.prediction_sha256, usage,
@@ -420,8 +440,9 @@ class OpenAICompatibleBackboneProvider(_BaseBackboneProvider):
     def __init__(self, config: BackboneProviderConfig, budget: ProviderBudget, *, transport: OpenAICompatibleTransport | None = None) -> None:
         if config.environment != _PRODUCTION:
             raise ValueError("OpenAICompatibleBackboneProvider requires PRODUCTION configuration")
-        if not config.api_key:
-            raise ValueError("OpenAICompatibleBackboneProvider requires an api_key")
+        parsed = urlparse(str(config.endpoint))
+        if not config.api_key and not _is_loopback_endpoint(parsed):
+            raise ValueError("OpenAICompatibleBackboneProvider requires an api_key for public endpoints")
         super().__init__(config, budget)
         self._transport = transport or _UrllibTransport()
 
@@ -443,6 +464,8 @@ class OpenAICompatibleBackboneProvider(_BaseBackboneProvider):
                 {"role": "user", "content": json.dumps(prompt, sort_keys=True, separators=(",", ":"), allow_nan=False)},
             ],
         }
+        if self.config.snapshot_binding == _EXTERNAL_MANIFEST and _is_loopback_endpoint(urlparse(str(self.config.endpoint))):
+            request["chat_template_kwargs"] = {"enable_thinking": False}
         headers = {"Content-Type": "application/json"}
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
@@ -455,8 +478,13 @@ class OpenAICompatibleBackboneProvider(_BaseBackboneProvider):
         returned_model = response.get("model")
         if returned_model != self.config.model_id:
             raise BackboneProviderError("OpenAI-compatible response model_id does not exactly match configured model_id")
-        if response.get("system_fingerprint") != self.config.snapshot:
-            raise BackboneProviderError("OpenAI-compatible response snapshot does not exactly match configured snapshot")
+        if (
+            self.config.snapshot_binding == _RESPONSE_FINGERPRINT
+            and response.get("system_fingerprint") != self.config.snapshot
+        ):
+            raise BackboneProviderError(
+                "OpenAI-compatible response snapshot does not exactly match configured snapshot"
+            )
         choices = response.get("choices")
         if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], Mapping):
             raise BackboneProviderError("OpenAI-compatible response must contain exactly one choice")

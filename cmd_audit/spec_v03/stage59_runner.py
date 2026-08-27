@@ -157,8 +157,14 @@ class Stage59Runner:
                     capabilities.backbone_provider,
                     capabilities.feedback_provider,
                     sealed_oracle_provider=capabilities.stage5_oracle,
+                    skill_library=capabilities.source_library or None,
                 ).run(bundles, order)
-                results["stage5"] = _jsonable(stage5)
+                stage5_mapping = _jsonable(stage5)
+                if isinstance(stage5_mapping, dict):
+                    stage5_mapping["provider_call_audit"] = _jsonable(
+                        getattr(capabilities.backbone_provider, "call_audit", ()),
+                    )
+                results["stage5"] = stage5_mapping
 
         ecology = EcologyTransferExecutor(model_id=self.config.model_id, seed=self.config.seed)
         if "stage6" in self.config.stages:
@@ -260,4 +266,3 @@ class Stage59Runner:
             unsupported_capabilities=tuple(sorted(unsupported)),
             report_sha256=canonical_sha256(body),
         )
-

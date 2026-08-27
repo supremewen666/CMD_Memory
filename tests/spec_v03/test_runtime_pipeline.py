@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cmd_audit.repair.ghost_ecology import ObservableResidualGHOSTRouter
+from cmd_audit.repair.ghost_ecology import ObservableResidualGHOSTRouter, SkillRevision
 from cmd_audit.spec_v03.repair_stream import build_intervention, compile_repair_case, iter_public_episodes
 from cmd_audit.spec_v03.runtime_pipeline import RuntimePipeline, build_legal_candidates
 from cmd_audit.spec_v03.router_stage5 import BackbonePrediction
@@ -37,6 +37,29 @@ def _prediction(decision: object, state: object, *, model_id: str = "unconfigure
         selected_skill_revision_id=min(scores),
         backbone_state_sha256=state.root,  # type: ignore[union-attr]
     )
+
+
+def _sibling_restore_library() -> tuple[SkillRevision, ...]:
+    """Keep two distinct stable revisions for the one typed restore operator."""
+    base = RuntimePipeline().frozen_skill_library
+    restore = next(skill for skill in base if skill.program["operator_id"] == "process_restore")
+    siblings = tuple(
+        SkillRevision.create(
+            skill_id=f"external:process_restore:{suffix}",
+            program={**restore.program, "external_revision": suffix},
+            parameter_schema=restore.parameter_schema,
+            preconditions=restore.preconditions,
+            postconditions=restore.postconditions,
+            success_probe={"probe_id": f"external-restore-{suffix}"},
+            mutation_budget=restore.mutation_budget,
+            rollback_program=restore.rollback_program,
+            producing_failure_id=f"external-frozen-library-{suffix}",
+            derivation_kind="seed",
+            state="stable",
+        )
+        for suffix in ("a", "b")
+    )
+    return tuple(skill for skill in base if skill is not restore) + siblings
 
 
 @pytest.mark.parametrize(("template", "mechanism", "operator"), (("drop", "process_fault", "process_restore"), ("explicit_supersede", "state_drift", "state_supersede_lineage"), ("untrusted_injection", "adversarial_poison", "poison_quarantine_audit")))
@@ -131,6 +154,39 @@ def test_frozen_operator_skill_identity_is_stable_across_cases() -> None:
 
     assert first.legal_operator_ids == second.legal_operator_ids == ("process_restore",)
     assert first.skill_revision_ids == second.skill_revision_ids
+
+
+def test_external_library_keeps_sibling_revisions_as_distinct_legal_candidates() -> None:
+    decision, state = _runtime_case("drop")
+    library = _sibling_restore_library()
+    pipeline = RuntimePipeline(skill_library=library)
+    candidates = build_legal_candidates(
+        state, decode_ecc_syndrome(decision, state), skill_library=library,
+    )
+    expected = tuple(
+        skill.skill_revision_id for skill in library
+        if skill.program["operator_id"] == "process_restore"
+    )
+
+    assert candidates.legal_operator_ids == ("process_restore", "process_restore")
+    assert candidates.skill_revision_ids == expected
+    assert pipeline.frozen_registry.stable_skill_revision_ids == tuple(sorted(skill.skill_revision_id for skill in library))
+    assert pipeline.frozen_skill(expected[1]) == next(skill for skill in library if skill.skill_revision_id == expected[1])
+
+    prediction = BackbonePrediction.create(
+        case_id=decision.case_id,
+        event_index=decision.event_index,
+        model_id="unconfigured",
+        candidate_skill_revision_ids=expected,
+        scores={expected[0]: -1.0, expected[1]: 1.0},
+        selected_skill_revision_id=expected[1],
+        backbone_state_sha256=state.root,
+    )
+    result = pipeline.decide(decision, state, prediction)
+    assert result.selected_skill_revision_id == expected[1]
+    assert result.selected_operator_id == "process_restore"
+    assert result.selected_skill_content is not None
+    assert result.selected_skill_content.program["external_revision"] == "b"
 
 
 def test_route_handle_binds_ghost_selected_skill_to_operator() -> None:

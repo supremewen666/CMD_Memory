@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -11,7 +12,15 @@ from cmd_audit.spec_v03.experiment_matrix import STAGE5_VARIANTS
 from cmd_audit.spec_v03.prequential_executor import RuntimeOrderManifest
 from cmd_audit.spec_v03.repair_stream import build_intervention, compile_repair_case, iter_public_episodes
 from cmd_audit.spec_v03.runtime_bundle import deserialize
-from cmd_audit.spec_v03.stage5_executor import Stage5ExecutionConfig, Stage5Executor, Stage5Receipt
+from cmd_audit.spec_v03.runtime_pipeline import RuntimePipeline, build_legal_candidates
+from cmd_audit.repair.ghost_ecology import SkillRevision
+from cmd_audit.spec_v03.stage5_executor import (
+    Stage5ExecutionConfig,
+    Stage5Executor,
+    Stage5Receipt,
+    StructuralDevelopmentStage5FeedbackProvider,
+)
+from cmd_audit.spec_v03.syndrome_runtime import decode_ecc_syndrome
 
 
 def _inputs():
@@ -24,6 +33,28 @@ def _inputs():
 
 def _provider():
     return DeterministicDevelopmentProvider(BackboneProviderConfig(model_id="development-hash-provider", snapshot="development-non-model-v1", environment="DEVELOPMENT", max_output_tokens=64, endpoint=None), ProviderBudget(max_requests=20, max_total_tokens=1_000_000))
+
+
+def _sibling_restore_library() -> tuple[SkillRevision, ...]:
+    base = RuntimePipeline().frozen_skill_library
+    restore = next(skill for skill in base if skill.program["operator_id"] == "process_restore")
+    siblings = tuple(
+        SkillRevision.create(
+            skill_id=f"stage5-external:process_restore:{suffix}",
+            program={**restore.program, "external_revision": suffix},
+            parameter_schema=restore.parameter_schema,
+            preconditions=restore.preconditions,
+            postconditions=restore.postconditions,
+            success_probe={"probe_id": f"stage5-external-restore-{suffix}"},
+            mutation_budget=restore.mutation_budget,
+            rollback_program=restore.rollback_program,
+            producing_failure_id=f"stage5-external-library-{suffix}",
+            derivation_kind="seed",
+            state="stable",
+        )
+        for suffix in ("a", "b")
+    )
+    return tuple(skill for skill in base if skill is not restore) + siblings
 
 
 class _Feedback:
@@ -99,6 +130,31 @@ def test_stage5_same_event_cannot_update_and_seed_replays() -> None:
         assert all(receipt.selected_at_event_index < receipt.settled_before_event_index == receipt.observed_after_event_index for receipt in arm.receipt_records)
 
 
+def test_stage5_routes_external_sibling_revisions_without_a_singleton_candidate_shortcut() -> None:
+    bundles, order = _inputs()
+    library = _sibling_restore_library()
+    expected = tuple(
+        skill.skill_revision_id for skill in library
+        if skill.program["operator_id"] == "process_restore"
+    )
+    report = Stage5Executor(
+        Stage5ExecutionConfig("stage5-external-library", "development-hash-provider", 127),
+        _provider(),
+        _Feedback(),
+        sealed_oracle_provider=_Oracle(),
+        skill_library=library,
+    ).run(bundles, order)
+
+    for arm in report.arms:
+        record = next(
+            row for row in arm.selection_records
+            if row.candidate_skill_revision_ids == expected
+        )
+        assert record.selected_skill_revision_id in expected
+    ghost = next(arm for arm in report.arms if arm.arm == "mix_ghost")
+    assert next(row for row in ghost.selection_records if row.candidate_skill_revision_ids == expected).selected_skill_revision_id in expected
+
+
 def test_stage5_best_global_is_a_frozen_calibration_prior_and_maturity_must_match_order() -> None:
     bundles, order = _inputs()
     report = Stage5Executor(Stage5ExecutionConfig("stage5-frozen-prior", "development-hash-provider", 107), _provider(), _Feedback(), sealed_oracle_provider=_Oracle()).run(bundles, order)
@@ -108,3 +164,62 @@ def test_stage5_best_global_is_a_frozen_calibration_prior_and_maturity_must_matc
 
     with pytest.raises(ValueError, match="bound to the selected Stage 5 action"):
         Stage5Executor(Stage5ExecutionConfig("stage5-late", "development-hash-provider", 109), _provider(), _LateFeedback(), sealed_oracle_provider=_Oracle()).run(bundles, order)
+
+
+def test_structural_development_feedback_replays_only_the_selected_frozen_skill() -> None:
+    bundles, _order = _inputs()
+    bundle = next(bundle for bundle in bundles if not decode_ecc_syndrome(bundle.decision_view, bundle.memory_state).abstains)
+    syndrome = decode_ecc_syndrome(bundle.decision_view, bundle.memory_state)
+    selected = build_legal_candidates(bundle.memory_state, syndrome).skill_revision_ids[0]
+
+    receipt = StructuralDevelopmentStage5FeedbackProvider("development-hash-provider").observe(
+        selection_id="selected-only", selected_skill_revision_id=selected,
+        selected_at_event_index=0, observed_after_event_index=1, case=bundle,
+    )
+
+    assert receipt.valid
+    assert receipt.utility == 1.0
+    assert receipt.provenance is not None
+    assert receipt.provenance["selected_skill_revision_id"] == selected
+    assert receipt.provenance["immutable_log_preserved"] is True
+    assert receipt.provenance["audit_log_preserved"] is True
+    assert receipt.provenance["after_structural_syndrome"] == "clean"
+
+
+def test_structural_development_feedback_fails_negative_for_an_unselected_illegal_skill() -> None:
+    bundles, _order = _inputs()
+    bundle = next(bundle for bundle in bundles if not decode_ecc_syndrome(bundle.decision_view, bundle.memory_state).abstains)
+    noop = next(
+        skill.skill_revision_id for skill in RuntimePipeline().frozen_skill_library
+        if skill.skill_id == "runtime:noop_abstain"
+    )
+
+    receipt = StructuralDevelopmentStage5FeedbackProvider("development-hash-provider").observe(
+        selection_id="illegal-selected", selected_skill_revision_id=noop,
+        selected_at_event_index=0, observed_after_event_index=1, case=bundle,
+    )
+
+    assert not receipt.valid
+    assert receipt.utility == -1.0
+    assert receipt.rolled_back
+    assert receipt.provenance is not None
+    assert receipt.provenance["shadow_root"] == bundle.memory_state.root
+
+
+def test_structural_development_feedback_has_no_evaluator_import_and_is_rejected_for_confirmatory() -> None:
+    import cmd_audit.spec_v03.stage5_executor as subject
+
+    imported_names = {
+        alias.name
+        for node in ast.walk(ast.parse(Path(subject.__file__).read_text(encoding="utf-8")))
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+    assert not {"RepairCase", "InterventionSpec", "ShadowOutcomeMatrix", "EvaluatorOnly"} & imported_names
+
+    with pytest.raises(ValueError, match="confirmatory"):
+        Stage5Executor(
+            Stage5ExecutionConfig("stage5-confirmatory", "development-hash-provider", 113, execution_mode="CONFIRMATORY"),
+            _provider(),
+            StructuralDevelopmentStage5FeedbackProvider("development-hash-provider"),
+        )

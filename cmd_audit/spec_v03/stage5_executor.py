@@ -27,11 +27,11 @@ from .backbone_provider import BackboneProvider, ResourceUsage
 from .contracts import DecisionView, canonical_sha256
 from .experiment_matrix import STAGE5_VARIANTS
 from .prequential_executor import RuntimeOrderManifest
-from .repair_stream import MemoryState
+from .repair_stream import MemoryState, OperatorSpec, execute_operator, operator_catalog
 from .router_stage5 import BackbonePrediction
 from .runtime_bundle import RuntimeBundle
 from .runtime_pipeline import RuntimePipeline, build_legal_candidates
-from .syndrome_runtime import decode_ecc_syndrome
+from .syndrome_runtime import audit_structural_telemetry, decode_ecc_syndrome
 
 
 STAGE5_EXECUTOR_SCHEMA = "cmd-spec-v03-stage5-executor-v1"
@@ -83,6 +83,159 @@ class DelayedFeedbackProvider(Protocol):
     ) -> Stage5Receipt: ...
 
 
+@dataclass(frozen=True)
+class StructuralDevelopmentStage5FeedbackProvider:
+    """Development-only structural feedback for the selected frozen skill.
+
+    This is deliberately a closed runtime replay, not a proxy for evaluator
+    success.  It receives exactly one selected revision and one RuntimeBundle,
+    executes that revision's typed operator against a copy-on-write state, and
+    returns only structural gate evidence at the scheduled maturity.  It must
+    never be used for confirmatory runs.
+    """
+
+    model_id: str
+    mode: str = "DEVELOPMENT_STRUCTURAL_ONLY"
+    development_only: bool = True
+    skill_library: tuple[SkillRevision, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.model_id, str) or not self.model_id:
+            raise ValueError("structural Stage 5 feedback requires a model ID")
+        if self.mode != "DEVELOPMENT_STRUCTURAL_ONLY" or self.development_only is not True:
+            raise ValueError("structural Stage 5 feedback is development-only")
+
+    def _operator(self, selected_skill_revision_id: str) -> OperatorSpec | None:
+        """Resolve one selected frozen typed program without candidate look-up."""
+        try:
+            skill = RuntimePipeline(skill_library=self.skill_library).frozen_skill(selected_skill_revision_id)
+        except KeyError:
+            return None
+        operator_id = skill.program.get("operator_id")
+        if not isinstance(operator_id, str):
+            return None
+        return next((spec for spec in operator_catalog() if spec.operator_id == operator_id), None)
+
+    @staticmethod
+    def _locality(before: MemoryState, after: MemoryState, spec: OperatorSpec) -> int:
+        """Count the named mutable surfaces; source/audit logs are invariants."""
+        changed = {
+            name for name, different in (
+                ("projection_order", before.projection_order != after.projection_order),
+                ("projection_index", before.projection_index != after.projection_index),
+                ("scope_projection", before.scope_projection != after.scope_projection),
+                ("cache_event_ids", before.cache_event_ids != after.cache_event_ids),
+                ("supersession_edges", before.supersession_edges != after.supersession_edges),
+                ("quarantine_set", before.quarantine_set != after.quarantine_set),
+            ) if different
+        }
+        contracts = {
+            "process_restore": ({"projection_order", "projection_index"}, 2),
+            "process_replay_order": ({"projection_order", "projection_index"}, 2),
+            "process_rebuild_index": ({"projection_index"}, 1),
+            "process_scope_repair": ({"scope_projection"}, 1),
+            "process_cache_invalidate": ({"cache_event_ids"}, 1),
+            "state_supersede_lineage": ({"projection_order", "projection_index", "supersession_edges"}, 2),
+            "poison_quarantine_audit": ({"projection_order", "projection_index", "quarantine_set"}, 1),
+        }
+        allowed, cost = contracts.get(spec.operator_id, (set(), spec.locality_bound + 1))
+        return cost if changed <= allowed else spec.locality_bound + 1
+
+    @staticmethod
+    def _rebased_decision(decision: DecisionView, state: MemoryState) -> DecisionView:
+        """Bind the public observation to the shadow state before telemetry."""
+        observation = dict(decision.observation)
+        current = dict(observation["current_state"])
+        current.update({
+            "projection_order": list(state.projection_order),
+            "projection_index": list(state.projection_index),
+            "scope_projection": list(state.scope_projection),
+            "cache_event_ids": list(state.cache_event_ids),
+            "supersession_edges": list(state.supersession_edges),
+            "quarantine_set": list(state.quarantine_set),
+            "state_root": state.root,
+        })
+        observation["current_state"] = current
+        return replace(decision, observation=observation)
+
+    def observe(
+        self,
+        *,
+        selection_id: str,
+        selected_skill_revision_id: str,
+        selected_at_event_index: int,
+        observed_after_event_index: int,
+        case: RuntimeBundle,
+    ) -> Stage5Receipt:
+        """Replay only the action that was actually selected at route time."""
+        before = case.memory_state
+        spec = self._operator(selected_skill_revision_id)
+        legal_ids: tuple[str, ...] = ()
+        before_classification = "unavailable"
+        after_classification = "unavailable"
+        shadow = before
+        if spec is not None:
+            decision = replace(case.decision_view, event_index=selected_at_event_index)
+            syndrome = decode_ecc_syndrome(decision, before)
+            before_classification = syndrome.descriptor.classification
+            legal_ids = build_legal_candidates(before, syndrome, skill_library=self.skill_library).skill_revision_ids
+            if selected_skill_revision_id in legal_ids:
+                shadow = execute_operator(before.clone(), spec)
+                after_classification = audit_structural_telemetry(
+                    self._rebased_decision(decision, shadow), shadow,
+                ).classification
+
+        immutable_log_preserved = shadow.immutable_source_log == before.immutable_source_log
+        audit_log_preserved = shadow.audit_log == before.audit_log
+        active_untrusted = any(
+            event.actor_scope == "untrusted" and event.event_id in shadow.projection_order
+            for event in shadow.audit_log
+        )
+        audit_ids = {event.event_id for event in shadow.audit_log}
+        safety_passed = immutable_log_preserved and audit_log_preserved and not active_untrusted and set(shadow.quarantine_set) <= audit_ids
+        locality_cost = None if spec is None else self._locality(before, shadow, spec)
+        locality_passed = locality_cost is not None and locality_cost <= spec.locality_bound
+        changed = shadow.root != before.root
+        resolved = after_classification == "clean"
+        valid = bool(
+            spec is not None
+            and selected_skill_revision_id in legal_ids
+            and changed
+            and immutable_log_preserved
+            and audit_log_preserved
+            and safety_passed
+            and locality_passed
+            and resolved
+        )
+        provenance = {
+            "provider": "StructuralDevelopmentStage5FeedbackProvider",
+            "mode": self.mode,
+            "model_id": self.model_id,
+            "selected_skill_revision_id": selected_skill_revision_id,
+            "before_root": before.root,
+            "shadow_root": shadow.root,
+            "immutable_log_preserved": immutable_log_preserved,
+            "audit_log_preserved": audit_log_preserved,
+            "safety_passed": safety_passed,
+            "locality_cost": locality_cost,
+            "locality_passed": locality_passed,
+            "before_structural_syndrome": before_classification,
+            "after_structural_syndrome": after_classification,
+            "structural_resolution": resolved,
+        }
+        return Stage5Receipt(
+            selection_id=selection_id,
+            selected_skill_revision_id=selected_skill_revision_id,
+            selected_at_event_index=selected_at_event_index,
+            observed_after_event_index=observed_after_event_index,
+            utility=1.0 if valid else -1.0,
+            valid=valid,
+            rolled_back=not valid,
+            delayed_regression=not resolved,
+            provenance=provenance,
+        )
+
+
 class SealedOracleProvider(Protocol):
     """Evaluator-owned legal-action capability, intentionally not optional by accident."""
 
@@ -105,12 +258,15 @@ class Stage5ExecutionConfig:
     best_global_calibration_prior: Mapping[str, float] | None = None
     algorithm_version: str = "stage5-isolation-v1"
     schema_version: str = STAGE5_EXECUTOR_SCHEMA
+    execution_mode: str = "DEVELOPMENT"
 
     def __post_init__(self) -> None:
         if not self.run_id or not self.model_id:
             raise ValueError("Stage 5 config requires run and model IDs")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise ValueError("Stage 5 seed must be an integer")
+        if self.execution_mode not in {"DEVELOPMENT", "CONFIRMATORY"}:
+            raise ValueError("Stage 5 execution mode must be DEVELOPMENT or CONFIRMATORY")
         if self.best_global_calibration_prior is not None:
             for skill_id, value in self.best_global_calibration_prior.items():
                 if not isinstance(skill_id, str) or not skill_id or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
@@ -264,11 +420,20 @@ class Stage5Executor:
         feedback_provider: DelayedFeedbackProvider,
         *,
         sealed_oracle_provider: SealedOracleProvider | None = None,
+        skill_library: Sequence[SkillRevision] | None = None,
     ) -> None:
+        if config.execution_mode == "CONFIRMATORY" and isinstance(feedback_provider, StructuralDevelopmentStage5FeedbackProvider):
+            raise ValueError("confirmatory Stage 5 execution cannot use structural development feedback")
         self.config = config
         self.backbone_provider = backbone_provider
         self.feedback_provider = feedback_provider
         self.sealed_oracle_provider = sealed_oracle_provider
+        self.skill_library = RuntimePipeline(skill_library=skill_library).frozen_skill_library
+        if isinstance(self.feedback_provider, StructuralDevelopmentStage5FeedbackProvider):
+            if self.feedback_provider.skill_library is None:
+                self.feedback_provider = replace(self.feedback_provider, skill_library=self.skill_library)
+            elif self.feedback_provider.skill_library != self.skill_library:
+                raise ValueError("structural feedback library must match the Stage 5 frozen library")
 
     @staticmethod
     def _context(decision: DecisionView, state: MemoryState) -> tuple[float, ...]:
@@ -290,7 +455,7 @@ class Stage5Executor:
 
     def _prediction_cache(self, bundles: Mapping[str, RuntimeBundle], order: RuntimeOrderManifest) -> dict[int, tuple[DecisionView, tuple[SkillRevision, ...], BackbonePrediction | None, str | None]]:
         cache: dict[int, tuple[DecisionView, tuple[SkillRevision, ...], BackbonePrediction | None, str | None]] = {}
-        pipeline = RuntimePipeline(model_id=self.config.model_id)
+        pipeline = RuntimePipeline(model_id=self.config.model_id, skill_library=self.skill_library)
         for row in order.rows:
             bundle = bundles[row.case_id]
             decision = replace(bundle.decision_view, event_index=row.event_index)
@@ -298,7 +463,7 @@ class Stage5Executor:
             if syndrome.abstains:
                 cache[row.event_index] = (decision, (), None, syndrome.descriptor.classification)
                 continue
-            candidates = build_legal_candidates(bundle.memory_state, syndrome)
+            candidates = build_legal_candidates(bundle.memory_state, syndrome, skill_library=self.skill_library)
             skills = tuple(pipeline.frozen_skill(skill_id) for skill_id in candidates.skill_revision_ids)
             if not skills:
                 cache[row.event_index] = (decision, (), None, "no-typed-legal-candidate")
@@ -349,7 +514,7 @@ class Stage5Executor:
             return Stage5ArmReport(arm, "UNSUPPORTED", (), (), (), {"reason": "sealed_oracle_provider_required"}, canonical_sha256({"arm": arm, "status": "UNSUPPORTED"}), shared_usage)
         policy = _AdaptivePolicy(arm, self.config.seed, self.config.best_global_calibration_prior) if arm in _ADAPTIVE_ARMS else None
         router: ObservableResidualGHOSTRouter | GHOSTEcologyRouter | None = None
-        pipeline = RuntimePipeline(model_id=self.config.model_id)
+        pipeline = RuntimePipeline(model_id=self.config.model_id, skill_library=self.skill_library)
         if arm == "mix_ghost":
             router = ObservableResidualGHOSTRouter(seed=self.config.seed, allow_development_proxy=True)
         elif arm == "ghost_hierarchy":
@@ -435,7 +600,7 @@ class Stage5Executor:
             syndrome = decode_ecc_syndrome(replace(item.case.decision_view, event_index=item.selected_at), item.case.memory_state)
             policy.observe(item.skill_id, receipt.outcome, item.context, syndrome.descriptor.classification)
         elif router is not None:
-            skill = RuntimePipeline(model_id=self.config.model_id).frozen_skill(item.skill_id)
+            skill = RuntimePipeline(model_id=self.config.model_id, skill_library=self.skill_library).frozen_skill(item.skill_id)
             feedback = DelayedOutcomeFeedback(item.selection_id, item.skill_id, str(skill.success_probe["probe_id"]), item.selected_at, item.matures_at, item.prediction.scores[item.skill_id], receipt.utility, receipt.valid, receipt.rolled_back, receipt.delayed_regression, "cmd-spec-v03-stage5-executor", development_proxy=True)
             router.observe(item.router_selection, feedback)  # type: ignore[arg-type]
         after = self._snapshot(router, policy)

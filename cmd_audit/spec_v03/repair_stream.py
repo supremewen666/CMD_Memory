@@ -7,6 +7,7 @@ files without paraphrasing or answer rewriting.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, dataclass
 import csv
 import hashlib
@@ -577,8 +578,9 @@ def _typed_precondition(spec: OperatorSpec, state: MemoryState) -> bool:
     source_ids = _source_ids(state)
     order = state.projection_order
     if spec.operator_id == "process_restore":
-        missing_one = len(order) == len(source_ids) - 1 and set(order) < set(source_ids)
-        duplicate_one = len(order) == len(source_ids) + 1 and any(order.count(event_id) > 1 for event_id in order)
+        source_set, order_set = set(source_ids), set(order)
+        missing_one = len(order) == len(source_ids) - 1 and order_set < source_set
+        duplicate_one = len(order) == len(source_ids) + 1 and any(count > 1 for count in Counter(order).values())
         truncated = len(order) < len(source_ids) and order == source_ids[:len(order)]
         return missing_one or duplicate_one or truncated
     if spec.operator_id == "process_replay_order":
@@ -586,8 +588,9 @@ def _typed_precondition(spec: OperatorSpec, state: MemoryState) -> bool:
     if spec.operator_id == "process_rebuild_index":
         return order == source_ids and state.projection_index != _reindex(order)
     if spec.operator_id == "process_scope_repair":
+        scopes = dict(state.scope_projection)
         return sum(
-            dict(state.scope_projection).get(event.event_id) != event.actor_scope
+            scopes.get(event.event_id) != event.actor_scope
             for event in state.immutable_source_log
         ) == 1
     if spec.operator_id == "process_cache_invalidate":
@@ -595,8 +598,9 @@ def _typed_precondition(spec: OperatorSpec, state: MemoryState) -> bool:
     if spec.operator_id == "state_supersede_lineage":
         return _state_lineage_pair(state) is not None
     if spec.operator_id == "poison_quarantine_audit":
+        order_ids, quarantined = set(order), set(state.quarantine_set)
         return sum(
-            event.actor_scope == "untrusted" and event.event_id in order and event.event_id not in state.quarantine_set
+            event.actor_scope == "untrusted" and event.event_id in order_ids and event.event_id not in quarantined
             for event in state.audit_log
         ) == 1
     return False
@@ -666,8 +670,9 @@ def execute_operator(state: MemoryState, spec: OperatorSpec) -> MemoryState:
     source_ids = _source_ids(before)
     if spec.operator_id == "process_restore":
         order = list(before.projection_order)
-        missing = [event_id for event_id in source_ids if event_id not in order]
-        duplicated = [event_id for event_id in source_ids if order.count(event_id) > 1]
+        order_counts = Counter(order)
+        missing = [event_id for event_id in source_ids if order_counts[event_id] == 0]
+        duplicated = [event_id for event_id in source_ids if order_counts[event_id] > 1]
         if len(missing) == 1 and len(order) == len(source_ids) - 1:
             order.insert(source_ids.index(missing[0]), missing[0])
         elif len(duplicated) == 1 and len(order) == len(source_ids) + 1:
@@ -680,13 +685,16 @@ def execute_operator(state: MemoryState, spec: OperatorSpec) -> MemoryState:
         return _replace_state(before, projection_order=repaired_order, projection_index=_reindex(repaired_order))
     if spec.operator_id == "process_replay_order":
         order = list(before.projection_order)
-        for index in range(len(order)):
-            other = (index + 1) % len(order)
-            order[index], order[other] = order[other], order[index]
-            if tuple(order) == source_ids:
+        if len(order) != len(source_ids):
+            return before
+        mismatches = [index for index, pair in enumerate(zip(order, source_ids)) if pair[0] != pair[1]]
+        if len(mismatches) == 2:
+            left, right = mismatches
+            adjacent = right == left + 1 or (left == 0 and right == len(order) - 1)
+            if adjacent and order[left] == source_ids[right] and order[right] == source_ids[left]:
+                order[left], order[right] = order[right], order[left]
                 repaired_order = tuple(order)
                 return _replace_state(before, projection_order=repaired_order, projection_index=_reindex(repaired_order))
-            order[index], order[other] = order[other], order[index]
         return before
     if spec.operator_id == "process_rebuild_index":
         return _replace_state(before, projection_index=_reindex(before.projection_order))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Mapping
 
 import pytest
@@ -62,7 +63,7 @@ def test_deterministic_provider_is_reproducible_audited_and_explicitly_non_model
     assert second_provider.usage.request_count == 1
     with pytest.raises(ValueError, match="DEVELOPMENT-only"):
         DeterministicDevelopmentProvider(
-            BackboneProviderConfig("x", "snapshot", "PRODUCTION", endpoint="https://example.test"),
+            BackboneProviderConfig("x", "snapshot", "PRODUCTION", endpoint="https://example.test", api_key="secret"),
             ProviderBudget(1, 100),
         )
     with pytest.raises(ValueError, match="model_id"):
@@ -132,6 +133,80 @@ def test_openai_compatible_provider_uses_injected_transport_and_closed_output() 
     prompt = transport.calls[0]["body"]["messages"][1]["content"]  # type: ignore[index]
     assert "must-not-appear-in-prompt" not in prompt
     assert provider.call_audit[0].snapshot == "qwen3-14b-2026-08-01"
+    assert provider.call_audit[0].snapshot_binding == "response_fingerprint"
+
+
+def test_loopback_vllm_accepts_no_key_with_external_manifest_snapshot_binding() -> None:
+    decision, state, skills = _decision(), _state(), (_skill("one"),)
+    skill_id = skills[0].skill_revision_id
+    transport = _FakeTransport({
+        "model": "Qwen2.5-14B-Instruct",
+        # vLLM need not emit system_fingerprint when the immutable model
+        # manifest is pinned separately from the HTTP response.
+        "choices": [{"message": {"role": "assistant", "content": json.dumps({
+            "selected_skill_revision_id": skill_id,
+            "scores": {skill_id: 0.4},
+        })}}],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 4, "total_tokens": 15},
+    })
+    config = BackboneProviderConfig(
+        "Qwen2.5-14B-Instruct",
+        "sha256:0e4bf5c868d1c51a3e39e1b7c44ec2b5060e4d74998b38ded1b0145223d8d413",
+        "PRODUCTION",
+        endpoint="http://127.0.0.1:8000/v1",
+        api_key=None,
+        max_output_tokens=16,
+        snapshot_binding="external_manifest",
+    )
+    provider = OpenAICompatibleBackboneProvider(
+        config, ProviderBudget(1, 1_000), transport=transport,
+    )
+
+    prediction = provider.predict(decision, state, skills)
+
+    assert prediction.model_id == "Qwen2.5-14B-Instruct"
+    assert "Authorization" not in transport.calls[0]["headers"]
+    audit = provider.call_audit[0]
+    assert audit.snapshot == config.snapshot
+    assert audit.snapshot_binding == "external_manifest"
+    assert audit.config_sha256 == config.config_sha256
+    assert config.config_sha256 != replace(config, snapshot="sha256:different").config_sha256
+
+
+@pytest.mark.parametrize("endpoint", ["https://provider.test/v1", "http://192.0.2.9:8000/v1"])
+def test_production_public_endpoint_requires_an_api_key(endpoint: str) -> None:
+    with pytest.raises(ValueError, match="public endpoint requires an api_key"):
+        BackboneProviderConfig(
+            "qwen3-14b", "snapshot-pin", "PRODUCTION", endpoint=endpoint, api_key=None,
+        )
+
+
+def test_response_fingerprint_binding_remains_strict_for_loopback_vllm() -> None:
+    skills = (_skill("one"),)
+    skill_id = skills[0].skill_revision_id
+    transport = _FakeTransport({
+        "model": "qwen-local",
+        "choices": [{"message": {"role": "assistant", "content": json.dumps({
+            "selected_skill_revision_id": skill_id,
+            "scores": {skill_id: 0.1},
+        })}}],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 4, "total_tokens": 9},
+    })
+    provider = OpenAICompatibleBackboneProvider(
+        BackboneProviderConfig(
+            "qwen-local", "expected-fingerprint", "PRODUCTION",
+            endpoint="http://localhost:8000/v1", api_key=None, max_output_tokens=16,
+        ),
+        ProviderBudget(1, 1_000), transport=transport,
+    )
+    with pytest.raises(BackboneProviderError, match="snapshot"):
+        provider.predict(_decision(), _state(), skills)
+
+
+@pytest.mark.parametrize("binding", ["", "manifest", "EXTERNAL_MANIFEST"])
+def test_snapshot_binding_mode_is_closed(binding: str) -> None:
+    with pytest.raises(ValueError, match="snapshot_binding"):
+        BackboneProviderConfig("model", "snapshot", "DEVELOPMENT", snapshot_binding=binding)
 
 
 @pytest.mark.parametrize("output", [

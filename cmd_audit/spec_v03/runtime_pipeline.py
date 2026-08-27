@@ -111,10 +111,14 @@ class RuntimeRouterDecisionLog:
     prediction_source: str
 
 
-def _content(spec: OperatorSpec) -> RuntimeSkillContent:
-    program = {"kind": "cmd-spec-v03-operator", "operator_id": spec.operator_id, "write_contract": spec.write_contract}
-    preconditions = ({"kind": "typed_state", "predicate": spec.precondition},)
-    rollback = {"action": spec.rollback_action}
+def _content(spec: OperatorSpec, skill: SkillRevision | None = None) -> RuntimeSkillContent:
+    """Expose a typed operator program while keeping revisions routable."""
+    program = dict(skill.program) if skill is not None else {
+        "kind": "cmd-spec-v03-operator", "operator_id": spec.operator_id,
+        "write_contract": spec.write_contract,
+    }
+    preconditions = skill.preconditions if skill is not None else ({"kind": "typed_state", "predicate": spec.precondition},)
+    rollback = dict(skill.rollback_program) if skill is not None else {"action": spec.rollback_action}
     return RuntimeSkillContent(spec.operator_id, program, preconditions, rollback, canonical_sha256({"program": program, "preconditions": preconditions, "rollback": rollback}))
 
 
@@ -154,15 +158,26 @@ def _frozen_patterns() -> tuple[tuple[str, PatternRevision], ...]:
 
 @lru_cache(maxsize=1)
 def _frozen_registry() -> RegistrySnapshot:
+    return _registry_for(_frozen_skill_library())
+
+
+def _registry_for(library: Sequence[SkillRevision]) -> RegistrySnapshot:
+    """Registry membership is revision-level, including sibling revisions."""
+    default_library = _frozen_skill_library()
+    config = {"runtime": "cmd-spec-v03-frozen-library-v1"}
+    if tuple(library) != default_library:
+        config["stable_skill_revision_ids"] = tuple(
+            sorted(skill.skill_revision_id for skill in library)
+        )
     return RegistrySnapshot.create(
         epoch=0,
         stable_pattern_revision_ids=tuple(
             pattern.pattern_revision_id for _mechanism, pattern in _frozen_patterns()
         ),
         stable_skill_revision_ids=tuple(
-            skill.skill_revision_id for skill in _frozen_skill_library()
+            skill.skill_revision_id for skill in library
         ),
-        config_sha256=canonical_sha256({"runtime": "cmd-spec-v03-frozen-library-v1"}),
+        config_sha256=canonical_sha256(config),
     )
 
 
@@ -170,35 +185,56 @@ def _pattern_for(mechanism: str) -> PatternRevision:
     return dict(_frozen_patterns())[mechanism]
 
 
+def _validated_library(skill_library: Sequence[SkillRevision] | None) -> tuple[SkillRevision, ...]:
+    """Bind every imported revision to one catalog operator without collapsing siblings."""
+    library = _frozen_skill_library() if skill_library is None else tuple(skill_library)
+    if not library:
+        raise ValueError("frozen skill library must be non-empty")
+    ids = tuple(skill.skill_revision_id for skill in library)
+    if len(set(ids)) != len(ids):
+        raise ValueError("frozen skill library has duplicate revision IDs")
+    catalog_ids = {spec.operator_id for spec in operator_catalog()}
+    for skill in library:
+        operator_id = skill.program.get("operator_id")
+        if not isinstance(operator_id, str) or operator_id not in catalog_ids:
+            raise ValueError("frozen skill program must bind a catalog operator_id")
+    return library
+
+
 def build_legal_candidates(
     state: MemoryState,
     syndrome: RuntimeSyndrome,
     eligible_skill_revision_ids: Sequence[str] | None = None,
+    *,
+    skill_library: Sequence[SkillRevision] | None = None,
 ) -> CandidateBuildLog:
     """Build model-independent legal candidates without evaluator incident data."""
     if syndrome.abstains:
         return CandidateBuildLog(state.root, None, (), (), (), (), ())
-    library = {skill.skill_id.removeprefix("runtime:"): skill for skill in _frozen_skill_library()}
+    library = _validated_library(skill_library)
+    by_operator: dict[str, list[SkillRevision]] = {}
+    for skill in library:
+        by_operator.setdefault(str(skill.program["operator_id"]), []).append(skill)
     eligible = None if eligible_skill_revision_ids is None else set(eligible_skill_revision_ids)
     if eligible is not None:
-        unknown = eligible - {skill.skill_revision_id for skill in library.values()}
+        unknown = eligible - {skill.skill_revision_id for skill in library}
         if unknown:
             raise ValueError("eligible skill mask contains an unknown frozen revision")
-    legal: list[OperatorSpec] = []
+    legal: list[tuple[OperatorSpec, SkillRevision]] = []
     rejected: list[tuple[str, str]] = []
     for spec in operator_catalog():
         if spec.operator_id == "noop_abstain":
             continue
-        skill = library[spec.operator_id]
-        if eligible is not None and skill.skill_revision_id not in eligible:
-            rejected.append((spec.operator_id, "lifecycle-ineligible"))
-            continue
         if not _is_state_legal(state, spec):
             rejected.append((spec.operator_id, "typed-state-precondition-failed"))
-        else:
-            legal.append(spec)
-    contents = tuple(_content(spec) for spec in legal)
-    skills = tuple(library[spec.operator_id] for spec in legal)
+            continue
+        for skill in by_operator.get(spec.operator_id, ()):
+            if eligible is not None and skill.skill_revision_id not in eligible:
+                rejected.append((spec.operator_id, "lifecycle-ineligible"))
+                continue
+            legal.append((spec, skill))
+    contents = tuple(_content(spec, skill) for spec, skill in legal)
+    skills = tuple(skill for _spec, skill in legal)
     evidence = tuple(
         RuntimeSkillEvidence(
             skill.skill_revision_id,
@@ -210,7 +246,7 @@ def build_legal_candidates(
     return CandidateBuildLog(
         state.root,
         syndrome.ecc_syndrome.syndrome_id,
-        tuple(spec.operator_id for spec in legal),
+        tuple(spec.operator_id for spec, _skill in legal),
         tuple(rejected),
         tuple(skill.skill_revision_id for skill in skills),
         contents,
@@ -232,26 +268,27 @@ def _to_skill(content: RuntimeSkillContent) -> SkillRevision:
 class RuntimePipeline:
     """A fail-closed serving adapter; it never accepts evaluator sidecars."""
 
-    def __init__(self, *, router_name: str = "mix_ghost", router: ObservableResidualGHOSTRouter | GHOSTEcologyRouter | None = None, model_id: str = "unconfigured") -> None:
+    def __init__(self, *, router_name: str = "mix_ghost", router: ObservableResidualGHOSTRouter | GHOSTEcologyRouter | None = None, model_id: str = "unconfigured", skill_library: Sequence[SkillRevision] | None = None) -> None:
         if router is None:
             router = ObservableResidualGHOSTRouter(allow_development_proxy=True) if router_name == "mix_ghost" else GHOSTEcologyRouter(allow_development_proxy=True)
         self.router_name = router_name
         self.router = router
         self.model_id = model_id
+        self._skill_library = _validated_library(skill_library)
 
     @property
     def frozen_skill_library(self) -> tuple[SkillRevision, ...]:
         """Read-only coordinator view of the sealed runtime skill revisions."""
-        return _frozen_skill_library()
+        return self._skill_library
 
     @property
     def frozen_registry(self) -> RegistrySnapshot:
         """Read-only coordinator view of the registry matching the library."""
-        return _frozen_registry()
+        return _registry_for(self._skill_library)
 
     def frozen_skill(self, skill_revision_id: str) -> SkillRevision:
         """Look up one frozen revision without exposing it to executor dispatch."""
-        for skill in _frozen_skill_library():
+        for skill in self._skill_library:
             if skill.skill_revision_id == skill_revision_id:
                 return skill
         raise KeyError(skill_revision_id)
@@ -266,7 +303,7 @@ class RuntimePipeline:
         eligible_skill_revision_ids: Sequence[str] | None = None,
     ) -> PipelineDecision:
         syndrome = decode_ecc_syndrome(decision, state)
-        candidates = build_legal_candidates(state, syndrome, eligible_skill_revision_ids)
+        candidates = build_legal_candidates(state, syndrome, eligible_skill_revision_ids, skill_library=self._skill_library)
         if syndrome.abstains:
             return PipelineDecision(
                 case_id=decision.case_id,
@@ -299,11 +336,11 @@ class RuntimePipeline:
                 abstained=True,
                 abstain_reason="no-typed-legal-candidate",
             )
-        library = {skill.skill_revision_id: skill for skill in _frozen_skill_library()}
+        library = {skill.skill_revision_id: skill for skill in self._skill_library}
         skills = tuple(library[skill_id] for skill_id in candidates.skill_revision_ids)
         pattern = _pattern_for(syndrome.ecc_syndrome.mechanism.value)
         responsibilities = (PatternResponsibility(pattern.pattern_revision_id, 1.0),)
-        registry = _frozen_registry()
+        registry = self.frozen_registry
         if prediction is not None and development_zero_backbone:
             raise ValueError("development zero backbone cannot replace a supplied prediction")
         if prediction is None:
@@ -363,11 +400,11 @@ class RuntimePipeline:
         if selected_id is None:
             raise RuntimeError("runtime router returned no action for non-empty candidates")
         selected_skill = library[selected_id]
-        selected_operator_id = selected_skill.skill_id.removeprefix("runtime:")
+        selected_operator_id = str(selected_skill.program["operator_id"])
         selected_content = next(
             content
-            for content in candidates.skill_content
-            if content.operator_id == selected_operator_id
+            for skill_id, content in zip(candidates.skill_revision_ids, candidates.skill_content)
+            if skill_id == selected_id
         )
         log = RuntimeRouterDecisionLog(
             "cmd-spec-v03-runtime-router-decision-v1",
