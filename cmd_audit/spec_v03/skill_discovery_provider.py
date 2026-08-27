@@ -395,9 +395,35 @@ class OpenAICompatibleSkillDiscoveryProvider:
             ),
         )
         self.budget.preflight(self._usage, estimated_input=estimated, reserved_output=self.config.max_output_tokens)
+        legal_operator_ids = tuple(spec.operator_id for spec in _legal_specs(bundle))
+        if not legal_operator_ids:
+            raise SkillDiscoveryProviderError("skill discovery requires at least one typed legal operator")
+        output_schema = {
+            "type": "object",
+            "properties": {
+                "candidates": {
+                    "type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": True,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "operator_id": {"type": "string", "enum": list(legal_operator_ids)},
+                            "skill_key": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,79}$", "maxLength": 80},
+                        },
+                        "required": ["operator_id", "skill_key"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["candidates"],
+            "additionalProperties": False,
+        }
         request: dict[str, object] = {
             "model": self.config.model_id, "temperature": float(self.config.temperature),
-            "max_tokens": self.config.max_output_tokens, "response_format": {"type": "json_object"},
+            "max_tokens": self.config.max_output_tokens,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "cmd_skill_candidates", "strict": True, "schema": output_schema},
+            },
             "messages": [
                 {"role": "system", "content": "Return only the closed JSON object requested by the user message."},
                 {"role": "user", "content": json.dumps(prompt, sort_keys=True, separators=(",", ":"), allow_nan=False)},
@@ -419,12 +445,16 @@ class OpenAICompatibleSkillDiscoveryProvider:
         message = choices[0].get("message")
         if not isinstance(message, Mapping) or not isinstance(message.get("content"), str):
             raise SkillDiscoveryProviderError("response choice must contain JSON string content")
+        if choices[0].get("finish_reason") == "length":
+            raise SkillDiscoveryProviderError(
+                "skill discovery response was truncated at max_output_tokens; JSON schema did not terminate"
+            )
         try:
             nominations = _parse_candidates(json.loads(str(message["content"])))
         except json.JSONDecodeError as error:
             raise SkillDiscoveryProviderError("response content is not JSON") from error
-        legal_operator_ids = {spec.operator_id for spec in _legal_specs(bundle)}
-        if any(operator_id not in legal_operator_ids for operator_id, _skill_key in nominations):
+        legal_operator_id_set = set(legal_operator_ids)
+        if any(operator_id not in legal_operator_id_set for operator_id, _skill_key in nominations):
             raise SkillDiscoveryProviderError("discovery candidate is outside the current typed legal mask")
         usage = _usage(response)
         if usage.output_tokens > self.config.max_output_tokens:

@@ -86,6 +86,10 @@ def test_vllm_provider_compiles_catalog_owned_typed_revisions_and_caches() -> No
     prompt = transport.calls[0]["body"]["messages"][1]["content"]  # type: ignore[index]
     assert "evaluator" not in prompt.casefold()
     assert provider.call_audit[0].snapshot_binding == "external_manifest"
+    response_format = transport.calls[0]["body"]["response_format"]
+    assert response_format["type"] == "json_schema"
+    operator_schema = response_format["json_schema"]["schema"]["properties"]["candidates"]["items"]["properties"]["operator_id"]
+    assert operator_schema["enum"] == ["process_restore"]
 
 
 def test_prompt_bounds_large_event_content_with_auditable_preview() -> None:
