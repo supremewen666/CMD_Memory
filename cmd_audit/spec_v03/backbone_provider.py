@@ -207,7 +207,13 @@ class _UrllibTransport:
         try:
             with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
                 raw = response.read()
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as error:
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")[:4096]
+            suffix = f"; response={detail}" if detail else ""
+            raise BackboneProviderError(
+                f"OpenAI-compatible transport failed: HTTP {error.code} {error.reason}{suffix}"
+            ) from error
+        except (urllib.error.URLError, TimeoutError) as error:
             raise BackboneProviderError(f"OpenAI-compatible transport failed: {error}") from error
         try:
             decoded = json.loads(raw.decode("utf-8"))
@@ -221,6 +227,28 @@ class _UrllibTransport:
 def _estimate_tokens(value: object) -> int:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return max(1, math.ceil(len(encoded) / 4))
+
+
+def _bounded_ids(values: Sequence[str], *, limit: int = 64) -> dict[str, object]:
+    rows = tuple(values)
+    return {
+        "count": len(rows), "ids": list(rows[:limit]),
+        "ids_sha256": canonical_sha256(rows), "truncated": len(rows) > limit,
+    }
+
+
+def _bounded_event(row: Mapping[str, object], *, max_content_chars: int = 1024) -> dict[str, object]:
+    content = row.get("content")
+    rendered = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    result = {key: row[key] for key in ("event_id", "timestamp", "actor_scope", "authority") if key in row}
+    result.update({
+        "content_sha256": canonical_sha256(content), "content_chars": len(rendered),
+        "content_preview": rendered[:max_content_chars], "content_truncated": len(rendered) > max_content_chars,
+    })
+    provenance = row.get("provenance")
+    if provenance is not None:
+        result["provenance_sha256"] = canonical_sha256(provenance)
+    return result
 
 
 def _state_view(state: MemoryState) -> dict[str, object]:
@@ -277,7 +305,7 @@ def build_backbone_prompt(
     priority_ids = set(affected) | set(suspects)
     priority = [row for row in event_rows if isinstance(row, Mapping) and row.get("event_id") in priority_ids]
     remaining = [row for row in event_rows if row not in priority]
-    event_sample = (priority + remaining[-max_context_events:])[:max_context_events]
+    event_sample = [_bounded_event(row) for row in (priority + remaining[-max_context_events:])[:max_context_events]]
     decision_summary = {
         "case_id": decision.case_id,
         "source_dataset_id": decision.source_dataset_id,
@@ -291,8 +319,8 @@ def build_backbone_prompt(
             "classification": "unavailable" if descriptor is None else descriptor.classification,
             "confidence": 0.0 if descriptor is None else descriptor.confidence,
             "signal_ids": [] if descriptor is None else list(descriptor.signal_ids),
-            "affected_event_ids": list(affected),
-            "suspect_event_ids": list(suspects),
+            "affected_events": _bounded_ids(affected),
+            "suspect_events": _bounded_ids(suspects),
         },
         "event_sample": event_sample,
         "event_sample_truncated": len(event_rows) > len(event_sample),
@@ -489,8 +517,8 @@ class OpenAICompatibleBackboneProvider(_BaseBackboneProvider):
         if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], Mapping):
             raise BackboneProviderError("OpenAI-compatible response must contain exactly one choice")
         message = choices[0].get("message")
-        if not isinstance(message, Mapping) or set(message) - {"role", "content", "refusal"}:
-            raise BackboneProviderError("OpenAI-compatible response message has unsupported fields")
+        if not isinstance(message, Mapping):
+            raise BackboneProviderError("OpenAI-compatible response choice must contain a message object")
         content = message.get("content")
         if not isinstance(content, str):
             raise BackboneProviderError("OpenAI-compatible response choice must contain JSON string content")

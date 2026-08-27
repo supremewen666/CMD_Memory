@@ -173,6 +173,18 @@ def test_loopback_vllm_accepts_no_key_with_external_manifest_snapshot_binding() 
     assert config.config_sha256 != replace(config, snapshot="sha256:different").config_sha256
 
 
+def test_openai_provider_accepts_vllm_message_extension_fields() -> None:
+    skills = (_skill("one"),)
+    skill_id = skills[0].skill_revision_id
+    response = _response(skills, {
+        "selected_skill_revision_id": skill_id, "scores": {skill_id: 0.4},
+    })
+    response["choices"][0]["message"]["tool_calls"] = []
+    provider, _ = _production_provider(response)
+
+    assert provider.predict(_decision(), _state(), skills).selected_skill_revision_id == skill_id
+
+
 @pytest.mark.parametrize("endpoint", ["https://provider.test/v1", "http://192.0.2.9:8000/v1"])
 def test_production_public_endpoint_requires_an_api_key(endpoint: str) -> None:
     with pytest.raises(ValueError, match="public endpoint requires an api_key"):

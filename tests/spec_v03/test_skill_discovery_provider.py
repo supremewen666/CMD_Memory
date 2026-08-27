@@ -11,7 +11,7 @@ from cmd_audit.spec_v03.repair_stream import PublicEpisode, PublicEvent, PublicQ
 from cmd_audit.spec_v03.runtime_bundle import deserialize, serialize
 from cmd_audit.spec_v03.skill_discovery_provider import (
     DiscoveryBudget, OpenAICompatibleSkillDiscoveryProvider, SkillDiscoveryConfig,
-    SkillDiscoveryProviderError, load_skill_library_mapping, serialize_skill_library,
+    SkillDiscoveryProviderError, _bounded_event, _bounded_ids, load_skill_library_mapping, serialize_skill_library,
 )
 
 
@@ -86,6 +86,29 @@ def test_vllm_provider_compiles_catalog_owned_typed_revisions_and_caches() -> No
     prompt = transport.calls[0]["body"]["messages"][1]["content"]  # type: ignore[index]
     assert "evaluator" not in prompt.casefold()
     assert provider.call_audit[0].snapshot_binding == "external_manifest"
+
+
+def test_prompt_bounds_large_event_content_with_auditable_preview() -> None:
+    event = _bounded_event({"event_id": "large", "content": {"memory": "x" * 100_000}})
+
+    assert event["content_truncated"] is True
+    assert len(event["content_preview"]) == 1024
+    assert event["content_chars"] > 100_000
+    assert len(event["content_sha256"]) == 64
+
+    ids = _bounded_ids(tuple(f"event-{index}" for index in range(100)))
+    assert ids["count"] == 100
+    assert len(ids["ids"]) == 64
+    assert ids["truncated"] is True
+
+
+def test_provider_accepts_vllm_message_extension_fields() -> None:
+    bundle = _bundle()
+    response = _response({"candidates": [{"operator_id": "process_restore", "skill_key": "x"}]})
+    response["choices"][0]["message"]["tool_calls"] = []
+    provider, _ = _provider(response)
+
+    assert provider.candidates(bundle, event_index=0, failure=_failure(bundle))
 
 
 @pytest.mark.parametrize("content", [

@@ -160,7 +160,13 @@ class _UrllibTransport:
         try:
             with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
                 raw = response.read()
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as error:
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")[:4096]
+            suffix = f"; response={detail}" if detail else ""
+            raise SkillDiscoveryProviderError(
+                f"OpenAI-compatible transport failed: HTTP {error.code} {error.reason}{suffix}"
+            ) from error
+        except (urllib.error.URLError, TimeoutError) as error:
             raise SkillDiscoveryProviderError(f"OpenAI-compatible transport failed: {error}") from error
         try:
             value = json.loads(raw.decode("utf-8"))
@@ -213,6 +219,32 @@ def _legal_specs(bundle: RuntimeBundle) -> tuple[OperatorSpec, ...]:
     )
 
 
+def _bounded_event(row: Mapping[str, object], *, max_content_chars: int = 1024) -> dict[str, object]:
+    content = row.get("content")
+    rendered = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    result = {key: row[key] for key in ("event_id", "timestamp", "actor_scope", "authority") if key in row}
+    result.update({
+        "content_sha256": canonical_sha256(content),
+        "content_chars": len(rendered),
+        "content_preview": rendered[:max_content_chars],
+        "content_truncated": len(rendered) > max_content_chars,
+    })
+    provenance = row.get("provenance")
+    if provenance is not None:
+        result["provenance_sha256"] = canonical_sha256(provenance)
+    return result
+
+
+def _bounded_ids(values: Sequence[str], *, limit: int = 64) -> dict[str, object]:
+    rows = tuple(values)
+    return {
+        "count": len(rows),
+        "ids": list(rows[:limit]),
+        "ids_sha256": canonical_sha256(rows),
+        "truncated": len(rows) > limit,
+    }
+
+
 def build_skill_discovery_prompt(bundle: RuntimeBundle, *, event_index: int, failure: FailureDeposit) -> dict[str, object]:
     """Return the complete serving-visible discovery prompt, deterministically."""
     if event_index < 0 or failure.case_id != bundle.case_id:
@@ -223,7 +255,7 @@ def build_skill_discovery_prompt(bundle: RuntimeBundle, *, event_index: int, fai
     events = raw_events if isinstance(raw_events, list) else []
     priority = [row for row in events if isinstance(row, Mapping) and row.get("event_id") in priority_ids]
     remaining = [row for row in events if row not in priority]
-    event_sample = (priority + remaining[-32:])[:32]
+    event_sample = [_bounded_event(row) for row in (priority + remaining[-32:])[:32]]
     state = bundle.memory_state
     return {
         "task": "nominate one or more legal typed repair operators for a runtime-visible memory failure",
@@ -243,8 +275,8 @@ def build_skill_discovery_prompt(bundle: RuntimeBundle, *, event_index: int, fai
             "quarantine_size": len(state.quarantine_set),
             "structural_classification": descriptor.classification,
             "signal_ids": list(descriptor.signal_ids),
-            "affected_event_ids": list(descriptor.root.affected_projection_ids),
-            "suspect_event_ids": list(descriptor.root.suspect_event_ids),
+            "affected_events": _bounded_ids(descriptor.root.affected_projection_ids),
+            "suspect_events": _bounded_ids(descriptor.root.suspect_event_ids),
             "event_sample": event_sample,
             "event_sample_truncated": len(events) > len(event_sample),
         },
@@ -367,8 +399,8 @@ class OpenAICompatibleSkillDiscoveryProvider:
         if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], Mapping):
             raise SkillDiscoveryProviderError("response must contain exactly one choice")
         message = choices[0].get("message")
-        if not isinstance(message, Mapping) or set(message) - {"role", "content", "refusal"} or not isinstance(message.get("content"), str):
-            raise SkillDiscoveryProviderError("response choice must contain only a JSON string message")
+        if not isinstance(message, Mapping) or not isinstance(message.get("content"), str):
+            raise SkillDiscoveryProviderError("response choice must contain JSON string content")
         try:
             nominations = _parse_candidates(json.loads(str(message["content"])))
         except json.JSONDecodeError as error:
