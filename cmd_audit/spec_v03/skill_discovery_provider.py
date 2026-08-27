@@ -387,6 +387,10 @@ class OpenAICompatibleSkillDiscoveryProvider:
         cached = self._cache.get(key)
         if cached is not None:
             return cached
+        legal_operator_ids = tuple(spec.operator_id for spec in _legal_specs(bundle))
+        if not legal_operator_ids:
+            self._cache[key] = ()
+            return ()
         prompt = build_skill_discovery_prompt(bundle, event_index=event_index, failure=failure)
         estimated = max(
             1,
@@ -395,9 +399,6 @@ class OpenAICompatibleSkillDiscoveryProvider:
             ),
         )
         self.budget.preflight(self._usage, estimated_input=estimated, reserved_output=self.config.max_output_tokens)
-        legal_operator_ids = tuple(spec.operator_id for spec in _legal_specs(bundle))
-        if not legal_operator_ids:
-            raise SkillDiscoveryProviderError("skill discovery requires at least one typed legal operator")
         output_schema = {
             "type": "object",
             "properties": {

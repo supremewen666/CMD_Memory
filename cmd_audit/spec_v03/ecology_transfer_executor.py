@@ -26,6 +26,7 @@ from .prequential_executor import RuntimeOrderManifest
 from .repair_stream import MemoryState, execute_operator, operator_catalog
 from .runtime_bundle import RuntimeBundle
 from .syndrome_runtime import audit_structural_telemetry
+from .system_runtime import _locality
 
 
 STAGE6_ARMS = (
@@ -149,10 +150,6 @@ def _typed_replay_gate(candidate: SkillRevision, bundle: RuntimeBundle) -> None:
     after = execute_operator(before, spec)
     if after == before or after.immutable_source_log != before.immutable_source_log or after.audit_log != before.audit_log:
         raise ValueError("candidate fails safety/locality shadow replay")
-    changed = sum(
-        getattr(before, field) != getattr(after, field)
-        for field in ("projection_order", "projection_index", "scope_projection", "cache_event_ids", "supersession_edges", "quarantine_set")
-    )
     after_observation = dict(bundle.decision_view.observation)
     current = dict(after_observation["current_state"])
     current["state_root"] = after.root
@@ -168,7 +165,7 @@ def _typed_replay_gate(candidate: SkillRevision, bundle: RuntimeBundle) -> None:
         provenance=bundle.decision_view.provenance,
         unsupported_fields=bundle.decision_view.unsupported_fields,
     )
-    if changed > spec.locality_bound or audit_structural_telemetry(after_decision, after).classification != "clean":
+    if _locality(before, after, spec) > spec.locality_bound or audit_structural_telemetry(after_decision, after).classification != "clean":
         raise ValueError("candidate fails safety/locality replay gate")
 
 

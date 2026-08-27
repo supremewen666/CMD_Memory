@@ -15,7 +15,7 @@ from cmd_audit.spec_v03.skill_discovery_provider import (
 )
 
 
-def _bundle():
+def _bundle(template: str = "drop"):
     def event(event_id: str, ordinal: int, payload: dict[str, object]) -> PublicEvent:
         digest = canonical_sha256(payload)
         return PublicEvent(event_id, f"fixture:{event_id}", ordinal, None, "user", payload, digest, digest)
@@ -26,7 +26,7 @@ def _bundle():
         (PublicQuery("fixture:q", "What is current?", "beta", (), "fixture:q"),),
         ("process", "state", "poison"), {"fixture": "skill-discovery"},
     )
-    clean = compile_repair_case(episode, build_intervention(episode, "drop", seed=3))
+    clean = compile_repair_case(episode, build_intervention(episode, template, seed=3))
     return deserialize(serialize(
         case_id=clean.case_id, source_dataset_id=clean.decision_view.source_dataset_id,
         source_episode_id=clean.decision_view.source_episode_id, family_id=clean.decision_view.family_id,
@@ -113,6 +113,18 @@ def test_provider_accepts_vllm_message_extension_fields() -> None:
     provider, _ = _provider(response)
 
     assert provider.candidates(bundle, event_index=0, failure=_failure(bundle))
+
+
+def test_clean_case_returns_cached_empty_candidates_without_model_call() -> None:
+    bundle = _bundle("clean")
+    provider, transport = _provider(_response({"candidates": [
+        {"operator_id": "process_restore", "skill_key": "must-not-run"},
+    ]}))
+
+    assert provider.candidates(bundle, event_index=0, failure=_failure(bundle)) == ()
+    assert provider.candidates(bundle, event_index=0, failure=_failure(bundle)) == ()
+    assert transport.calls == []
+    assert provider.usage.request_count == 0
 
 
 @pytest.mark.parametrize("content", [
