@@ -17,6 +17,7 @@ import random
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from .contracts import DecisionView, EvaluatorOnly, canonical_sha256
+from .repair_utility import score_repair_utility
 
 
 STREAM_SCHEMA = "cmd-spec-v03-repair-stream-v1"
@@ -477,18 +478,27 @@ class OperatorSpec:
     safety_contract: str
     locality_bound: int
     rollback_action: str
+    operator_family: str = ""
+    strategy_id: str = "targeted"
+    expected_cost: float = 0.0
+    read_set: tuple[str, ...] = ()
+    write_set: tuple[str, ...] = ()
+    repair_action: str = ""
 
 
 def operator_catalog() -> tuple[OperatorSpec, ...]:
     return (
-        OperatorSpec("noop_abstain", ("clean", "process_fault", "state_drift", "poison"), ALL_TEMPLATES, "always", "none", "none", "preserve before root", "no mutation", 0, "no mutation"),
-        OperatorSpec("process_restore", ("process_fault",), ("drop", "duplicate", "truncate"), "process target exists", "target and source event stream", "projection", "exact clean root", "preserve source payloads", 2, "restore before root"),
-        OperatorSpec("process_replay_order", ("process_fault",), ("reorder",), "typed: swapped neighboring source events", "event order", "projection order", "exact clean root", "preserve source payloads", 2, "restore before root"),
-        OperatorSpec("process_rebuild_index", ("process_fault",), ("wrong_index",), "index target exists", "event index", "index projection", "exact clean root", "preserve source payloads", 2, "restore before root"),
-        OperatorSpec("process_scope_repair", ("process_fault",), ("wrong_scope",), "scope target exists", "actor scope", "scope projection", "exact clean root", "preserve source payloads", 1, "restore before root"),
-        OperatorSpec("process_cache_invalidate", ("process_fault",), ("stale_cache",), "cache synthetic event exists", "cache entry", "cache projection", "exact clean root", "remove stale cache only", 1, "restore before root"),
-        OperatorSpec("state_supersede_lineage", ("state_drift",), STATE_TEMPLATES, "source-derived lineage exists", "source lineage", "state projection", "exact clean root", "remove only synthetic invalidation", 2, "restore before root"),
-        OperatorSpec("poison_quarantine_audit", ("poison",), POISON_TEMPLATES, "untrusted synthetic event exists", "untrusted event", "quarantine projection", "exact clean root", "remove untrusted event and retain audit", 1, "restore before root"),
+        OperatorSpec("noop_abstain", ("clean", "process_fault", "state_drift", "poison"), ALL_TEMPLATES, "always", "none", "none", "preserve before root", "no mutation", 0, "no mutation", "noop", "abstain", read_set=(), write_set=(), repair_action="abstain"),
+        OperatorSpec("process_restore", ("process_fault",), ("drop", "duplicate", "truncate"), "process target exists", "target and source event stream", "projection", "exact clean root", "preserve source payloads", 2, "restore before root", "process_restore", "targeted", 0.10, ("immutable_source_log", "projection_order"), ("projection_order", "projection_index"), "restore_projection_segment"),
+        OperatorSpec("process_replay_order", ("process_fault",), ("reorder",), "typed: swapped neighboring source events", "event order", "projection order", "exact clean root", "preserve source payloads", 2, "restore before root", "process_restore", "targeted", 0.10, ("immutable_source_log", "projection_order"), ("projection_order", "projection_index"), "replay_local_order"),
+        OperatorSpec("process_rebuild_index", ("process_fault",), ("wrong_index",), "index target exists", "event index", "index projection", "exact clean root", "preserve source payloads", 1, "restore before root", "process_restore", "targeted", 0.05, ("projection_order", "projection_index"), ("projection_index",), "rebuild_index_only"),
+        OperatorSpec("process_scope_repair", ("process_fault",), ("wrong_scope",), "scope target exists", "actor scope", "scope projection", "exact clean root", "preserve source payloads", 1, "restore before root", "process_restore", "targeted", 0.05, ("immutable_source_log", "scope_projection"), ("scope_projection",), "repair_target_scope"),
+        OperatorSpec("process_cache_invalidate", ("process_fault",), ("stale_cache",), "cache synthetic event exists", "cache entry", "cache projection", "exact clean root", "remove stale cache only", 1, "restore before root", "process_restore", "targeted", 0.05, ("cache_event_ids",), ("cache_event_ids",), "invalidate_stale_cache"),
+        OperatorSpec("process_projection_rebuild", ("process_fault",), PROCESS_TEMPLATES, "materialized process projection differs from immutable source", "source event stream and materialized projections", "projection, index, scope, cache", "exact clean root", "preserve source payloads", 4, "restore before root", "process_restore", "rebuild", 0.70, ("immutable_source_log",), ("projection_order", "projection_index", "scope_projection", "cache_event_ids"), "rebuild_process_projection"),
+        OperatorSpec("state_supersede_lineage", ("state_drift",), STATE_TEMPLATES, "source-derived lineage exists", "source lineage", "state projection", "exact clean root", "remove only synthetic invalidation", 2, "restore before root", "state_supersede", "targeted", 0.15, ("immutable_source_log", "audit_log", "projection_order"), ("projection_order", "projection_index", "supersession_edges"), "supersede_target_lineage"),
+        OperatorSpec("state_supersede_rebuild", ("state_drift",), STATE_TEMPLATES, "source-derived lineage exists", "source lineage and materialized state", "state projection and lineage", "exact clean root", "remove only synthetic invalidation", 3, "restore before root", "state_supersede", "cascade", 0.65, ("immutable_source_log", "audit_log", "projection_order", "supersession_edges"), ("projection_order", "projection_index", "supersession_edges"), "cascade_supersession_rebuild"),
+        OperatorSpec("poison_quarantine_audit", ("poison",), POISON_TEMPLATES, "untrusted synthetic event exists", "untrusted event", "quarantine projection", "exact clean root", "remove untrusted event and retain audit", 1, "restore before root", "poison_quarantine", "quarantine_only", 0.15, ("audit_log", "projection_order"), ("projection_order", "projection_index", "quarantine_set"), "quarantine_untrusted_event"),
+        OperatorSpec("poison_quarantine_rebuild", ("poison",), POISON_TEMPLATES, "untrusted synthetic event exists", "untrusted event and materialized projections", "quarantine projection and cache", "exact clean root", "remove untrusted event and retain audit", 3, "restore before root", "poison_quarantine", "quarantine_and_rebuild", 0.60, ("audit_log", "projection_order", "cache_event_ids"), ("projection_order", "projection_index", "cache_event_ids", "quarantine_set"), "quarantine_and_rebuild_projection"),
     )
 
 
@@ -573,7 +583,7 @@ def _replace_state(
 
 def _typed_precondition(spec: OperatorSpec, state: MemoryState) -> bool:
     """Runtime-only predicate over the materialized state, without sealed truth."""
-    if spec.operator_id == "noop_abstain":
+    if spec.operator_family == "noop":
         return True
     source_ids = _source_ids(state)
     order = state.projection_order
@@ -595,9 +605,15 @@ def _typed_precondition(spec: OperatorSpec, state: MemoryState) -> bool:
         ) == 1
     if spec.operator_id == "process_cache_invalidate":
         return bool(state.cache_event_ids)
-    if spec.operator_id == "state_supersede_lineage":
+    if spec.operator_family == "process_restore" and spec.strategy_id == "rebuild":
+        return any(
+            _typed_precondition(candidate, state)
+            for candidate in operator_catalog()
+            if candidate.operator_family == "process_restore" and candidate.strategy_id == "targeted"
+        )
+    if spec.operator_family == "state_supersede":
         return _state_lineage_pair(state) is not None
-    if spec.operator_id == "poison_quarantine_audit":
+    if spec.operator_family == "poison_quarantine":
         order_ids, quarantined = set(order), set(state.quarantine_set)
         return sum(
             event.actor_scope == "untrusted" and event.event_id in order_ids and event.event_id not in quarantined
@@ -632,7 +648,42 @@ def expected_repaired_state(clean: MemoryState, corrupt: MemoryState, interventi
     return clean
 
 
-def _locality(case: RepairCase, before: MemoryState, after: MemoryState) -> int:
+_MUTABLE_SURFACES = (
+    "projection_order", "projection_index", "scope_projection",
+    "cache_event_ids", "supersession_edges", "quarantine_set",
+)
+
+
+def changed_operator_surfaces(before: MemoryState, after: MemoryState) -> frozenset[str]:
+    return frozenset(
+        name for name in _MUTABLE_SURFACES
+        if getattr(before, name) != getattr(after, name)
+    )
+
+
+def operator_locality(before: MemoryState, after: MemoryState, spec: OperatorSpec) -> int:
+    """Score the declared logical repair surface and fail closed on spillover."""
+    changed = changed_operator_surfaces(before, after)
+    if not changed:
+        return 0
+    if not changed <= set(spec.write_set):
+        return spec.locality_bound + 1
+    if spec.strategy_id in {"rebuild", "cascade", "quarantine_and_rebuild"}:
+        return spec.locality_bound
+    if spec.operator_family == "state_supersede":
+        return 2
+    return 1
+
+
+def operator_collateral_cost(before: MemoryState, after: MemoryState, spec: OperatorSpec) -> float:
+    changed = changed_operator_surfaces(before, after)
+    if not changed:
+        return 0.0
+    spillover = changed - set(spec.write_set)
+    return min(1.0, len(spillover) / len(_MUTABLE_SURFACES))
+
+
+def _oracle_locality(case: RepairCase, before: MemoryState, after: MemoryState) -> int:
     """Count the repair surface, not denormalized projection fallout.
 
     A truncation may make many entries temporarily absent from a materialized
@@ -662,43 +713,23 @@ def _state_lineage_pair(state: MemoryState) -> tuple[str, str] | None:
     return old[0], updates[0].event_id
 
 
-def execute_operator(state: MemoryState, spec: OperatorSpec) -> MemoryState:
-    """Pure runtime repair: only corrupt materialized state plus operator contract."""
-    before = state.clone()
-    if spec.operator_id == "noop_abstain":
-        return before
+def _repair_process_projection(before: MemoryState, *, operator_id: str, strategy_id: str) -> MemoryState:
+    """Repair process projections from visible state with local or rebuild scope."""
     source_ids = _source_ids(before)
-    if spec.operator_id == "process_restore":
-        order = list(before.projection_order)
-        order_counts = Counter(order)
-        missing = [event_id for event_id in source_ids if order_counts[event_id] == 0]
-        duplicated = [event_id for event_id in source_ids if order_counts[event_id] > 1]
-        if len(missing) == 1 and len(order) == len(source_ids) - 1:
-            order.insert(source_ids.index(missing[0]), missing[0])
-        elif len(duplicated) == 1 and len(order) == len(source_ids) + 1:
-            order.pop(max(index for index, event_id in enumerate(order) if event_id == duplicated[0]))
-        elif len(order) < len(source_ids) and tuple(order) == source_ids[:len(order)]:
-            order.extend(source_ids[len(order):])
-        else:
+    if strategy_id == "rebuild":
+        scopes = tuple((event.event_id, event.actor_scope) for event in before.immutable_source_log)
+        return _replace_state(
+            before,
+            projection_order=source_ids,
+            projection_index=_reindex(source_ids),
+            scope_projection=scopes,
+            cache_event_ids=(),
+        )
+    if operator_id == "process_rebuild_index":
+        if before.projection_order != source_ids or before.projection_index == _reindex(source_ids):
             return before
-        repaired_order = tuple(order)
-        return _replace_state(before, projection_order=repaired_order, projection_index=_reindex(repaired_order))
-    if spec.operator_id == "process_replay_order":
-        order = list(before.projection_order)
-        if len(order) != len(source_ids):
-            return before
-        mismatches = [index for index, pair in enumerate(zip(order, source_ids)) if pair[0] != pair[1]]
-        if len(mismatches) == 2:
-            left, right = mismatches
-            adjacent = right == left + 1 or (left == 0 and right == len(order) - 1)
-            if adjacent and order[left] == source_ids[right] and order[right] == source_ids[left]:
-                order[left], order[right] = order[right], order[left]
-                repaired_order = tuple(order)
-                return _replace_state(before, projection_order=repaired_order, projection_index=_reindex(repaired_order))
-        return before
-    if spec.operator_id == "process_rebuild_index":
         return _replace_state(before, projection_index=_reindex(before.projection_order))
-    if spec.operator_id == "process_scope_repair":
+    if operator_id == "process_scope_repair":
         scopes = dict(before.scope_projection)
         mismatches = [
             event.event_id for event in before.immutable_source_log
@@ -709,26 +740,80 @@ def execute_operator(state: MemoryState, spec: OperatorSpec) -> MemoryState:
         target = mismatches[0]
         scopes[target] = _source_scope(before, target)
         return _replace_state(before, scope_projection=tuple((event_id, scopes[event_id]) for event_id in before.projection_order))
-    if spec.operator_id == "process_cache_invalidate":
+    if operator_id == "process_cache_invalidate":
+        if not before.cache_event_ids:
+            return before
         return _replace_state(before, cache_event_ids=())
-    if spec.operator_id == "state_supersede_lineage":
-        lineage = _state_lineage_pair(before)
-        if lineage is None:
+    order = list(before.projection_order)
+    if operator_id == "process_replay_order":
+        if len(order) != len(source_ids):
             return before
-        old, update = lineage
-        order = tuple(event_id for event_id in before.projection_order if event_id != old)
-        edges = before.supersession_edges + ((old, update),)
-        return _replace_state(before, projection_order=order, projection_index=_reindex(order), supersession_edges=edges)
-    if spec.operator_id == "poison_quarantine_audit":
-        injected = [
-            event.event_id for event in before.audit_log
-            if event.actor_scope == "untrusted" and event.event_id in before.projection_order
-        ]
-        if len(injected) != 1:
+        mismatches = [index for index, pair in enumerate(zip(order, source_ids)) if pair[0] != pair[1]]
+        if len(mismatches) != 2:
             return before
-        order = tuple(event_id for event_id in before.projection_order if event_id != injected[0])
-        quarantine = tuple(sorted(set(before.quarantine_set + (injected[0],))))
-        return _replace_state(before, projection_order=order, projection_index=_reindex(order), quarantine_set=quarantine)
+        left, right = mismatches
+        adjacent = right == left + 1 or (left == 0 and right == len(order) - 1)
+        if not (adjacent and order[left] == source_ids[right] and order[right] == source_ids[left]):
+            return before
+        order[left], order[right] = order[right], order[left]
+        repaired = tuple(order)
+        return _replace_state(before, projection_order=repaired, projection_index=_reindex(repaired))
+    if operator_id != "process_restore":
+        return before
+    counts = Counter(order)
+    missing = [event_id for event_id in source_ids if counts[event_id] == 0]
+    duplicated = [event_id for event_id in source_ids if counts[event_id] > 1]
+    if len(missing) == 1 and len(order) == len(source_ids) - 1:
+        order.insert(source_ids.index(missing[0]), missing[0])
+    elif len(duplicated) == 1 and len(order) == len(source_ids) + 1:
+        order.pop(max(index for index, event_id in enumerate(order) if event_id == duplicated[0]))
+    elif len(order) < len(source_ids) and tuple(order) == source_ids[:len(order)]:
+        order.extend(source_ids[len(order):])
+    elif len(order) == len(source_ids) and set(order) == set(source_ids):
+        order = list(source_ids)
+    else:
+        return before
+    repaired = tuple(order)
+    return _replace_state(before, projection_order=repaired, projection_index=_reindex(repaired))
+
+
+def _repair_state_lineage(before: MemoryState, *, strategy_id: str) -> MemoryState:
+    lineage = _state_lineage_pair(before)
+    if lineage is None:
+        return before
+    old, update = lineage
+    order = tuple(event_id for event_id in before.projection_order if event_id != old)
+    edges = before.supersession_edges + ((old, update),)
+    if strategy_id == "cascade":
+        edges = tuple(dict.fromkeys(edges))
+    return _replace_state(before, projection_order=order, projection_index=_reindex(order), supersession_edges=edges)
+
+
+def _repair_poison_quarantine(before: MemoryState, *, strategy_id: str) -> MemoryState:
+    injected = [
+        event.event_id for event in before.audit_log
+        if event.actor_scope == "untrusted" and event.event_id in before.projection_order
+    ]
+    if len(injected) != 1:
+        return before
+    order = tuple(event_id for event_id in before.projection_order if event_id != injected[0])
+    quarantine = tuple(sorted(set(before.quarantine_set + (injected[0],))))
+    if strategy_id == "quarantine_and_rebuild":
+        return _replace_state(before, projection_order=order, projection_index=_reindex(order), cache_event_ids=(), quarantine_set=quarantine)
+    return _replace_state(before, projection_order=order, projection_index=_reindex(order), quarantine_set=quarantine)
+
+
+def execute_operator(state: MemoryState, spec: OperatorSpec) -> MemoryState:
+    """Pure runtime repair: only corrupt materialized state plus operator contract."""
+    before = state.clone()
+    if spec.operator_family == "noop":
+        return before
+    if spec.operator_family == "process_restore":
+        return _repair_process_projection(before, operator_id=spec.operator_id, strategy_id=spec.strategy_id)
+    if spec.operator_family == "state_supersede":
+        return _repair_state_lineage(before, strategy_id=spec.strategy_id)
+    if spec.operator_family == "poison_quarantine":
+        return _repair_poison_quarantine(before, strategy_id=spec.strategy_id)
     return before
 
 
@@ -745,20 +830,31 @@ def execute_shadow(case: RepairCase, spec: OperatorSpec) -> ShadowOutcome:
         return ShadowOutcome(case.case_id, spec.operator_id, False, reason, False, False, False, False, 0, False, False, before_root, before_root, -1.0)
     after = execute_copy_on_write(case, spec)
     expected = expected_repaired_state(case.clean_state, before, case.intervention)
-    locality = _locality(case, before, after)
+    locality = operator_locality(before, after, spec)
+    collateral = operator_collateral_cost(before, after, spec)
     root_corrected = after.root == expected.root
     invariants = root_corrected and after.immutable_source_log == before.immutable_source_log
     safety = (case.intervention.incident_type != "poison" or bool(after.quarantine_set)) and all(event in after.audit_log for event in before.audit_log)
     committed = root_corrected and invariants and safety and locality <= spec.locality_bound
     final = after if committed else before
-    return ShadowOutcome(case.case_id, spec.operator_id, True, None, True, root_corrected, invariants, safety, locality, committed, not committed, before_root, final.root, 1.0 if committed else -1.0)
+    utility = score_repair_utility(
+        committed=committed,
+        safety_passed=safety,
+        invariant_passed=invariants,
+        locality_cost=locality,
+        locality_bound=spec.locality_bound,
+        collateral_cost=collateral,
+        expected_cost=spec.expected_cost,
+        rolled_back=not committed,
+    )
+    return ShadowOutcome(case.case_id, spec.operator_id, True, None, True, root_corrected, invariants, safety, locality, committed, not committed, before_root, final.root, utility)
 
 
 def _runtime_compatible_ids(case: RepairCase) -> tuple[str, ...]:
     return tuple(
         spec.operator_id
         for spec in operator_catalog()
-        if _typed_precondition(spec, case.corrupt_state)
+        if spec.operator_family != "noop" and _typed_precondition(spec, case.corrupt_state)
     )
 
 
@@ -766,12 +862,12 @@ def _candidate_available_ids(case: RepairCase, library_ids: tuple[str, ...]) -> 
     """Deterministic retrieval gate over runtime-visible state, never evaluator truth."""
     if not library_ids:
         return ()
-    digest = canonical_sha256({
-        "case_id": case.decision_view.case_id,
-        "state_root": case.decision_view.observation["current_state"]["state_root"],
-        "catalog": "cmd-spec-v03-typed-candidate-v1",
-    })
-    return (library_ids[int(digest[:8], 16) % len(library_ids)],)
+    # The candidate-set oracle models a minimal retrieved library.  Profile
+    # metadata is public catalog data, so this remains independent of sealed
+    # outcomes while preferring the least invasive compatible seed program.
+    by_id = {spec.operator_id: spec for spec in operator_catalog()}
+    selected = min(library_ids, key=lambda operator_id: (by_id[operator_id].expected_cost, operator_id))
+    return (selected,)
 
 
 def _mechanism_oracle_id(case: RepairCase) -> str:
@@ -786,7 +882,7 @@ def _evaluate_mechanism_oracle(case: RepairCase) -> EvaluatorOracleTransform:
         True,
         expected.immutable_source_log == case.corrupt_state.immutable_source_log,
         case.intervention.incident_type != "poison" or bool(expected.quarantine_set),
-        _locality(case, case.corrupt_state, expected),
+        _oracle_locality(case, case.corrupt_state, expected),
         expected.root,
         2.0,
     )

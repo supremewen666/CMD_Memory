@@ -84,6 +84,8 @@ class Stage59Capabilities:
     source_library: tuple[SkillRevision, ...] = ()
     source_residual_snapshot: Mapping[str, object] | None = None
     target_prefix_snapshot: Mapping[str, object] | None = None
+    initial_router_snapshots: Mapping[str, Mapping[str, object]] | None = None
+    adaptation_prefix_ratio: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -153,7 +155,11 @@ class Stage59Runner:
                 unsupported.add(reason)
             else:
                 stage5 = Stage5Executor(
-                    Stage5ExecutionConfig(self.config.run_id + ":stage5", self.config.model_id, self.config.seed),
+                    Stage5ExecutionConfig(
+                        self.config.run_id + ":stage5", self.config.model_id, self.config.seed,
+                        initial_router_snapshots=capabilities.initial_router_snapshots,
+                        adaptation_prefix_ratio=capabilities.adaptation_prefix_ratio,
+                    ),
                     capabilities.backbone_provider,
                     capabilities.feedback_provider,
                     sealed_oracle_provider=capabilities.stage5_oracle,

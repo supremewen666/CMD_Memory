@@ -138,7 +138,16 @@ def _typed_catalog_spec(candidate: SkillRevision):
     if not isinstance(operator_id, str):
         raise ValueError("candidate typed program lacks operator_id")
     spec = next((row for row in operator_catalog() if row.operator_id == operator_id), None)
-    if spec is None or program.get("write_contract") != spec.write_contract:
+    profile = (
+        program.get("operator_family"),
+        program.get("strategy_id"),
+        tuple(program.get("write_set", spec.write_set)) if spec is not None else (),
+        program.get("repair_action", spec.repair_action) if spec is not None else None,
+    )
+    expected = None if spec is None else (
+        spec.operator_family, spec.strategy_id, spec.write_set, spec.repair_action,
+    )
+    if spec is None or program.get("write_contract") != spec.write_contract or profile != expected:
         raise ValueError("candidate operator program does not match the typed catalog")
     return spec
 

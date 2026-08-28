@@ -27,7 +27,15 @@ from .backbone_provider import BackboneProvider, ResourceUsage
 from .contracts import DecisionView, canonical_sha256
 from .experiment_matrix import STAGE5_VARIANTS
 from .prequential_executor import RuntimeOrderManifest
-from .repair_stream import MemoryState, OperatorSpec, execute_operator, operator_catalog
+from .repair_stream import (
+    MemoryState,
+    OperatorSpec,
+    execute_operator,
+    operator_catalog,
+    operator_collateral_cost,
+    operator_locality,
+)
+from .repair_utility import score_repair_utility
 from .router_stage5 import BackbonePrediction
 from .runtime_bundle import RuntimeBundle
 from .runtime_pipeline import RuntimePipeline, build_legal_candidates
@@ -36,6 +44,8 @@ from .syndrome_runtime import audit_structural_telemetry, decode_ecc_syndrome
 
 STAGE5_EXECUTOR_SCHEMA = "cmd-spec-v03-stage5-executor-v1"
 _ADAPTIVE_ARMS = frozenset({"best_global", "global_thompson", "niche_thompson", "contextual_bandit"})
+_ROUTER_ARMS = frozenset({"mix_ghost", "ghost_hierarchy"})
+ROUTER_SNAPSHOT_BUNDLE_SCHEMA = "cmd-spec-v03-stage5-router-snapshots-v1"
 
 
 @dataclass(frozen=True)
@@ -80,6 +90,7 @@ class DelayedFeedbackProvider(Protocol):
         selected_at_event_index: int,
         observed_after_event_index: int,
         case: RuntimeBundle,
+        regime: str = "stationary",
     ) -> Stage5Receipt: ...
 
 
@@ -117,31 +128,6 @@ class StructuralDevelopmentStage5FeedbackProvider:
         return next((spec for spec in operator_catalog() if spec.operator_id == operator_id), None)
 
     @staticmethod
-    def _locality(before: MemoryState, after: MemoryState, spec: OperatorSpec) -> int:
-        """Count the named mutable surfaces; source/audit logs are invariants."""
-        changed = {
-            name for name, different in (
-                ("projection_order", before.projection_order != after.projection_order),
-                ("projection_index", before.projection_index != after.projection_index),
-                ("scope_projection", before.scope_projection != after.scope_projection),
-                ("cache_event_ids", before.cache_event_ids != after.cache_event_ids),
-                ("supersession_edges", before.supersession_edges != after.supersession_edges),
-                ("quarantine_set", before.quarantine_set != after.quarantine_set),
-            ) if different
-        }
-        contracts = {
-            "process_restore": ({"projection_order", "projection_index"}, 2),
-            "process_replay_order": ({"projection_order", "projection_index"}, 2),
-            "process_rebuild_index": ({"projection_index"}, 1),
-            "process_scope_repair": ({"scope_projection"}, 1),
-            "process_cache_invalidate": ({"cache_event_ids"}, 1),
-            "state_supersede_lineage": ({"projection_order", "projection_index", "supersession_edges"}, 2),
-            "poison_quarantine_audit": ({"projection_order", "projection_index", "quarantine_set"}, 1),
-        }
-        allowed, cost = contracts.get(spec.operator_id, (set(), spec.locality_bound + 1))
-        return cost if changed <= allowed else spec.locality_bound + 1
-
-    @staticmethod
     def _rebased_decision(decision: DecisionView, state: MemoryState) -> DecisionView:
         """Bind the public observation to the shadow state before telemetry."""
         observation = dict(decision.observation)
@@ -166,6 +152,7 @@ class StructuralDevelopmentStage5FeedbackProvider:
         selected_at_event_index: int,
         observed_after_event_index: int,
         case: RuntimeBundle,
+        regime: str = "stationary",
     ) -> Stage5Receipt:
         """Replay only the action that was actually selected at route time."""
         before = case.memory_state
@@ -193,10 +180,16 @@ class StructuralDevelopmentStage5FeedbackProvider:
         )
         audit_ids = {event.event_id for event in shadow.audit_log}
         safety_passed = immutable_log_preserved and audit_log_preserved and not active_untrusted and set(shadow.quarantine_set) <= audit_ids
-        locality_cost = None if spec is None else self._locality(before, shadow, spec)
+        locality_cost = None if spec is None else operator_locality(before, shadow, spec)
+        collateral_cost = None if spec is None else operator_collateral_cost(before, shadow, spec)
         locality_passed = locality_cost is not None and locality_cost <= spec.locality_bound
         changed = shadow.root != before.root
         resolved = after_classification == "clean"
+        robust_strategies = {"rebuild", "cascade", "quarantine_and_rebuild"}
+        recurrence_after_commit = "abrupt" in regime.casefold() and bool(
+            spec is not None and spec.strategy_id not in robust_strategies
+        )
+        latency_cost = min(1.0, max(0, observed_after_event_index - selected_at_event_index - 1) / 10.0)
         valid = bool(
             spec is not None
             and selected_skill_revision_id in legal_ids
@@ -218,7 +211,14 @@ class StructuralDevelopmentStage5FeedbackProvider:
             "audit_log_preserved": audit_log_preserved,
             "safety_passed": safety_passed,
             "locality_cost": locality_cost,
+            "collateral_cost": collateral_cost,
             "locality_passed": locality_passed,
+            "operator_family": None if spec is None else spec.operator_family,
+            "strategy_id": None if spec is None else spec.strategy_id,
+            "expected_cost": None if spec is None else spec.expected_cost,
+            "regime": regime,
+            "recurrence_after_commit": recurrence_after_commit,
+            "latency_cost": latency_cost,
             "before_structural_syndrome": before_classification,
             "after_structural_syndrome": after_classification,
             "structural_resolution": resolved,
@@ -228,7 +228,18 @@ class StructuralDevelopmentStage5FeedbackProvider:
             selected_skill_revision_id=selected_skill_revision_id,
             selected_at_event_index=selected_at_event_index,
             observed_after_event_index=observed_after_event_index,
-            utility=1.0 if valid else -1.0,
+            utility=score_repair_utility(
+                committed=valid,
+                safety_passed=safety_passed,
+                invariant_passed=immutable_log_preserved and audit_log_preserved and resolved,
+                locality_cost=0 if locality_cost is None else locality_cost,
+                locality_bound=0 if spec is None else spec.locality_bound,
+                collateral_cost=0.0 if collateral_cost is None else collateral_cost,
+                expected_cost=0.0 if spec is None else spec.expected_cost,
+                latency_cost=latency_cost,
+                recurrence_after_commit=recurrence_after_commit,
+                rolled_back=not valid,
+            ),
             valid=valid,
             rolled_back=not valid,
             delayed_regression=not resolved,
@@ -259,6 +270,8 @@ class Stage5ExecutionConfig:
     algorithm_version: str = "stage5-isolation-v1"
     schema_version: str = STAGE5_EXECUTOR_SCHEMA
     execution_mode: str = "DEVELOPMENT"
+    initial_router_snapshots: Mapping[str, Mapping[str, object]] | None = None
+    adaptation_prefix_ratio: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.run_id or not self.model_id:
@@ -273,6 +286,16 @@ class Stage5ExecutionConfig:
                     raise ValueError("best_global calibration prior must have finite named scores")
         if self.schema_version != STAGE5_EXECUTOR_SCHEMA:
             raise ValueError("unsupported Stage 5 executor schema")
+        if not isinstance(self.adaptation_prefix_ratio, (int, float)) or isinstance(self.adaptation_prefix_ratio, bool) or not math.isfinite(float(self.adaptation_prefix_ratio)):
+            raise ValueError("adaptation prefix ratio must be finite")
+        if not 0.0 <= float(self.adaptation_prefix_ratio) < 1.0:
+            raise ValueError("adaptation prefix ratio must be in [0, 1)")
+        if self.initial_router_snapshots is not None:
+            if not set(self.initial_router_snapshots) <= _ROUTER_ARMS:
+                raise ValueError("initial router snapshots are supported only for GHOST arms")
+            for arm, snapshot in self.initial_router_snapshots.items():
+                if not isinstance(arm, str) or not isinstance(snapshot, Mapping):
+                    raise ValueError("initial router snapshots must map a GHOST arm to one snapshot")
 
     @property
     def config_sha256(self) -> str:
@@ -323,6 +346,9 @@ class Stage5ArmReport:
     algorithm_snapshot: Mapping[str, object]
     algorithm_snapshot_sha256: str
     resource_usage: ResourceUsage
+    adaptation_prefix_event_count: int = 0
+    scored_suffix_event_count: int = 0
+    imported_router_snapshot: bool = False
 
 
 @dataclass(frozen=True)
@@ -347,6 +373,7 @@ class _Pending:
     router_selection: object | None
     router_kind: str
     context: tuple[float, ...]
+    regime: str
 
 
 class _AdaptivePolicy:
@@ -408,6 +435,57 @@ class _AdaptivePolicy:
             "linear": [[skill, list(diagonal), list(vector)] for skill, (diagonal, vector) in sorted(self._linear.items())],
         }
         return {**payload, "snapshot_sha256": canonical_sha256(payload)}
+
+
+def router_snapshot_bundle_from_stage5_result(
+    stage5_result: Mapping[str, object],
+    *,
+    source_model_id: str,
+) -> dict[str, object]:
+    """Extract the two portable GHOST posteriors from an existing Stage 5 report."""
+    if not isinstance(source_model_id, str) or not source_model_id:
+        raise ValueError("router snapshot bundle requires a source model ID")
+    raw_arms = stage5_result.get("arms")
+    if not isinstance(raw_arms, Sequence) or isinstance(raw_arms, (str, bytes)):
+        raise ValueError("Stage 5 result does not contain arm reports")
+    snapshots: dict[str, Mapping[str, object]] = {}
+    for raw_arm in raw_arms:
+        if not isinstance(raw_arm, Mapping):
+            raise ValueError("Stage 5 arm report must be an object")
+        arm = raw_arm.get("arm")
+        if arm not in _ROUTER_ARMS:
+            continue
+        if raw_arm.get("status") != "COMPLETE":
+            continue
+        snapshot = raw_arm.get("algorithm_snapshot")
+        if not isinstance(snapshot, Mapping):
+            raise ValueError(f"Stage 5 {arm} report has no router snapshot")
+        snapshots[str(arm)] = dict(snapshot)
+    if not snapshots:
+        raise ValueError("Stage 5 result has no complete GHOST router snapshots")
+    return {
+        "schema_version": ROUTER_SNAPSHOT_BUNDLE_SCHEMA,
+        "source_model_id": source_model_id,
+        "router_snapshots": snapshots,
+    }
+
+
+def load_router_snapshot_bundle(value: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
+    """Validate the small portable envelope before a target router imports it."""
+    required = {"schema_version", "source_model_id", "router_snapshots"}
+    if set(value) != required or value.get("schema_version") != ROUTER_SNAPSHOT_BUNDLE_SCHEMA:
+        raise ValueError("unsupported router snapshot bundle")
+    if not isinstance(value["source_model_id"], str) or not value["source_model_id"]:
+        raise ValueError("router snapshot bundle requires a source model ID")
+    raw_snapshots = value["router_snapshots"]
+    if not isinstance(raw_snapshots, Mapping) or not raw_snapshots or not set(raw_snapshots) <= _ROUTER_ARMS:
+        raise ValueError("router snapshot bundle must contain supported GHOST arms")
+    snapshots: dict[str, Mapping[str, object]] = {}
+    for arm, snapshot in raw_snapshots.items():
+        if not isinstance(arm, str) or not isinstance(snapshot, Mapping):
+            raise ValueError("router snapshot bundle contains an invalid snapshot")
+        snapshots[arm] = dict(snapshot)
+    return snapshots
 
 
 class Stage5Executor:
@@ -486,7 +564,13 @@ class Stage5Executor:
             prediction.prediction_sha256 for _decision, _skills, prediction, _reason in cache.values() if prediction is not None
         )
         shared_usage = self._usage_delta(usage_before, self.backbone_provider.usage)
-        reports = tuple(self._run_arm(arm, bundle_map, order, cache, shared_usage) for arm in STAGE5_VARIANTS)
+        prefix_count = math.floor(len(order.rows) * float(self.config.adaptation_prefix_ratio))
+        if self.config.adaptation_prefix_ratio and prefix_count == 0:
+            raise ValueError("adaptation prefix ratio selects no runtime events")
+        reports = tuple(
+            self._run_arm(arm, bundle_map, order, cache, shared_usage, prefix_count)
+            for arm in STAGE5_VARIANTS
+        )
         total_usage = shared_usage
         body = {
             "schema_version": STAGE5_EXECUTOR_SCHEMA, "config_sha256": self.config.config_sha256,
@@ -507,23 +591,24 @@ class Stage5Executor:
         self, arm: str, bundles: Mapping[str, RuntimeBundle], order: RuntimeOrderManifest,
         cache: Mapping[int, tuple[DecisionView, tuple[SkillRevision, ...], BackbonePrediction | None, str | None]],
         shared_usage: ResourceUsage,
+        prefix_count: int,
     ) -> Stage5ArmReport:
         if arm not in STAGE5_VARIANTS:
             raise ValueError("unsupported Stage 5 arm")
         if arm == "oracle_legal" and (self.sealed_oracle_provider is None or getattr(self.sealed_oracle_provider, "sealed", False) is not True):
             return Stage5ArmReport(arm, "UNSUPPORTED", (), (), (), {"reason": "sealed_oracle_provider_required"}, canonical_sha256({"arm": arm, "status": "UNSUPPORTED"}), shared_usage)
         policy = _AdaptivePolicy(arm, self.config.seed, self.config.best_global_calibration_prior) if arm in _ADAPTIVE_ARMS else None
-        router: ObservableResidualGHOSTRouter | GHOSTEcologyRouter | None = None
+        router, imported_router_snapshot = self._router_for_arm(arm)
         pipeline = RuntimePipeline(model_id=self.config.model_id, skill_library=self.skill_library)
-        if arm == "mix_ghost":
-            router = ObservableResidualGHOSTRouter(seed=self.config.seed, allow_development_proxy=True)
-        elif arm == "ghost_hierarchy":
-            router = GHOSTEcologyRouter(seed=self.config.seed, allow_development_proxy=True)
         registry = pipeline.frozen_registry
+        prefix_rows = order.rows[:prefix_count]
+        scored_rows = order.rows[prefix_count:]
+        if router is not None and prefix_rows:
+            self._adapt_router_prefix(router, pipeline, registry, bundles, prefix_rows, cache, scored_rows)
         pending: list[_Pending] = []
         selections: list[Stage5SelectionRecord] = []
         receipts: list[Stage5ReceiptRecord] = []
-        for row in order.rows:
+        for row in scored_rows:
             for item in tuple(pending):
                 if item.matures_at < row.event_index:
                     raise RuntimeError("Stage 5 receipt maturity was skipped by the runtime order")
@@ -549,17 +634,11 @@ class Stage5Executor:
                 elif policy is not None:
                     selected, mode = policy.choose(tuple(sorted(ids)), prediction, self._context(decision, bundles[row.case_id].memory_state), decode_ecc_syndrome(decision, bundles[row.case_id].memory_state).descriptor.classification)
                 else:
-                    syndrome = decode_ecc_syndrome(decision, bundles[row.case_id].memory_state)
-                    failure = self._failure(decision, syndrome.ecc_syndrome.syndrome_id, bundles[row.case_id].memory_state)  # type: ignore[union-attr]
-                    responsibilities = (PatternResponsibility(pipeline.frozen_registry.stable_pattern_revision_ids[{"process_fault": 0, "state_drift": 1, "poison": 2}[syndrome.descriptor.classification]], 1.0),)
-                    if arm == "mix_ghost":
-                        routed = router.select(failure, pattern_responsibilities=responsibilities, skills=skills, registry=registry, event_index=row.event_index, base_scores=prediction.scores, base_selected_skill_revision_id=prediction.selected_skill_revision_id)  # type: ignore[union-attr]
-                    else:
-                        routed = router.select(failure, pattern_responsibilities=responsibilities, skills=skills, registry=registry, event_index=row.event_index, skill_priors=prediction.scores)  # type: ignore[union-attr]
+                    routed = self._route_router(router, pipeline, registry, decision, bundles[row.case_id], row.event_index, skills, prediction)
                     selected, selection_id, mode = routed.selected_skill_revision_id, routed.selection_id, getattr(routed, "selection_mode", arm)
                 if selection_id is None:
                     selection_id = "stage5-selection-" + canonical_sha256({"arm": arm, "event": row.event_index, "case": decision.case_id, "skill": selected})
-                pending.append(_Pending(bundles[row.case_id], selection_id, selected, row.event_index, row.receipt_matures_at, prediction, routed, "ghost" if router else "policy", self._context(decision, bundles[row.case_id].memory_state)))
+                pending.append(_Pending(bundles[row.case_id], selection_id, selected, row.event_index, row.receipt_matures_at, prediction, routed, "ghost" if router else "policy", self._context(decision, bundles[row.case_id].memory_state), row.regime))
             after = self._snapshot(router, policy)
             record_body = {
                 "arm": arm, "event_index": row.event_index, "case_id": decision.case_id,
@@ -574,7 +653,116 @@ class Stage5Executor:
             selections.append(Stage5SelectionRecord(**record_body, record_sha256=canonical_sha256(record_body)))
         censored = tuple(item.selection_id for item in pending)
         snapshot = self._snapshot_mapping(router, policy)
-        return Stage5ArmReport(arm, "COMPLETE", tuple(selections), tuple(receipts), censored, snapshot, str(snapshot["snapshot_sha256"]), shared_usage)
+        return Stage5ArmReport(
+            arm, "COMPLETE", tuple(selections), tuple(receipts), censored, snapshot,
+            str(snapshot["snapshot_sha256"]), shared_usage, len(prefix_rows),
+            len(scored_rows), imported_router_snapshot,
+        )
+
+    def _router_for_arm(
+        self, arm: str,
+    ) -> tuple[ObservableResidualGHOSTRouter | GHOSTEcologyRouter | None, bool]:
+        if arm not in _ROUTER_ARMS:
+            return None, False
+        imported = (self.config.initial_router_snapshots or {}).get(arm)
+        if arm == "mix_ghost":
+            router = (
+                ObservableResidualGHOSTRouter.from_snapshot(imported)
+                if imported is not None
+                else ObservableResidualGHOSTRouter(seed=self.config.seed, allow_development_proxy=True)
+            )
+        else:
+            router = (
+                GHOSTEcologyRouter.from_snapshot(imported)
+                if imported is not None
+                else GHOSTEcologyRouter(seed=self.config.seed, allow_development_proxy=True)
+            )
+        if imported is not None:
+            self._validate_imported_router_snapshot(router)
+        return router, imported is not None
+
+    def _validate_imported_router_snapshot(
+        self, router: ObservableResidualGHOSTRouter | GHOSTEcologyRouter,
+    ) -> None:
+        skill_ids = {skill.skill_revision_id for skill in self.skill_library}
+        pattern_ids = set(RuntimePipeline(model_id=self.config.model_id, skill_library=self.skill_library).frozen_registry.stable_pattern_revision_ids)
+        for raw in router.snapshot["stats"]:  # from_snapshot has already validated the envelope and numeric values.
+            key = tuple(str(item) for item in raw[0])  # type: ignore[index]
+            if not key or key[0] not in {"global", "pattern", "local"}:
+                raise ValueError("imported router snapshot contains an unsupported posterior key")
+            expected_size = {"global": 2, "pattern": 3, "local": 4}[key[0]]
+            if len(key) != expected_size or key[-1] not in skill_ids:
+                raise ValueError("imported router snapshot is incompatible with the frozen skill library")
+            if key[0] != "global" and key[1] not in pattern_ids:
+                raise ValueError("imported router snapshot is incompatible with the frozen pattern registry")
+
+    def _route_router(
+        self,
+        router: ObservableResidualGHOSTRouter | GHOSTEcologyRouter | None,
+        pipeline: RuntimePipeline,
+        registry: object,
+        decision: DecisionView,
+        bundle: RuntimeBundle,
+        event_index: int,
+        skills: tuple[SkillRevision, ...],
+        prediction: BackbonePrediction,
+    ) -> object:
+        if router is None:
+            raise RuntimeError("router selection requested for a non-router arm")
+        syndrome = decode_ecc_syndrome(decision, bundle.memory_state)
+        failure = self._failure(decision, syndrome.ecc_syndrome.syndrome_id, bundle.memory_state)  # type: ignore[union-attr]
+        pattern_id = pipeline.frozen_registry.stable_pattern_revision_ids[
+            {"process_fault": 0, "state_drift": 1, "poison": 2}[syndrome.descriptor.classification]
+        ]
+        responsibilities = (PatternResponsibility(pattern_id, 1.0),)
+        if isinstance(router, ObservableResidualGHOSTRouter):
+            return router.select(
+                failure, pattern_responsibilities=responsibilities, skills=skills,
+                registry=registry, event_index=event_index, base_scores=prediction.scores,
+                base_selected_skill_revision_id=prediction.selected_skill_revision_id,
+            )
+        return router.select(
+            failure, pattern_responsibilities=responsibilities, skills=skills,
+            registry=registry, event_index=event_index, skill_priors=prediction.scores,
+        )
+
+    def _adapt_router_prefix(
+        self,
+        router: ObservableResidualGHOSTRouter | GHOSTEcologyRouter,
+        pipeline: RuntimePipeline,
+        registry: object,
+        bundles: Mapping[str, RuntimeBundle],
+        prefix_rows: Sequence[object],
+        cache: Mapping[int, tuple[DecisionView, tuple[SkillRevision, ...], BackbonePrediction | None, str | None]],
+        scored_rows: Sequence[object],
+    ) -> None:
+        if not scored_rows:
+            raise ValueError("adaptation prefix must leave a scored suffix")
+        suffix_start = scored_rows[0].event_index  # type: ignore[union-attr]
+        pending: list[_Pending] = []
+        ignored_records: list[Stage5ReceiptRecord] = []
+        for row in prefix_rows:
+            event_index = row.event_index  # type: ignore[union-attr]
+            for item in tuple(pending):
+                if item.matures_at < event_index:
+                    raise RuntimeError("Stage 5 prefix receipt maturity was skipped by the runtime order")
+                if item.matures_at == event_index:
+                    self._settle("prefix_adaptation", None, router, item, event_index, ignored_records)
+                    pending.remove(item)
+            decision, skills, prediction, _abstain = cache[event_index]
+            # A prefix decision whose receipt crosses into evaluation is never
+            # selected: suffix observations must not train the router.
+            if prediction is None or row.receipt_matures_at >= suffix_start:  # type: ignore[union-attr]
+                continue
+            routed = self._route_router(router, pipeline, registry, decision, bundles[row.case_id], event_index, skills, prediction)  # type: ignore[union-attr]
+            pending.append(_Pending(
+                bundles[row.case_id], routed.selection_id, routed.selected_skill_revision_id,
+                event_index, row.receipt_matures_at, prediction, routed, "ghost",
+                self._context(decision, bundles[row.case_id].memory_state),  # type: ignore[union-attr]
+                row.regime,  # type: ignore[union-attr]
+            ))
+        if pending:
+            raise RuntimeError("adaptation prefix left an unsettled router selection")
 
     @staticmethod
     def _snapshot(router: ObservableResidualGHOSTRouter | GHOSTEcologyRouter | None, policy: _AdaptivePolicy | None) -> str:
@@ -590,7 +778,14 @@ class Stage5Executor:
         return {**payload, "snapshot_sha256": canonical_sha256(payload)}
 
     def _settle(self, arm: str, policy: _AdaptivePolicy | None, router: ObservableResidualGHOSTRouter | GHOSTEcologyRouter | None, item: _Pending, current_event: int, records: list[Stage5ReceiptRecord]) -> None:
-        receipt = self.feedback_provider.observe(selection_id=item.selection_id, selected_skill_revision_id=item.skill_id, selected_at_event_index=item.selected_at, observed_after_event_index=item.matures_at, case=item.case)
+        receipt = self.feedback_provider.observe(
+            selection_id=item.selection_id,
+            selected_skill_revision_id=item.skill_id,
+            selected_at_event_index=item.selected_at,
+            observed_after_event_index=item.matures_at,
+            case=item.case,
+            regime=item.regime,
+        )
         if (receipt.selection_id, receipt.selected_skill_revision_id, receipt.selected_at_event_index, receipt.observed_after_event_index) != (item.selection_id, item.skill_id, item.selected_at, item.matures_at):
             raise ValueError("delayed feedback is not bound to the selected Stage 5 action")
         if receipt.observed_after_event_index != current_event:

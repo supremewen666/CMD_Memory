@@ -115,7 +115,13 @@ def _content(spec: OperatorSpec, skill: SkillRevision | None = None) -> RuntimeS
     """Expose a typed operator program while keeping revisions routable."""
     program = dict(skill.program) if skill is not None else {
         "kind": "cmd-spec-v03-operator", "operator_id": spec.operator_id,
+        "operator_family": spec.operator_family,
+        "strategy_id": spec.strategy_id,
+        "read_set": spec.read_set,
+        "write_set": spec.write_set,
+        "repair_action": spec.repair_action,
         "write_contract": spec.write_contract,
+        "expected_cost": spec.expected_cost,
     }
     preconditions = skill.preconditions if skill is not None else ({"kind": "typed_state", "predicate": spec.precondition},)
     rollback = dict(skill.rollback_program) if skill is not None else {"action": spec.rollback_action}
@@ -193,11 +199,25 @@ def _validated_library(skill_library: Sequence[SkillRevision] | None) -> tuple[S
     ids = tuple(skill.skill_revision_id for skill in library)
     if len(set(ids)) != len(ids):
         raise ValueError("frozen skill library has duplicate revision IDs")
-    catalog_ids = {spec.operator_id for spec in operator_catalog()}
+    catalog = {spec.operator_id: spec for spec in operator_catalog()}
     for skill in library:
         operator_id = skill.program.get("operator_id")
-        if not isinstance(operator_id, str) or operator_id not in catalog_ids:
+        if not isinstance(operator_id, str) or operator_id not in catalog:
             raise ValueError("frozen skill program must bind a catalog operator_id")
+        spec = catalog[operator_id]
+        for field, expected in (
+            ("operator_family", spec.operator_family),
+            ("strategy_id", spec.strategy_id),
+            ("read_set", spec.read_set),
+            ("write_set", spec.write_set),
+            ("repair_action", spec.repair_action),
+        ):
+            actual = skill.program.get(field)
+            if actual is None:
+                continue
+            normalized = tuple(actual) if field.endswith("_set") and isinstance(actual, (list, tuple)) else actual
+            if normalized != expected:
+                raise ValueError("frozen skill program profile does not match catalog operator")
     return library
 
 
@@ -222,8 +242,18 @@ def build_legal_candidates(
             raise ValueError("eligible skill mask contains an unknown frozen revision")
     legal: list[tuple[OperatorSpec, SkillRevision]] = []
     rejected: list[tuple[str, str]] = []
+    mechanism_incident = {
+        "process_fault": "process_fault",
+        "state_drift": "state_drift",
+        "adversarial_poison": "poison",
+    }.get(syndrome.ecc_syndrome.mechanism.value)
+    if mechanism_incident is None:
+        raise ValueError("runtime syndrome has no typed incident binding")
     for spec in operator_catalog():
         if spec.operator_id == "noop_abstain":
+            continue
+        if mechanism_incident not in spec.incident_types:
+            rejected.append((spec.operator_id, "syndrome-incident-incompatible"))
             continue
         if not _is_state_legal(state, spec):
             rejected.append((spec.operator_id, "typed-state-precondition-failed"))

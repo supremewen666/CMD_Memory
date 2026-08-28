@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from cmd_audit.spec_v03.contracts import DecisionView, canonical_sha256
+from cmd_audit.repair.ghost_ecology import GHOSTEcologyRouter, ObservableResidualGHOSTRouter
+from cmd_audit.spec_v03.backbone_provider import BackboneProviderConfig, DeterministicDevelopmentProvider, ProviderBudget
 from cmd_audit.spec_v03.experiment_matrix import (
     STAGE5_VARIANTS,
     STAGE6_VARIANTS,
@@ -15,6 +17,7 @@ from cmd_audit.spec_v03.prequential_executor import RuntimeOrderManifest, Runtim
 from cmd_audit.spec_v03.repair_stream import MemoryState, PublicEvent
 from cmd_audit.spec_v03.runtime_bundle import RuntimeBundle
 from cmd_audit.spec_v03.stage59_runner import Stage59Capabilities, Stage59Config, Stage59Runner
+from cmd_audit.spec_v03.stage5_executor import StructuralDevelopmentStage5FeedbackProvider
 
 
 def _bundle() -> RuntimeBundle:
@@ -92,3 +95,27 @@ def test_stage59_runner_is_content_addressed_and_stage_selective() -> None:
     assert first.report_sha256 == second.report_sha256
     assert tuple(first.results) == ("stage6", "stage8a")
     assert first.to_mapping()["report_sha256"] == first.report_sha256
+
+
+def test_stage59_runner_forwards_imported_router_posteriors_to_stage5() -> None:
+    model_id = "development-router-target"
+    provider = DeterministicDevelopmentProvider(
+        BackboneProviderConfig(model_id=model_id, snapshot="dev", environment="DEVELOPMENT"),
+        ProviderBudget(max_requests=10, max_total_tokens=10_000),
+    )
+    report = Stage59Runner(
+        Stage59Config("router-import", model_id, 29, stages=("stage5",)),
+        Stage59Capabilities(
+            backbone_provider=provider,
+            feedback_provider=StructuralDevelopmentStage5FeedbackProvider(model_id=model_id),
+            initial_router_snapshots={
+                "mix_ghost": ObservableResidualGHOSTRouter(allow_development_proxy=True).snapshot,
+                "ghost_hierarchy": GHOSTEcologyRouter(allow_development_proxy=True).snapshot,
+            },
+        ),
+    ).run((_bundle(),), _order(), system_budget=ResourceUsage.zero())
+
+    arms = {row["arm"]: row for row in report.results["stage5"]["arms"]}
+    assert arms["mix_ghost"]["imported_router_snapshot"] is True
+    assert arms["ghost_hierarchy"]["imported_router_snapshot"] is True
+    assert arms["random_legal"]["imported_router_snapshot"] is False

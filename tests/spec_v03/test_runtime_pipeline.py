@@ -62,19 +62,19 @@ def _sibling_restore_library() -> tuple[SkillRevision, ...]:
     return tuple(skill for skill in base if skill is not restore) + siblings
 
 
-@pytest.mark.parametrize(("template", "mechanism", "operator"), (("drop", "process_fault", "process_restore"), ("explicit_supersede", "state_drift", "state_supersede_lineage"), ("untrusted_injection", "adversarial_poison", "poison_quarantine_audit")))
-def test_runtime_structural_path_builds_only_typed_legal_candidates(template: str, mechanism: str, operator: str) -> None:
+@pytest.mark.parametrize(("template", "mechanism", "operator", "general"), (("drop", "process_fault", "process_restore", "process_projection_rebuild"), ("explicit_supersede", "state_drift", "state_supersede_lineage", "state_supersede_rebuild"), ("untrusted_injection", "adversarial_poison", "poison_quarantine_audit", "poison_quarantine_rebuild")))
+def test_runtime_structural_path_builds_only_typed_legal_candidates(template: str, mechanism: str, operator: str, general: str) -> None:
     decision, state = _runtime_case(template)
     result = _development_decide(RuntimePipeline(), decision, state)
     assert result.abstained is False
     assert result.syndrome.ecc_syndrome is not None
     assert result.syndrome.ecc_syndrome.mechanism.value == mechanism
-    assert result.candidates.legal_operator_ids == (operator,)
+    assert result.candidates.legal_operator_ids == (operator, general)
     assert result.router_log is not None
     assert result.selected_skill_revision_id == result.router_log.selected_skill_revision_id
     assert result.selection_handle is not None
     assert result.selection_handle.selected_skill_revision_id == result.selected_skill_revision_id
-    assert result.selected_operator_id == operator
+    assert result.selected_operator_id in {operator, general}
     assert result.candidates.skill_content[0].content_sha256 != result.candidates.evidence[0].evidence_sha256
 
 
@@ -152,7 +152,9 @@ def test_frozen_operator_skill_identity_is_stable_across_cases() -> None:
         decode_ecc_syndrome(second_case.decision_view, second_case.corrupt_state),
     )
 
-    assert first.legal_operator_ids == second.legal_operator_ids == ("process_restore",)
+    assert first.legal_operator_ids == second.legal_operator_ids == (
+        "process_restore", "process_projection_rebuild",
+    )
     assert first.skill_revision_ids == second.skill_revision_ids
 
 
@@ -168,8 +170,9 @@ def test_external_library_keeps_sibling_revisions_as_distinct_legal_candidates()
         if skill.program["operator_id"] == "process_restore"
     )
 
-    assert candidates.legal_operator_ids == ("process_restore", "process_restore")
-    assert candidates.skill_revision_ids == expected
+    assert candidates.legal_operator_ids[:2] == ("process_restore", "process_restore")
+    assert candidates.skill_revision_ids[:2] == expected
+    assert candidates.legal_operator_ids[2:] == ("process_projection_rebuild",)
     assert pipeline.frozen_registry.stable_skill_revision_ids == tuple(sorted(skill.skill_revision_id for skill in library))
     assert pipeline.frozen_skill(expected[1]) == next(skill for skill in library if skill.skill_revision_id == expected[1])
 
@@ -177,14 +180,18 @@ def test_external_library_keeps_sibling_revisions_as_distinct_legal_candidates()
         case_id=decision.case_id,
         event_index=decision.event_index,
         model_id="unconfigured",
-        candidate_skill_revision_ids=expected,
-        scores={expected[0]: -1.0, expected[1]: 1.0},
+        candidate_skill_revision_ids=candidates.skill_revision_ids,
+        scores={
+            **{skill_id: 0.0 for skill_id in candidates.skill_revision_ids},
+            expected[0]: -1.0,
+            expected[1]: 1.0,
+        },
         selected_skill_revision_id=expected[1],
         backbone_state_sha256=state.root,
     )
     result = pipeline.decide(decision, state, prediction)
     assert result.selected_skill_revision_id == expected[1]
-    assert result.selected_operator_id == "process_restore"
+    assert result.selected_operator_id in {"process_restore", "process_projection_rebuild"}
     assert result.selected_skill_content is not None
     assert result.selected_skill_content.program["external_revision"] == "b"
 
@@ -195,7 +202,7 @@ def test_route_handle_binds_ghost_selected_skill_to_operator() -> None:
 
     assert result.selection_handle is not None
     assert result.selection_handle.selected_skill_revision_id == result.selected_skill_revision_id
-    assert result.selected_operator_id == "process_restore"
+    assert result.selected_operator_id in {"process_restore", "process_projection_rebuild"}
     assert result.selected_skill_revision_id in result.candidates.skill_revision_ids
     assert result.executor_dispatch() is not None
     assert result.executor_dispatch().skill_content == result.selected_skill_content  # type: ignore[union-attr]
@@ -212,12 +219,15 @@ def test_external_backbone_winner_maps_to_the_selected_operator() -> None:
     syndrome = decode_ecc_syndrome(combined_decision, combined)
     candidates = build_legal_candidates(combined, syndrome)
     by_operator = dict(zip(candidates.legal_operator_ids, candidates.skill_revision_ids))
+    scores = {skill_id: 0.0 for skill_id in candidates.skill_revision_ids}
+    scores[by_operator["process_restore"]] = -0.5
+    scores[by_operator["process_cache_invalidate"]] = 0.7
     prediction = BackbonePrediction.create(
         case_id=combined_decision.case_id,
         event_index=combined_decision.event_index,
         model_id="unconfigured",
         candidate_skill_revision_ids=candidates.skill_revision_ids,
-        scores={by_operator["process_restore"]: -0.5, by_operator["process_cache_invalidate"]: 0.7},
+        scores=scores,
         selected_skill_revision_id=by_operator["process_cache_invalidate"],
         backbone_state_sha256=combined.root,
     )

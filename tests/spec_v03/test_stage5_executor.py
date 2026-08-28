@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import asdict
 import json
 from pathlib import Path
 
 import pytest
 
 from cmd_audit.spec_v03.backbone_provider import BackboneProviderConfig, DeterministicDevelopmentProvider, ProviderBudget
+from cmd_audit.spec_v03.contracts import DecisionView, canonical_sha256
 from cmd_audit.spec_v03.event_order import compile_event_order
 from cmd_audit.spec_v03.experiment_matrix import STAGE5_VARIANTS
-from cmd_audit.spec_v03.prequential_executor import RuntimeOrderManifest
-from cmd_audit.spec_v03.repair_stream import build_intervention, compile_repair_case, iter_public_episodes
-from cmd_audit.spec_v03.runtime_bundle import deserialize
+from cmd_audit.spec_v03.prequential_executor import RuntimeOrderManifest, RuntimeOrderRow
+from cmd_audit.spec_v03.repair_stream import MemoryState, PublicEvent, build_intervention, compile_repair_case, iter_public_episodes
+from cmd_audit.spec_v03.runtime_bundle import RuntimeBundle, deserialize
 from cmd_audit.spec_v03.runtime_pipeline import RuntimePipeline, build_legal_candidates
 from cmd_audit.repair.ghost_ecology import SkillRevision
 from cmd_audit.spec_v03.stage5_executor import (
@@ -19,6 +21,8 @@ from cmd_audit.spec_v03.stage5_executor import (
     Stage5Executor,
     Stage5Receipt,
     StructuralDevelopmentStage5FeedbackProvider,
+    load_router_snapshot_bundle,
+    router_snapshot_bundle_from_stage5_result,
 )
 from cmd_audit.spec_v03.syndrome_runtime import decode_ecc_syndrome
 
@@ -31,8 +35,45 @@ def _inputs():
     return bundles, order
 
 
-def _provider():
-    return DeterministicDevelopmentProvider(BackboneProviderConfig(model_id="development-hash-provider", snapshot="development-non-model-v1", environment="DEVELOPMENT", max_output_tokens=64, endpoint=None), ProviderBudget(max_requests=20, max_total_tokens=1_000_000))
+def _fast_inputs() -> tuple[tuple, RuntimeOrderManifest]:
+    payload = {"content": "runtime memory"}
+    payload_sha = canonical_sha256(payload)
+    event = PublicEvent("source-event", "public-source", 0, None, "trusted", payload, payload_sha, payload_sha)
+    state = MemoryState((event,), (), (), (), ((event.event_id, "trusted"),), (), (), ())
+    bundles = []
+    rows = []
+    for index in range(4):
+        case_id = f"fast-case-{index}"
+        decision = {
+            "event_log": [{
+                "event_id": event.event_id, "timestamp": None, "actor_scope": "trusted",
+                "content": payload, "authority": "trusted",
+                "provenance": {"source_payload_sha256": payload_sha},
+            }],
+            "current_state": {
+                "projection_order": [], "projection_index": [],
+                "scope_projection": [[event.event_id, "trusted"]], "cache_event_ids": [],
+                "supersession_edges": [], "quarantine_set": [], "state_root": state.root,
+            },
+            "observable_telemetry": {"event_count": 1, "projection_size": 0},
+        }
+        bundles.append(RuntimeBundle(
+            case_id, "fixture", "episode", f"family-{index}", "lineage",
+            (event.event_id,),
+            DecisionView(case_id, "fixture", "episode", f"family-{index}", "lineage", index, decision, {"source": payload_sha}, ()),
+            state,
+        ))
+        rows.append(RuntimeOrderRow(case_id, index, "stationary", index + 1, "benign"))
+    body = {"seed": 53, "schedule": "stationary", "rows": [
+        {"case_id": row.case_id, "event_index": row.event_index, "regime": row.regime,
+         "receipt_matures_at": row.receipt_matures_at, "cas_interleaving": row.cas_interleaving}
+        for row in rows
+    ]}
+    return tuple(bundles), RuntimeOrderManifest(53, "stationary", tuple(rows), canonical_sha256(body))
+
+
+def _provider(model_id: str = "development-hash-provider"):
+    return DeterministicDevelopmentProvider(BackboneProviderConfig(model_id=model_id, snapshot="development-non-model-v1", environment="DEVELOPMENT", max_output_tokens=64, endpoint=None), ProviderBudget(max_requests=20, max_total_tokens=1_000_000))
 
 
 def _sibling_restore_library() -> tuple[SkillRevision, ...]:
@@ -60,6 +101,7 @@ def _sibling_restore_library() -> tuple[SkillRevision, ...]:
 class _Feedback:
     def observe(self, **kwargs):
         kwargs.pop("case")
+        kwargs.pop("regime")
         return Stage5Receipt(**kwargs, utility=0.75, provenance={"channel": "fixture"})
 
 
@@ -77,6 +119,7 @@ class _UnsealedOracle(_Oracle):
 class _LateFeedback(_Feedback):
     def observe(self, **kwargs):
         kwargs.pop("case")
+        kwargs.pop("regime")
         return Stage5Receipt(**{**kwargs, "observed_after_event_index": kwargs["observed_after_event_index"] + 1}, utility=0.75)
 
 
@@ -148,11 +191,14 @@ def test_stage5_routes_external_sibling_revisions_without_a_singleton_candidate_
     for arm in report.arms:
         record = next(
             row for row in arm.selection_records
-            if row.candidate_skill_revision_ids == expected
+            if set(expected) <= set(row.candidate_skill_revision_ids)
         )
-        assert record.selected_skill_revision_id in expected
+        assert record.selected_skill_revision_id in record.candidate_skill_revision_ids
     ghost = next(arm for arm in report.arms if arm.arm == "mix_ghost")
-    assert next(row for row in ghost.selection_records if row.candidate_skill_revision_ids == expected).selected_skill_revision_id in expected
+    assert next(
+        row for row in ghost.selection_records
+        if set(expected) <= set(row.candidate_skill_revision_ids)
+    ).selected_skill_revision_id is not None
 
 
 def test_stage5_best_global_is_a_frozen_calibration_prior_and_maturity_must_match_order() -> None:
@@ -164,6 +210,64 @@ def test_stage5_best_global_is_a_frozen_calibration_prior_and_maturity_must_matc
 
     with pytest.raises(ValueError, match="bound to the selected Stage 5 action"):
         Stage5Executor(Stage5ExecutionConfig("stage5-late", "development-hash-provider", 109), _provider(), _LateFeedback(), sealed_oracle_provider=_Oracle()).run(bundles, order)
+
+
+def test_stage5_imports_ghost_posteriors_and_keeps_prefix_out_of_scored_suffix() -> None:
+    bundles, order = _fast_inputs()
+    source = Stage5Executor(
+        Stage5ExecutionConfig("stage5-source", "source-model", 131),
+        _provider("source-model"), _Feedback(), sealed_oracle_provider=_Oracle(),
+    ).run(bundles, order)
+    exported = router_snapshot_bundle_from_stage5_result(
+        {"arms": [asdict(arm) for arm in source.arms]}, source_model_id="source-model",
+    )
+    snapshots = load_router_snapshot_bundle(exported)
+
+    target = Stage5Executor(
+        Stage5ExecutionConfig(
+            "stage5-target", "target-model", 137,
+            initial_router_snapshots=snapshots, adaptation_prefix_ratio=0.5,
+        ),
+        _provider("target-model"), _Feedback(), sealed_oracle_provider=_Oracle(),
+    ).run(bundles, order)
+
+    suffix_start = order.rows[2].event_index
+    for arm in target.arms:
+        assert arm.adaptation_prefix_event_count == 2
+        assert arm.scored_suffix_event_count == 2
+        assert all(row.event_index >= suffix_start for row in arm.selection_records)
+        assert all(row.selected_at_event_index >= suffix_start for row in arm.receipt_records)
+    by_arm = {arm.arm: arm for arm in target.arms}
+    assert by_arm["mix_ghost"].imported_router_snapshot
+    assert by_arm["ghost_hierarchy"].imported_router_snapshot
+    assert not by_arm["random_legal"].imported_router_snapshot
+
+
+def test_stage5_fails_closed_for_incompatible_imported_router_snapshots() -> None:
+    bundles, order = _fast_inputs()
+    source = Stage5Executor(
+        Stage5ExecutionConfig("stage5-source-incompatible", "source-model", 139),
+        _provider("source-model"), _Feedback(), sealed_oracle_provider=_Oracle(), skill_library=_sibling_restore_library(),
+    ).run(bundles, order)
+    source_mix = next(arm.algorithm_snapshot for arm in source.arms if arm.arm == "mix_ghost")
+    with pytest.raises(ValueError, match="frozen skill library"):
+        Stage5Executor(
+            Stage5ExecutionConfig(
+                "stage5-target-incompatible", "target-model", 149,
+                initial_router_snapshots={"mix_ghost": source_mix},
+            ),
+            _provider("target-model"), _Feedback(), sealed_oracle_provider=_Oracle(),
+        ).run(bundles, order)
+
+    wrong_router = next(arm.algorithm_snapshot for arm in source.arms if arm.arm == "ghost_hierarchy")
+    with pytest.raises(ValueError, match="closed mapping"):
+        Stage5Executor(
+            Stage5ExecutionConfig(
+                "stage5-target-wrong-router", "target-model", 151,
+                initial_router_snapshots={"mix_ghost": wrong_router},
+            ),
+            _provider("target-model"), _Feedback(), sealed_oracle_provider=_Oracle(),
+        ).run(bundles, order)
 
 
 def test_structural_development_feedback_replays_only_the_selected_frozen_skill() -> None:
@@ -178,12 +282,39 @@ def test_structural_development_feedback_replays_only_the_selected_frozen_skill(
     )
 
     assert receipt.valid
-    assert receipt.utility == 1.0
+    assert 0.0 < receipt.utility < 1.0
     assert receipt.provenance is not None
     assert receipt.provenance["selected_skill_revision_id"] == selected
     assert receipt.provenance["immutable_log_preserved"] is True
     assert receipt.provenance["audit_log_preserved"] is True
     assert receipt.provenance["after_structural_syndrome"] == "clean"
+
+
+def test_structural_receipt_cost_preference_reverses_under_abrupt_recurrence() -> None:
+    bundles, _order = _inputs()
+    pipeline = RuntimePipeline()
+    by_revision = {skill.skill_revision_id: skill for skill in pipeline.frozen_skill_library}
+    bundle = next(
+        bundle for bundle in bundles
+        if decode_ecc_syndrome(bundle.decision_view, bundle.memory_state).descriptor.classification == "process_fault"
+    )
+    candidates = build_legal_candidates(
+        bundle.memory_state, decode_ecc_syndrome(bundle.decision_view, bundle.memory_state),
+    ).skill_revision_ids
+    by_operator = {by_revision[item].program["operator_id"]: item for item in candidates}
+    targeted = next(item for operator, item in by_operator.items() if operator != "process_projection_rebuild")
+    rebuild = by_operator["process_projection_rebuild"]
+    provider = StructuralDevelopmentStage5FeedbackProvider("development-hash-provider")
+
+    def utility(skill_id: str, regime: str) -> float:
+        return provider.observe(
+            selection_id=f"{skill_id}:{regime}", selected_skill_revision_id=skill_id,
+            selected_at_event_index=0, observed_after_event_index=1,
+            case=bundle, regime=regime,
+        ).utility
+
+    assert utility(targeted, "stationary") > utility(rebuild, "stationary")
+    assert utility(targeted, "abrupt_process_state_poison") < utility(rebuild, "abrupt_process_state_poison")
 
 
 def test_structural_development_feedback_fails_negative_for_an_unselected_illegal_skill() -> None:

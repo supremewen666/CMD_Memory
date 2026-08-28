@@ -31,7 +31,11 @@ from cmd_audit.spec_v03.skill_discovery_provider import (
     serialize_skill_library,
 )
 from cmd_audit.spec_v03.stage59_runner import Stage59Capabilities, Stage59Config, Stage59Runner
-from cmd_audit.spec_v03.stage5_executor import StructuralDevelopmentStage5FeedbackProvider
+from cmd_audit.spec_v03.stage5_executor import (
+    StructuralDevelopmentStage5FeedbackProvider,
+    load_router_snapshot_bundle,
+    router_snapshot_bundle_from_stage5_result,
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -71,6 +75,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--skill-library", type=Path, help="Frozen discovered skill library to load")
     parser.add_argument("--skill-library-output", type=Path, help="Write discovered typed skills and a call-audit sidecar")
     parser.add_argument(
+        "--initial-router-snapshot", type=Path,
+        help="Stage 5 router snapshot bundle exported by --router-snapshot-output.",
+    )
+    parser.add_argument(
+        "--router-snapshot-output", type=Path,
+        help="Write portable mix_ghost/ghost_hierarchy posterior snapshots after Stage 5.",
+    )
+    parser.add_argument(
+        "--adaptation-prefix-ratio", type=float, default=0.0,
+        help="Initial target-order fraction used only to update GHOST posteriors; the suffix is scored.",
+    )
+    parser.add_argument(
         "--development-first-legal",
         action="store_true",
         help="Enable the deterministic non-model proposal policy for wiring validation.",
@@ -80,6 +96,11 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
+    stages = tuple(args.stages) if args.stages else (
+        "stage5", "stage6", "stage7", "stage8a", "stage8b", "stage9",
+    )
+    if (args.initial_router_snapshot is not None or args.router_snapshot_output is not None or args.adaptation_prefix_ratio != 0.0) and "stage5" not in stages:
+        raise ValueError("router snapshot import/export and prefix adaptation require --stage stage5")
     bundles = load_runtime_cases(args.runtime_cases)
     raw_order = json.loads(args.event_order.read_text(encoding="utf-8"))
     if not isinstance(raw_order, dict):
@@ -153,9 +174,12 @@ def main() -> int:
     if loaded_skills:
         combined = RuntimePipeline().frozen_skill_library + tuple(loaded_skills)
         source_library = tuple({skill.skill_revision_id: skill for skill in combined}.values())
-    stages = tuple(args.stages) if args.stages else (
-        "stage5", "stage6", "stage7", "stage8a", "stage8b", "stage9",
-    )
+    initial_router_snapshots = None
+    if args.initial_router_snapshot is not None:
+        raw_snapshot = json.loads(args.initial_router_snapshot.read_text(encoding="utf-8"))
+        if not isinstance(raw_snapshot, dict):
+            raise ValueError("initial router snapshot must contain one JSON object")
+        initial_router_snapshots = load_router_snapshot_bundle(raw_snapshot)
     report = Stage59Runner(
         Stage59Config(
             args.run_id, args.model_id, args.seed, track=args.track,
@@ -169,6 +193,8 @@ def main() -> int:
             proposal_provider=proposal,
             frozen_library=RuntimePipeline().frozen_skill_library if candidate_provider is not None else (),
             source_library=source_library,
+            initial_router_snapshots=initial_router_snapshots,
+            adaptation_prefix_ratio=args.adaptation_prefix_ratio,
         ),
     ).run(
         bundles,
@@ -177,6 +203,17 @@ def main() -> int:
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report.to_mapping(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.router_snapshot_output is not None:
+        stage5_result = report.results.get("stage5")
+        if not isinstance(stage5_result, dict):
+            raise ValueError("Stage 5 did not produce a router snapshot report")
+        router_bundle = router_snapshot_bundle_from_stage5_result(
+            stage5_result, source_model_id=args.model_id,
+        )
+        args.router_snapshot_output.parent.mkdir(parents=True, exist_ok=True)
+        args.router_snapshot_output.write_text(
+            json.dumps(router_bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8",
+        )
     if candidate_provider is not None and args.skill_library_output is not None:
         args.skill_library_output.parent.mkdir(parents=True, exist_ok=True)
         library = serialize_skill_library(candidate_provider.discovered_skills)
@@ -195,6 +232,8 @@ def main() -> int:
     print(f"[RESULT] report_sha256={report.report_sha256}")
     if candidate_provider is not None and args.skill_library_output is not None:
         print(f"[RESULT] skill_library={args.skill_library_output}")
+    if args.router_snapshot_output is not None:
+        print(f"[RESULT] router_snapshot={args.router_snapshot_output}")
     print(f"[RESULT] output={args.output}")
     return 0
 

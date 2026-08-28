@@ -242,10 +242,10 @@ def test_quarantined_skill_is_removed_from_the_next_event_candidate_mask() -> No
         second_case.decision_view,
         event_index=first.pending.matures_at_event_index + 1,
     )
-    second = second_runtime.process(second_decision)
+    second = second_runtime.process(second_decision, development_zero_backbone=True)
 
-    assert second.abstain is not None
-    assert second.abstain.reason == "no-typed-legal-candidate"
+    assert second.abstain is None
+    assert second.decision.selected_operator_id == "process_projection_rebuild"
     assert ("process_restore", "lifecycle-ineligible") in second.decision.candidates.rejected_operator_reasons
 
 

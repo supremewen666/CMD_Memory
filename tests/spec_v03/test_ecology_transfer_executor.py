@@ -31,7 +31,12 @@ def _order() -> RuntimeOrderManifest:
 def _skill(*, failure_id: str = "pending", parent: tuple[str, ...] = ()) -> SkillRevision:
     spec = next(item for item in operator_catalog() if item.operator_id == "process_restore")
     return SkillRevision.create(
-        skill_id="tiny:restore", program={"kind": "cmd-spec-v03-operator", "operator_id": spec.operator_id, "write_contract": spec.write_contract},
+        skill_id="tiny:restore", program={
+            "kind": "cmd-spec-v03-operator", "operator_id": spec.operator_id,
+            "operator_family": spec.operator_family, "strategy_id": spec.strategy_id,
+            "write_set": spec.write_set, "repair_action": spec.repair_action,
+            "write_contract": spec.write_contract,
+        },
         parameter_schema={"type": "object"}, preconditions=(), postconditions=(),
         success_probe={"probe_id": "tiny"}, mutation_budget={"locality": 2},
         rollback_program={"action": "restore"}, producing_failure_id=failure_id,

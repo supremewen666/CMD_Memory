@@ -15,7 +15,7 @@ from cmd_audit.repair.ecc import EccRepairReceipt
 
 from .contracts import DecisionView, canonical_sha256
 from .ecology_runtime import EcologyRuntime, Settlement
-from .repair_stream import MemoryState, OperatorSpec, execute_operator, operator_catalog
+from .repair_stream import MemoryState, OperatorSpec, execute_operator, operator_catalog, operator_locality
 from .router_stage5 import BackbonePrediction
 from .runtime_pipeline import PipelineDecision, RuntimePipeline
 from .syndrome_runtime import audit_structural_telemetry
@@ -138,31 +138,7 @@ def _operator(operator_id: str) -> OperatorSpec:
 
 
 def _locality(before: MemoryState, shadow: MemoryState, spec: OperatorSpec) -> int:
-    if before == shadow:
-        return 0
-    changed = {
-        name for name, different in (
-            ("projection_order", before.projection_order != shadow.projection_order),
-            ("projection_index", before.projection_index != shadow.projection_index),
-            ("scope_projection", before.scope_projection != shadow.scope_projection),
-            ("cache_event_ids", before.cache_event_ids != shadow.cache_event_ids),
-            ("supersession_edges", before.supersession_edges != shadow.supersession_edges),
-            ("quarantine_set", before.quarantine_set != shadow.quarantine_set),
-        ) if different
-    }
-    # A contract names a logical mutation surface; redundant materialized
-    # indexes do not multiply its locality cost.  Extra changed surfaces fail.
-    contracts = {
-        "process_restore": ({"projection_order", "projection_index"}, 2),
-        "process_replay_order": ({"projection_order", "projection_index"}, 2),
-        "process_rebuild_index": ({"projection_index"}, 1),
-        "process_scope_repair": ({"scope_projection"}, 1),
-        "process_cache_invalidate": ({"cache_event_ids"}, 1),
-        "state_supersede_lineage": ({"projection_order", "projection_index", "supersession_edges"}, 2),
-        "poison_quarantine_audit": ({"projection_order", "projection_index", "quarantine_set"}, 1),
-    }
-    allowed, cost = contracts.get(spec.operator_id, (set(), spec.locality_bound + 1))
-    return cost if changed <= allowed else spec.locality_bound + 1
+    return operator_locality(before, shadow, spec)
 
 
 def _rebased_decision(decision: DecisionView, state: MemoryState) -> DecisionView:

@@ -198,12 +198,18 @@ class SkillDiscoveryCallAudit:
 def _catalog_row(spec: OperatorSpec) -> dict[str, object]:
     return {
         "operator_id": spec.operator_id,
+        "operator_family": spec.operator_family,
+        "strategy_id": spec.strategy_id,
         "precondition": spec.precondition,
+        "read_set": list(spec.read_set),
+        "write_set": list(spec.write_set),
+        "repair_action": spec.repair_action,
         "read_contract": spec.read_contract,
         "write_contract": spec.write_contract,
         "invariant_contract": spec.invariant_contract,
         "safety_contract": spec.safety_contract,
         "locality_bound": spec.locality_bound,
+        "expected_cost": spec.expected_cost,
         "rollback_action": spec.rollback_action,
     }
 
@@ -344,7 +350,17 @@ def _compile_candidate(operator_id: str, skill_key: str, *, failure_id: str) -> 
     spec = next(item for item in operator_catalog() if item.operator_id == operator_id)
     return SkillRevision.create(
         skill_id=f"catalog:{operator_id}:{skill_key}",
-        program={"kind": "cmd-spec-v03-operator", "operator_id": operator_id, "write_contract": spec.write_contract},
+        program={
+            "kind": "cmd-spec-v03-operator",
+            "operator_id": operator_id,
+            "operator_family": spec.operator_family,
+            "strategy_id": spec.strategy_id,
+            "read_set": spec.read_set,
+            "write_set": spec.write_set,
+            "repair_action": spec.repair_action,
+            "write_contract": spec.write_contract,
+            "expected_cost": spec.expected_cost,
+        },
         parameter_schema={"type": "object", "additionalProperties": False},
         preconditions=({"kind": "catalog_precondition", "contract": spec.precondition},),
         postconditions=(
@@ -352,7 +368,12 @@ def _compile_candidate(operator_id: str, skill_key: str, *, failure_id: str) -> 
             {"kind": "catalog_safety", "contract": spec.safety_contract},
         ),
         success_probe={"probe_id": f"catalog:{operator_id}:invariant-and-safety"},
-        mutation_budget={"locality_bound": spec.locality_bound, "write_contract": spec.write_contract},
+        mutation_budget={
+            "locality_bound": spec.locality_bound,
+            "write_set": spec.write_set,
+            "write_contract": spec.write_contract,
+            "expected_cost": spec.expected_cost,
+        },
         rollback_program={"action": spec.rollback_action},
         producing_failure_id=failure_id,
         derivation_kind="discovery", state="stable",
