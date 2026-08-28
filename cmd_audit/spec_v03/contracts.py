@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from functools import cached_property
 import hashlib
 import json
 from typing import Any, Mapping
@@ -89,7 +90,7 @@ class DecisionView:
     def to_mapping(self) -> dict[str, object]:
         return asdict(self)
 
-    @property
+    @cached_property
     def content_sha256(self) -> str:
         return canonical_sha256(self.to_mapping())
 

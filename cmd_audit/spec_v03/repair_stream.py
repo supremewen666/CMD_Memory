@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass
 import csv
+from functools import cached_property
 import hashlib
 import json
 from pathlib import Path
@@ -309,7 +310,7 @@ class MemoryState:
     supersession_edges: tuple[tuple[str, str], ...]
     quarantine_set: tuple[str, ...]
 
-    @property
+    @cached_property
     def root(self) -> str:
         source_ids = tuple(event.event_id for event in self.immutable_source_log)
         source_root = _SOURCE_LOG_ROOT_CACHE.get(source_ids)
