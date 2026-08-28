@@ -19,6 +19,7 @@ from cmd_audit.spec_v03.backbone_provider import (
     ProviderBudget,
 )
 from cmd_audit.spec_v03.governance_system_executor import FirstLegalProposalPolicy
+from cmd_audit.spec_v03.experiment_matrix import STAGE5_VARIANTS
 from cmd_audit.spec_v03.industry_adapters import ResourceUsage
 from cmd_audit.spec_v03.prequential_executor import RuntimeOrderManifest
 from cmd_audit.spec_v03.runtime_bundle import load_runtime_cases
@@ -85,6 +86,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--adaptation-prefix-ratio", type=float, default=0.0,
         help="Initial target-order fraction used only to update GHOST posteriors; the suffix is scored.",
+    )
+    parser.add_argument(
+        "--stage5-arm", action="append", dest="stage5_arms",
+        choices=("random_legal", "best_global", "global_thompson", "niche_thompson", "contextual_bandit", "ghost_hierarchy", "mix_ghost", "oracle_legal"),
+        help="Run only this Stage 5 arm; repeat for multiple arms. Defaults to all arms.",
     )
     parser.add_argument(
         "--development-first-legal",
@@ -195,6 +201,7 @@ def main() -> int:
             source_library=source_library,
             initial_router_snapshots=initial_router_snapshots,
             adaptation_prefix_ratio=args.adaptation_prefix_ratio,
+            stage5_arms=tuple(args.stage5_arms) if args.stage5_arms else STAGE5_VARIANTS,
         ),
     ).run(
         bundles,

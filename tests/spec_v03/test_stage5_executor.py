@@ -173,6 +173,23 @@ def test_stage5_same_event_cannot_update_and_seed_replays() -> None:
         assert all(receipt.selected_at_event_index < receipt.settled_before_event_index == receipt.observed_after_event_index for receipt in arm.receipt_records)
 
 
+def test_stage5_can_run_only_the_requested_source_posterior_arms() -> None:
+    bundles, order = _fast_inputs()
+    report = Stage5Executor(
+        Stage5ExecutionConfig(
+            "stage5-selected-arms", "development-hash-provider", 113,
+            arms=("mix_ghost",),
+        ),
+        _provider(), _Feedback(), sealed_oracle_provider=_Oracle(),
+    ).run(bundles, order)
+
+    assert tuple(arm.arm for arm in report.arms) == ("mix_ghost",)
+    with pytest.raises(ValueError, match="unique non-empty supported subset"):
+        Stage5ExecutionConfig(
+            "stage5-bad-arms", "development-hash-provider", 113, arms=(),
+        )
+
+
 def test_stage5_routes_external_sibling_revisions_without_a_singleton_candidate_shortcut() -> None:
     bundles, order = _inputs()
     library = _sibling_restore_library()

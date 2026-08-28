@@ -86,6 +86,7 @@ class Stage59Capabilities:
     target_prefix_snapshot: Mapping[str, object] | None = None
     initial_router_snapshots: Mapping[str, Mapping[str, object]] | None = None
     adaptation_prefix_ratio: float = 0.0
+    stage5_arms: tuple[str, ...] = STAGE5_VARIANTS
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,7 @@ class Stage59Runner:
                         self.config.run_id + ":stage5", self.config.model_id, self.config.seed,
                         initial_router_snapshots=capabilities.initial_router_snapshots,
                         adaptation_prefix_ratio=capabilities.adaptation_prefix_ratio,
+                        arms=capabilities.stage5_arms,
                     ),
                     capabilities.backbone_provider,
                     capabilities.feedback_provider,

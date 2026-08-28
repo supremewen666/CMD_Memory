@@ -272,6 +272,7 @@ class Stage5ExecutionConfig:
     execution_mode: str = "DEVELOPMENT"
     initial_router_snapshots: Mapping[str, Mapping[str, object]] | None = None
     adaptation_prefix_ratio: float = 0.0
+    arms: tuple[str, ...] = STAGE5_VARIANTS
 
     def __post_init__(self) -> None:
         if not self.run_id or not self.model_id:
@@ -296,6 +297,8 @@ class Stage5ExecutionConfig:
             for arm, snapshot in self.initial_router_snapshots.items():
                 if not isinstance(arm, str) or not isinstance(snapshot, Mapping):
                     raise ValueError("initial router snapshots must map a GHOST arm to one snapshot")
+        if not self.arms or len(set(self.arms)) != len(self.arms) or not set(self.arms) <= set(STAGE5_VARIANTS):
+            raise ValueError("Stage 5 arms must be a unique non-empty supported subset")
 
     @property
     def config_sha256(self) -> str:
@@ -569,7 +572,7 @@ class Stage5Executor:
             raise ValueError("adaptation prefix ratio selects no runtime events")
         reports = tuple(
             self._run_arm(arm, bundle_map, order, cache, shared_usage, prefix_count)
-            for arm in STAGE5_VARIANTS
+            for arm in self.config.arms
         )
         total_usage = shared_usage
         body = {
