@@ -482,11 +482,38 @@ class OpenAICompatibleBackboneProvider(_BaseBackboneProvider):
 
     def predict(self, decision: DecisionView, state: MemoryState, candidates: Sequence[SkillRevision]) -> BackbonePrediction:
         prompt, candidate_ids, _estimated_input = self._prepare(decision, state, candidates)
+        output_schema = {
+            "type": "object",
+            "properties": {
+                "selected_skill_revision_id": {
+                    "type": "string",
+                    "enum": list(candidate_ids),
+                },
+                "scores": {
+                    "type": "object",
+                    "properties": {
+                        skill_id: {"type": "number", "minimum": -1.0, "maximum": 1.0}
+                        for skill_id in candidate_ids
+                    },
+                    "required": list(candidate_ids),
+                    "additionalProperties": False,
+                },
+            },
+            "required": ["selected_skill_revision_id", "scores"],
+            "additionalProperties": False,
+        }
         request: dict[str, object] = {
             "model": self.config.model_id,
             "temperature": float(self.config.temperature),
             "max_tokens": self.config.max_output_tokens,
-            "response_format": {"type": "json_object"},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "cmd_backbone_prediction",
+                    "strict": True,
+                    "schema": output_schema,
+                },
+            },
             "messages": [
                 {"role": "system", "content": "Return only the closed JSON object requested by the user message."},
                 {"role": "user", "content": json.dumps(prompt, sort_keys=True, separators=(",", ":"), allow_nan=False)},

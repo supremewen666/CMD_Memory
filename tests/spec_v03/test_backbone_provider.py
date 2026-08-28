@@ -171,6 +171,11 @@ def test_loopback_vllm_accepts_no_key_with_external_manifest_snapshot_binding() 
     assert audit.snapshot_binding == "external_manifest"
     assert audit.config_sha256 == config.config_sha256
     assert config.config_sha256 != replace(config, snapshot="sha256:different").config_sha256
+    response_format = transport.calls[0]["body"]["response_format"]
+    assert response_format["type"] == "json_schema"
+    schema = response_format["json_schema"]["schema"]
+    assert schema["properties"]["selected_skill_revision_id"]["enum"] == [skill_id]
+    assert schema["properties"]["scores"]["required"] == [skill_id]
 
 
 def test_openai_provider_accepts_vllm_message_extension_fields() -> None:
