@@ -260,6 +260,36 @@ def test_stage5_imports_ghost_posteriors_and_keeps_prefix_out_of_scored_suffix()
     assert not by_arm["random_legal"].imported_router_snapshot
 
 
+def test_stage5_receipt_records_persist_explicit_telemetry_and_custom_provider_stays_unknown() -> None:
+    bundles, order = _fast_inputs()
+    structural = Stage5Executor(
+        Stage5ExecutionConfig("stage5-telemetry", "development-hash-provider", 149, arms=("mix_ghost",)),
+        _provider(), StructuralDevelopmentStage5FeedbackProvider("development-hash-provider"),
+    ).run(bundles, order).arms[0]
+    receipt = structural.receipt_records[0]
+    assert isinstance(receipt.valid, bool)
+    assert isinstance(receipt.safety_passed, bool)
+    assert isinstance(receipt.invariant_passed, bool)
+    assert receipt.operator_family is not None
+    assert receipt.strategy_id is not None
+    assert receipt.regime == "stationary"
+    assert receipt.posterior_updates
+    for update in receipt.posterior_updates:
+        assert update.before_precision == 1.0
+        assert update.before_natural == 0.0
+        assert update.before_mean == 0.0
+        assert update.after_precision > 0
+        assert update.after_mean == pytest.approx(update.after_natural / update.after_precision)
+
+    custom = Stage5Executor(
+        Stage5ExecutionConfig("stage5-custom-telemetry", "development-hash-provider", 151, arms=("random_legal",)),
+        _provider(), _Feedback(),
+    ).run(bundles, order).arms[0].receipt_records[0]
+    assert custom.safety_passed is None
+    assert custom.locality_cost is None
+    assert custom.posterior_updates == ()
+
+
 def test_stage5_fails_closed_for_incompatible_imported_router_snapshots() -> None:
     bundles, order = _fast_inputs()
     source = Stage5Executor(

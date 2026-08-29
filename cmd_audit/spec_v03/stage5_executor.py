@@ -42,7 +42,7 @@ from .runtime_pipeline import RuntimePipeline, build_legal_candidates
 from .syndrome_runtime import audit_structural_telemetry, decode_ecc_syndrome
 
 
-STAGE5_EXECUTOR_SCHEMA = "cmd-spec-v03-stage5-executor-v1"
+STAGE5_EXECUTOR_SCHEMA = "cmd-spec-v03-stage5-executor-v2"
 _ADAPTIVE_ARMS = frozenset({"best_global", "global_thompson", "niche_thompson", "contextual_bandit"})
 _ROUTER_ARMS = frozenset({"mix_ghost", "ghost_hierarchy"})
 ROUTER_SNAPSHOT_BUNDLE_SCHEMA = "cmd-spec-v03-stage5-router-snapshots-v1"
@@ -60,6 +60,13 @@ class Stage5Receipt:
     valid: bool = True
     rolled_back: bool = False
     delayed_regression: bool = False
+    safety_passed: bool | None = None
+    invariant_passed: bool | None = None
+    locality_cost: float | None = None
+    collateral_cost: float | None = None
+    operator_family: str | None = None
+    strategy_id: str | None = None
+    recurrence_after_commit: bool | None = None
     provenance: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
@@ -69,6 +76,17 @@ class Stage5Receipt:
             raise ValueError("Stage 5 receipt must mature after its selection")
         if not math.isfinite(self.utility) or not -1.0 <= self.utility <= 1.0:
             raise ValueError("Stage 5 receipt utility must be finite in [-1, 1]")
+        for name in ("safety_passed", "invariant_passed", "recurrence_after_commit"):
+            if getattr(self, name) is not None and not isinstance(getattr(self, name), bool):
+                raise ValueError(f"Stage 5 receipt {name} must be bool or None")
+        for name in ("locality_cost", "collateral_cost"):
+            value = getattr(self, name)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or value < 0):
+                raise ValueError(f"Stage 5 receipt {name} must be finite, non-negative, or None")
+        for name in ("operator_family", "strategy_id"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, str) or not value):
+                raise ValueError(f"Stage 5 receipt {name} must be a non-empty string or None")
 
     @property
     def outcome(self) -> float:
@@ -243,6 +261,13 @@ class StructuralDevelopmentStage5FeedbackProvider:
             valid=valid,
             rolled_back=not valid,
             delayed_regression=not resolved,
+            safety_passed=safety_passed,
+            invariant_passed=immutable_log_preserved and audit_log_preserved and resolved,
+            locality_cost=locality_cost,
+            collateral_cost=collateral_cost,
+            operator_family=None if spec is None else spec.operator_family,
+            strategy_id=None if spec is None else spec.strategy_id,
+            recurrence_after_commit=recurrence_after_commit,
             provenance=provenance,
         )
 
@@ -337,6 +362,29 @@ class Stage5ReceiptRecord:
     settled_before_event_index: int
     posterior_before_sha256: str
     posterior_after_sha256: str
+    valid: bool
+    rolled_back: bool
+    delayed_regression: bool
+    safety_passed: bool | None
+    invariant_passed: bool | None
+    locality_cost: float | None
+    collateral_cost: float | None
+    operator_family: str | None
+    strategy_id: str | None
+    recurrence_after_commit: bool | None
+    regime: str
+    posterior_updates: tuple["Stage5PosteriorUpdate", ...]
+
+
+@dataclass(frozen=True)
+class Stage5PosteriorUpdate:
+    key: tuple[str, ...]
+    before_precision: float
+    before_natural: float
+    before_mean: float
+    after_precision: float
+    after_natural: float
+    after_mean: float
 
 
 @dataclass(frozen=True)
@@ -780,6 +828,47 @@ class Stage5Executor:
         payload = {"schema_version": "cmd-spec-v03-stage5-static-v1"}
         return {**payload, "snapshot_sha256": canonical_sha256(payload)}
 
+    @staticmethod
+    def _posterior_updates(
+        before: Mapping[str, object],
+        after: Mapping[str, object],
+        *,
+        ghost: bool,
+    ) -> tuple[Stage5PosteriorUpdate, ...]:
+        if not ghost:
+            return ()
+
+        def parse(snapshot: Mapping[str, object]) -> dict[tuple[str, ...], tuple[float, float]]:
+            raw = snapshot.get("stats")
+            if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+                raise ValueError("GHOST snapshot has no stats sequence")
+            result: dict[tuple[str, ...], tuple[float, float]] = {}
+            for row in raw:
+                if not isinstance(row, Sequence) or isinstance(row, (str, bytes)) or len(row) != 3:
+                    raise ValueError("GHOST snapshot has malformed statistic")
+                raw_key, raw_precision, raw_natural = row
+                if not isinstance(raw_key, Sequence) or isinstance(raw_key, (str, bytes)):
+                    raise ValueError("GHOST statistic key is malformed")
+                key = tuple(str(value) for value in raw_key)
+                precision, natural = float(raw_precision), float(raw_natural)
+                if not key or any(not value for value in key) or not math.isfinite(precision) or precision <= 0 or not math.isfinite(natural) or key in result:
+                    raise ValueError("GHOST snapshot statistic is invalid")
+                result[key] = (precision, natural)
+            return result
+
+        before_stats, after_stats = parse(before), parse(after)
+        updates = []
+        for key in sorted(set(before_stats) | set(after_stats)):
+            left = before_stats.get(key, (1.0, 0.0))
+            right = after_stats.get(key, (1.0, 0.0))
+            if left == right:
+                continue
+            updates.append(Stage5PosteriorUpdate(
+                key, left[0], left[1], left[1] / left[0],
+                right[0], right[1], right[1] / right[0],
+            ))
+        return tuple(updates)
+
     def _settle(self, arm: str, policy: _AdaptivePolicy | None, router: ObservableResidualGHOSTRouter | GHOSTEcologyRouter | None, item: _Pending, current_event: int, records: list[Stage5ReceiptRecord]) -> None:
         receipt = self.feedback_provider.observe(
             selection_id=item.selection_id,
@@ -793,7 +882,8 @@ class Stage5Executor:
             raise ValueError("delayed feedback is not bound to the selected Stage 5 action")
         if receipt.observed_after_event_index != current_event:
             raise ValueError("Stage 5 receipt must settle exactly at its order-manifest maturity event")
-        before = self._snapshot(router, policy)
+        before_mapping = self._snapshot_mapping(router, policy)
+        before = str(before_mapping["snapshot_sha256"])
         if policy is not None:
             syndrome = decode_ecc_syndrome(replace(item.case.decision_view, event_index=item.selected_at), item.case.memory_state)
             policy.observe(item.skill_id, receipt.outcome, item.context, syndrome.descriptor.classification)
@@ -801,5 +891,16 @@ class Stage5Executor:
             skill = RuntimePipeline(model_id=self.config.model_id, skill_library=self.skill_library).frozen_skill(item.skill_id)
             feedback = DelayedOutcomeFeedback(item.selection_id, item.skill_id, str(skill.success_probe["probe_id"]), item.selected_at, item.matures_at, item.prediction.scores[item.skill_id], receipt.utility, receipt.valid, receipt.rolled_back, receipt.delayed_regression, "cmd-spec-v03-stage5-executor", development_proxy=True)
             router.observe(item.router_selection, feedback)  # type: ignore[arg-type]
-        after = self._snapshot(router, policy)
-        records.append(Stage5ReceiptRecord(arm, receipt.receipt_sha256, receipt.selection_id, receipt.selected_skill_revision_id, receipt.selected_at_event_index, receipt.observed_after_event_index, receipt.outcome, current_event, before, after))
+        after_mapping = self._snapshot_mapping(router, policy)
+        after = str(after_mapping["snapshot_sha256"])
+        records.append(Stage5ReceiptRecord(
+            arm, receipt.receipt_sha256, receipt.selection_id,
+            receipt.selected_skill_revision_id, receipt.selected_at_event_index,
+            receipt.observed_after_event_index, receipt.outcome, current_event,
+            before, after, receipt.valid, receipt.rolled_back,
+            receipt.delayed_regression, receipt.safety_passed,
+            receipt.invariant_passed, receipt.locality_cost,
+            receipt.collateral_cost, receipt.operator_family, receipt.strategy_id,
+            receipt.recurrence_after_commit, item.regime,
+            self._posterior_updates(before_mapping, after_mapping, ghost=router is not None),
+        ))
