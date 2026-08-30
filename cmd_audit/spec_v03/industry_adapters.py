@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+import math
 from pathlib import Path
 import random
 import subprocess
@@ -49,8 +50,12 @@ class ResourceUsage:
 
     def __post_init__(self) -> None:
         values = asdict(self)
-        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 for value in values.values()):
-            raise ValueError("resource usage values must be non-negative numbers")
+        if any(
+            isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(float(value)) or value < 0
+            for value in values.values()
+        ):
+            raise ValueError("resource usage values must be finite non-negative numbers")
         if any(name != "wall_clock_seconds" and isinstance(value, float) and not value.is_integer() for name, value in values.items()):
             raise ValueError("resource usage counters must be integral except wall_clock_seconds")
 

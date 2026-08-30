@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -20,7 +21,13 @@ from cmd_audit.spec_v03.backbone_provider import (
 )
 from cmd_audit.spec_v03.governance_system_executor import FirstLegalProposalPolicy
 from cmd_audit.spec_v03.experiment_matrix import STAGE5_VARIANTS
-from cmd_audit.spec_v03.industry_adapters import ResourceUsage
+from cmd_audit.spec_v03.industry_adapters import (
+    IndustryAdapter,
+    ResourceUsage,
+    lightmem_adapter,
+    lycheemem_adapter,
+    mem0_adapter,
+)
 from cmd_audit.spec_v03.prequential_executor import RuntimeOrderManifest
 from cmd_audit.spec_v03.runtime_bundle import load_runtime_cases
 from cmd_audit.spec_v03.runtime_pipeline import RuntimePipeline
@@ -39,6 +46,43 @@ from cmd_audit.spec_v03.stage5_executor import (
 )
 
 
+def _non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be non-negative")
+    return parsed
+
+
+def _non_negative_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("must be a finite non-negative number")
+    return parsed
+
+
+def _load_industry_adapters(config_path: Path | None) -> dict[str, IndustryAdapter]:
+    """Build only known Stage 9 adapters from the closed JSON config schema."""
+    raw_config: object = {}
+    if config_path is not None:
+        raw_config = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(raw_config, dict) or set(raw_config) - {"lightmem", "lycheemem", "mem0"}:
+        raise ValueError("industry adapters config must be a JSON object with only lightmem, lycheemem, and mem0")
+    for system_id, config in raw_config.items():
+        if not isinstance(config, dict):
+            raise ValueError(f"{system_id} adapter configuration must be a JSON object")
+    return {
+        "lightmem": lightmem_adapter(raw_config.get("lightmem")),
+        "lycheemem": lycheemem_adapter(raw_config.get("lycheemem")),
+        "mem0": mem0_adapter(raw_config.get("mem0")),
+    }
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-cases", type=Path, required=True)
@@ -47,7 +91,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--model-id", default="development-non-model")
     parser.add_argument("--seed", type=int, default=20260827)
-    parser.add_argument("--track", choices=("controlled_a1", "controlled_a2"), default="controlled_a1")
+    parser.add_argument("--track", choices=("controlled_a1", "controlled_a2", "native"), default="controlled_a1")
+    parser.add_argument(
+        "--industry-adapters-config", type=Path,
+        help="Closed JSON configuration for pinned LightMem, LycheeMem, and Mem0 OSS wrappers.",
+    )
+    parser.add_argument("--system-max-llm-calls", type=_non_negative_int, default=0)
+    parser.add_argument("--system-max-input-tokens", type=_non_negative_int, default=0)
+    parser.add_argument("--system-max-output-tokens", type=_non_negative_int, default=0)
+    parser.add_argument("--system-max-wall-seconds", type=_non_negative_float, default=0.0)
+    parser.add_argument("--system-max-gpu-seconds", type=_non_negative_int, default=0)
     parser.add_argument(
         "--stage", action="append", dest="stages",
         choices=("stage5", "stage6", "stage7", "stage8a", "stage8b", "stage9"),
@@ -107,6 +160,7 @@ def main() -> int:
     )
     if (args.initial_router_snapshot is not None or args.router_snapshot_output is not None or args.adaptation_prefix_ratio != 0.0) and "stage5" not in stages:
         raise ValueError("router snapshot import/export and prefix adaptation require --stage stage5")
+    industry_adapters = _load_industry_adapters(args.industry_adapters_config)
     bundles = load_runtime_cases(args.runtime_cases)
     raw_order = json.loads(args.event_order.read_text(encoding="utf-8"))
     if not isinstance(raw_order, dict):
@@ -202,11 +256,18 @@ def main() -> int:
             initial_router_snapshots=initial_router_snapshots,
             adaptation_prefix_ratio=args.adaptation_prefix_ratio,
             stage5_arms=tuple(args.stage5_arms) if args.stage5_arms else STAGE5_VARIANTS,
+            industry_adapters=industry_adapters,
         ),
     ).run(
         bundles,
         order,
-        system_budget=ResourceUsage(0, 0, 0, 0.0, 0.0),
+        system_budget=ResourceUsage(
+            args.system_max_llm_calls,
+            args.system_max_input_tokens,
+            args.system_max_output_tokens,
+            args.system_max_wall_seconds,
+            args.system_max_gpu_seconds,
+        ),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report.to_mapping(), indent=2, sort_keys=True) + "\n", encoding="utf-8")

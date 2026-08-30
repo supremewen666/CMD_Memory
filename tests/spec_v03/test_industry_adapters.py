@@ -65,6 +65,12 @@ def test_builtin_adapters_are_closed_and_deterministic() -> None:
     assert first.selected_operator_id in request.legal_operator_ids
 
 
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), float("-inf")))
+def test_resource_usage_rejects_non_finite_values(value: float) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        ResourceUsage(0, 0, 0, value, 0)
+
+
 def test_unconfigured_industry_factories_are_unsupported_without_results() -> None:
     request = _request()
     for factory in (lightmem_adapter, lycheemem_adapter, mem0_adapter):

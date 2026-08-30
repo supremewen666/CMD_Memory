@@ -1,0 +1,49 @@
+{
+  "schema_version": "cmd-controlled-memory-protocol-v1",
+  "retrieval_top_k": 5,
+  "head": {
+    "endpoint": "http://127.0.0.1:8001/v1",
+    "model_id": "Qwen3-14B",
+    "model_snapshot": "REPLACE_WITH_FROZEN_MODEL_MANIFEST_SHA256",
+    "api_key_env": "QWEN_API_KEY",
+    "max_output_tokens": 64,
+    "timeout_seconds": 60.0,
+    "temperature": 0.0,
+    "max_memory_chars": 16000
+  },
+  "systems": {
+    "lightmem": {
+      "config_path": "/ABS/PATH/lightmem-controlled.json",
+      "force_segment": true,
+      "force_extract": true,
+      "offline_update": true,
+      "offline_score_threshold": 0.8,
+      "backend_usage": {
+        "mode": "enforcing_proxy_receipt",
+        "receipt_path": "/ABS/PATH/usage/lightmem-{namespace}.json"
+      }
+    },
+    "lycheemem": {
+      "base_url": "http://127.0.0.1:9000/instances/{namespace}",
+      "instance_receipt_path": "/ABS/PATH/lychee-instances/{namespace}.json",
+      "expected_commit": "0000000000000000000000000000000000000000",
+      "api_key_env": "LYCHEEMEM_API_KEY",
+      "timeout_seconds": 60.0,
+      "consolidate": true,
+      "include_graph": true,
+      "include_skills": false,
+      "backend_usage": {
+        "mode": "enforcing_proxy_receipt",
+        "receipt_path": "/ABS/PATH/usage/lycheemem-{namespace}.json"
+      }
+    },
+    "mem0": {
+      "config_path": "/ABS/PATH/mem0-controlled.json",
+      "add_per_event": true,
+      "backend_usage": {
+        "mode": "enforcing_proxy_receipt",
+        "receipt_path": "/ABS/PATH/usage/mem0-{namespace}.json"
+      }
+    }
+  }
+}
