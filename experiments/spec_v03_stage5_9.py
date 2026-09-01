@@ -21,6 +21,7 @@ from cmd_audit.spec_v03.backbone_provider import (
 )
 from cmd_audit.spec_v03.governance_system_executor import FirstLegalProposalPolicy
 from cmd_audit.spec_v03.experiment_matrix import STAGE5_EXECUTABLE_VARIANTS, STAGE5_VARIANTS
+from cmd_audit.spec_v03.family_disjoint import select_runtime_splits
 from cmd_audit.spec_v03.industry_adapters import (
     IndustryAdapter,
     ResourceUsage,
@@ -87,6 +88,19 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-cases", type=Path, required=True)
     parser.add_argument("--event-order", type=Path, required=True)
+    parser.add_argument(
+        "--split-manifest", type=Path,
+        help="Frozen split manifest used with one or more --include-split values.",
+    )
+    parser.add_argument(
+        "--include-split", action="append", dest="include_splits",
+        choices=("D_skill", "D_router", "D_cal", "D_lifecycle", "T_online", "T_anchor", "T_final"),
+        help="Run only this frozen split; repeat to combine splits.",
+    )
+    parser.add_argument(
+        "--split-audit-output", type=Path,
+        help="Write the family-disjoint partition audit used by this run.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--model-id", default="development-non-model")
@@ -166,6 +180,15 @@ def main() -> int:
     if not isinstance(raw_order, dict):
         raise ValueError("event order must contain one JSON object")
     order = RuntimeOrderManifest.from_mapping(raw_order)
+    split_audit = None
+    if bool(args.split_manifest) != bool(args.include_splits):
+        raise ValueError("--split-manifest and --include-split must be supplied together")
+    if args.split_audit_output is not None and args.split_manifest is None:
+        raise ValueError("--split-audit-output requires split selection")
+    if args.split_manifest is not None:
+        bundles, order, split_audit = select_runtime_splits(
+            bundles, order, args.split_manifest, tuple(args.include_splits),
+        )
     proposal = FirstLegalProposalPolicy() if args.development_first_legal else None
     provider_budget = ProviderBudget(
         max_requests=args.max_requests,
@@ -271,6 +294,11 @@ def main() -> int:
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report.to_mapping(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.split_audit_output is not None and split_audit is not None:
+        args.split_audit_output.parent.mkdir(parents=True, exist_ok=True)
+        args.split_audit_output.write_text(
+            json.dumps(split_audit, indent=2, sort_keys=True) + "\n", encoding="utf-8",
+        )
     if args.router_snapshot_output is not None:
         stage5_result = report.results.get("stage5")
         if not isinstance(stage5_result, dict):
