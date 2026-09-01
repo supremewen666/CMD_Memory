@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+
 from cmd_audit.spec_v03.order_only import CaseOrderMetadata
 from experiments.spec_v03_analyze_routing_ablation import ARMS
-from experiments.spec_v03_routing_bootstrap import _paired_deltas
+from experiments.spec_v03_routing_bootstrap import _load_case_indexes, _paired_deltas
 
 
 def _arm(name: str, selected: str, utility: float) -> dict[str, object]:
@@ -54,3 +56,21 @@ def test_routing_bootstrap_rows_preserve_family_blocks() -> None:
     assert {row["family_id"] for row in rows} == {"family-1"}
     gate = next(row for row in rows if row["mechanism"] == "support_gate")
     assert gate["delta"] == 0.5
+
+
+def test_routing_bootstrap_loads_repeated_consistent_case_indexes(tmp_path) -> None:
+    row = {
+        "case_id": "case-1",
+        "family_id": "family-1",
+        "source_episode_id": "episode-1",
+        "source_dataset_id": "fixture",
+        "incident_type": "process_fault",
+    }
+    first = tmp_path / "first.json"
+    second = tmp_path / "second.json"
+    first.write_text(json.dumps([row]))
+    second.write_text(json.dumps([row]))
+
+    result = _load_case_indexes([first, second])
+
+    assert result["case-1"].family_id == "family-1"

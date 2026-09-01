@@ -26,19 +26,67 @@ from experiments.spec_v03_analyze_routing_ablation import (
 from experiments.spec_v03_family_bootstrap import bootstrap_family_means
 
 
+def _load_case_indexes(paths: list[Path]) -> dict[str, CaseOrderMetadata]:
+    result: dict[str, CaseOrderMetadata] = {}
+    required = {
+        "case_id",
+        "family_id",
+        "source_episode_id",
+        "source_dataset_id",
+        "incident_type",
+    }
+    for path in paths:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, list):
+            raise ValueError(f"case index must contain a JSON list: {path}")
+        for item in raw:
+            if not isinstance(item, Mapping) or set(item) != required:
+                raise ValueError(f"case index row has an invalid schema: {path}")
+            row = CaseOrderMetadata(**{key: str(item[key]) for key in required})
+            previous = result.get(row.case_id)
+            if previous is not None and previous != row:
+                raise ValueError("case index files disagree on case metadata")
+            result[row.case_id] = row
+    if not result:
+        raise ValueError("case index files contain no rows")
+    return result
+
+
+def _pilot_case_seed(data_root: Path, source: str) -> int:
+    manifest_path = data_root / f"{source}_stationary" / "pilot_manifest.json"
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    seed = raw.get("seed") if isinstance(raw, Mapping) else None
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValueError(f"pilot manifest has no integer seed: {manifest_path}")
+    return seed
+
+
 def _case_index(args: argparse.Namespace) -> dict[str, CaseOrderMetadata]:
+    if args.case_indexes:
+        return _load_case_indexes(args.case_indexes)
     result: dict[str, CaseOrderMetadata] = {}
     for source in args.sources:
+        case_seed = (
+            args.case_seed
+            if args.case_seed is not None
+            else _pilot_case_seed(args.data_root, source)
+        )
         rows = compile_case_order_metadata(
             source,
             group_a_root=args.group_a_root,
             limit=args.limit,
-            case_seed=args.case_seed,
+            case_seed=case_seed,
         )
-        verify_split_case_ids(
-            rows,
-            args.data_root / f"{source}_stationary" / "split_manifest.json",
-        )
+        try:
+            verify_split_case_ids(
+                rows,
+                args.data_root / f"{source}_stationary" / "split_manifest.json",
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"{source} case metadata does not match its pilot split at seed "
+                f"{case_seed}; pass one or more frozen --case-index files"
+            ) from error
         for row in rows:
             if row.case_id in result:
                 raise ValueError("case identity collides across public sources")
@@ -101,7 +149,18 @@ def main() -> int:
         choices=("halumem", "memfail", "memtracebench"),
     )
     parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument("--case-seed", type=int, default=20260827)
+    parser.add_argument(
+        "--case-seed",
+        type=int,
+        help="Override the per-source seed recorded in pilot_manifest.json.",
+    )
+    parser.add_argument(
+        "--case-index",
+        action="append",
+        dest="case_indexes",
+        type=Path,
+        help="Use a frozen case_index.json instead of reconstructing case identities.",
+    )
     parser.add_argument("--bootstrap-seed", type=int, default=20260901)
     parser.add_argument("--iterations", type=int, default=10000)
     parser.add_argument("--output", type=Path, required=True)
