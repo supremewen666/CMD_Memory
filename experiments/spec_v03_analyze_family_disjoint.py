@@ -40,7 +40,10 @@ def main() -> int:
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--group-a-root", type=Path, default=Path("data/external/group_a"))
     parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument("--case-seed", type=int, default=20260827)
+    parser.add_argument(
+        "--case-seed", type=int,
+        help="Override each source seed recorded in its pilot_manifest.json.",
+    )
     parser.add_argument("--iterations", type=int, default=10000)
     parser.add_argument("--bootstrap-seed", type=int, default=20260901)
     parser.add_argument("--output", type=Path, required=True)
@@ -48,9 +51,18 @@ def main() -> int:
 
     case_index = {}
     for source in ("halumem", "memfail", "memtracebench"):
+        pilot = json.loads(
+            (args.data_root / f"{source}_stationary" / "pilot_manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        pilot_seed = pilot.get("seed") if isinstance(pilot, Mapping) else None
+        if isinstance(pilot_seed, bool) or not isinstance(pilot_seed, int):
+            raise ValueError(f"{source} pilot manifest lacks an integer seed")
+        case_seed = args.case_seed if args.case_seed is not None else pilot_seed
         rows = compile_case_order_metadata(
             source, group_a_root=args.group_a_root,
-            limit=args.limit, case_seed=args.case_seed,
+            limit=args.limit, case_seed=case_seed,
         )
         verify_split_case_ids(rows, args.data_root / f"{source}_stationary" / "split_manifest.json")
         case_index.update({row.case_id: row for row in rows})
