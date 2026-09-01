@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from experiments.spec_v03_analyze_routing_ablation import ARMS, analyze_report
+from cmd_audit.spec_v03.order_only import CaseOrderMetadata
+from experiments.spec_v03_analyze_routing_ablation import ARMS
+from experiments.spec_v03_routing_bootstrap import _paired_deltas
 
 
 def _arm(name: str, selected: str, utility: float) -> dict[str, object]:
@@ -29,7 +31,7 @@ def _arm(name: str, selected: str, utility: float) -> dict[str, object]:
     }
 
 
-def test_routing_ablation_analysis_pairs_overrides_and_gate_effect() -> None:
+def test_routing_bootstrap_rows_preserve_family_blocks() -> None:
     utilities = {
         "routing_frozen_backbone": ("base", 0.4),
         "routing_global": ("other", 0.5),
@@ -44,12 +46,11 @@ def test_routing_ablation_analysis_pairs_overrides_and_gate_effect() -> None:
             _arm(arm, *utilities[arm]) for arm in ARMS
         ]}},
     }
+    metadata = CaseOrderMetadata("case-1", "family-1", "episode-1", "fixture", "process_fault")
 
-    result = analyze_report(raw, source="fixture")
+    rows = _paired_deltas(raw, {"case-1": metadata}, source="fixture")
 
-    assert result is not None
-    assert result["arm_metrics"]["mix_ghost"]["mean_utility"] == 0.8
-    assert result["arm_metrics"]["routing_frozen_backbone"]["override_rate"] == 0.0
-    assert result["arm_metrics"]["routing_full_no_support_gate"]["negative_override_rate"] == 1.0
-    gate = next(row for row in result["comparisons"] if row["mechanism"] == "support_gate")
-    assert gate["mean_delta"] == 0.5
+    assert len(rows) == 5
+    assert {row["family_id"] for row in rows} == {"family-1"}
+    gate = next(row for row in rows if row["mechanism"] == "support_gate")
+    assert gate["delta"] == 0.5

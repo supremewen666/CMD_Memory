@@ -58,6 +58,12 @@ python experiments/spec_v03_analyze_routing_ablation.py \
   --input-root "$RUN_ROOT/routing_ablation" \
   --output "$RUN_ROOT/analysis/routing-ablation.json" \
   --markdown-output "$RUN_ROOT/analysis/routing-ablation.md"
+
+python experiments/spec_v03_routing_bootstrap.py \
+  --input-root "$RUN_ROOT/routing_ablation" \
+  --data-root "$RUN_ROOT/data" \
+  --iterations 10000 \
+  --output "$RUN_ROOT/analysis/routing-ablation-family-bootstrap.json"
 ```
 
 The analyzer reports paired utility, empirical regret, override rate, negative

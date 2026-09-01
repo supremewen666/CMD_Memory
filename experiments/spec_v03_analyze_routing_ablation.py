@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 import json
-import math
 from pathlib import Path
 from statistics import mean
 from typing import Iterable, Mapping, Sequence
@@ -20,21 +19,13 @@ ARMS = (
     "routing_full_no_support_gate",
     "mix_ghost",
 )
-
-
-def _base_skill(selection: Mapping[str, object]) -> str | None:
-    raw_scores = selection.get("backbone_scores")
-    if not isinstance(raw_scores, Sequence) or isinstance(raw_scores, (str, bytes)):
-        return None
-    scores: list[tuple[str, float]] = []
-    for row in raw_scores:
-        if not isinstance(row, Sequence) or isinstance(row, (str, bytes)) or len(row) != 2:
-            raise ValueError("backbone score rows must be [skill, score]")
-        score = float(row[1])
-        if not math.isfinite(score):
-            raise ValueError("backbone score must be finite")
-        scores.append((str(row[0]), score))
-    return None if not scores else min(scores, key=lambda row: (-row[1], row[0]))[0]
+COMPARISONS = (
+    ("routing_global", "routing_frozen_backbone", "global_residual"),
+    ("routing_global_pattern", "routing_global", "pattern_residual"),
+    ("routing_global_pattern_local", "routing_global_pattern", "local_residual"),
+    ("mix_ghost", "routing_full_no_support_gate", "support_gate"),
+    ("mix_ghost", "routing_frozen_backbone", "full_router"),
+)
 
 
 def _arm_events(arm: Mapping[str, object]) -> dict[tuple[str, int], dict[str, object]]:
@@ -50,7 +41,6 @@ def _arm_events(arm: Mapping[str, object]) -> dict[tuple[str, int], dict[str, ob
         if key in events:
             raise ValueError("routing ablation repeats a settled case/event")
         selected = selection.get("selected_skill_revision_id")
-        base = _base_skill(selection)
         safety = receipt.get("safety_passed")
         invariant = receipt.get("invariant_passed")
         safe_success = (
@@ -63,8 +53,6 @@ def _arm_events(arm: Mapping[str, object]) -> dict[tuple[str, int], dict[str, ob
         events[key] = {
             "utility": float(receipt["utility"]),
             "selected_skill_revision_id": selected,
-            "base_skill_revision_id": base,
-            "override": selected is not None and base is not None and selected != base,
             "safe_repair_success_proxy": safe_success,
             "locality_cost": receipt.get("locality_cost"),
             "collateral_cost": receipt.get("collateral_cost"),
@@ -99,12 +87,22 @@ def analyze_report(raw: Mapping[str, object], *, source: str) -> dict[str, objec
     }
     metrics: dict[str, dict[str, object]] = {}
     for arm in ARMS:
-        rows = [events[arm][key] for key in paired_keys]
-        overrides = [row for row in rows if row["override"]]
+        keyed_rows = [(key, events[arm][key]) for key in paired_keys]
+        rows = [row for _key, row in keyed_rows]
+        overrides = [
+            row
+            for key, row in keyed_rows
+            if row["selected_skill_revision_id"]
+            != baseline[key]["selected_skill_revision_id"]
+        ]
         harmful = [
             row
-            for key, row in ((key, events[arm][key]) for key in paired_keys)
-            if row["override"] and row["utility"] < baseline[key]["utility"]
+            for key, row in keyed_rows
+            if (
+                row["selected_skill_revision_id"]
+                != baseline[key]["selected_skill_revision_id"]
+                and row["utility"] < baseline[key]["utility"]
+            )
         ]
         metrics[arm] = {
             "paired_events": len(rows),
@@ -124,13 +122,7 @@ def analyze_report(raw: Mapping[str, object], *, source: str) -> dict[str, objec
             "mean_collateral_cost": _optional_mean(row["collateral_cost"] for row in rows),
         }
     comparisons = []
-    for left, right, label in (
-        ("routing_global", "routing_frozen_backbone", "global_residual"),
-        ("routing_global_pattern", "routing_global", "pattern_residual"),
-        ("routing_global_pattern_local", "routing_global_pattern", "local_residual"),
-        ("mix_ghost", "routing_full_no_support_gate", "support_gate"),
-        ("mix_ghost", "routing_frozen_backbone", "full_router"),
-    ):
+    for left, right, label in COMPARISONS:
         deltas = [
             float(events[left][key]["utility"]) - float(events[right][key]["utility"])
             for key in paired_keys
