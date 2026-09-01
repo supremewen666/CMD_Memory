@@ -519,6 +519,29 @@ class SkillLibrary:
     library_sha256: str
 
 
+class FrozenSkillReplayCandidateProvider:
+    """Replay already-discovered revisions at their producing failures."""
+
+    def __init__(self, skills: Sequence[SkillRevision]) -> None:
+        if not skills:
+            raise ValueError("frozen skill replay requires a non-empty library")
+        grouped: dict[str, list[SkillRevision]] = {}
+        for skill in skills:
+            grouped.setdefault(skill.producing_failure_id, []).append(skill)
+        self._by_failure = {
+            failure_id: tuple(sorted(rows, key=lambda row: row.skill_revision_id))
+            for failure_id, rows in grouped.items()
+        }
+
+    def candidates(
+        self, bundle: RuntimeBundle, *, event_index: int, failure: FailureDeposit,
+    ) -> tuple[SkillRevision, ...]:
+        del event_index
+        if failure.case_id != bundle.case_id:
+            raise ValueError("frozen replay failure does not bind the runtime case")
+        return self._by_failure.get(failure.failure_id, ())
+
+
 def serialize_skill_library(skills: Sequence[SkillRevision]) -> dict[str, object]:
     """Encode a closed library and reject duplicate revision identities."""
     ordered = tuple(sorted(skills, key=lambda skill: skill.skill_revision_id))

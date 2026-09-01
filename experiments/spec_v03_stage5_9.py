@@ -34,6 +34,7 @@ from cmd_audit.spec_v03.runtime_bundle import load_runtime_cases
 from cmd_audit.spec_v03.runtime_pipeline import RuntimePipeline
 from cmd_audit.spec_v03.skill_discovery_provider import (
     DiscoveryBudget,
+    FrozenSkillReplayCandidateProvider,
     OpenAICompatibleSkillDiscoveryProvider,
     SkillDiscoveryConfig,
     load_skill_library,
@@ -137,7 +138,7 @@ def _parse_args() -> argparse.Namespace:
         help="Selected-action delayed feedback. The structural provider is development-only.",
     )
     parser.add_argument(
-        "--candidate-provider", choices=("none", "vllm-discovery"), default="none",
+        "--candidate-provider", choices=("none", "vllm-discovery", "frozen-replay"), default="none",
         help="Stage 6 typed skill discovery provider.",
     )
     parser.add_argument("--skill-library", type=Path, help="Frozen discovered skill library to load")
@@ -230,6 +231,9 @@ def main() -> int:
         feedback = StructuralDevelopmentStage5FeedbackProvider(model_id=args.model_id)
     if args.backbone_provider != "none" and feedback is None:
         raise ValueError("a configured backbone requires --feedback-provider")
+    loaded_skills = ()
+    if args.skill_library is not None:
+        loaded_skills = load_skill_library(args.skill_library).skills
     candidate_provider = None
     if args.candidate_provider == "vllm-discovery":
         if not args.endpoint or not args.model_snapshot:
@@ -248,9 +252,10 @@ def main() -> int:
         )
         if args.skill_library_output is None:
             raise ValueError("vllm discovery requires --skill-library-output")
-    loaded_skills = ()
-    if args.skill_library is not None:
-        loaded_skills = load_skill_library(args.skill_library).skills
+    elif args.candidate_provider == "frozen-replay":
+        if not loaded_skills:
+            raise ValueError("frozen replay requires --skill-library")
+        candidate_provider = FrozenSkillReplayCandidateProvider(loaded_skills)
     # Every imported discovery library augments the typed seed catalog, giving
     # Stage 5 both a safe fallback and sibling revisions to route among.
     source_library = ()
@@ -310,7 +315,7 @@ def main() -> int:
         args.router_snapshot_output.write_text(
             json.dumps(router_bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8",
         )
-    if candidate_provider is not None and args.skill_library_output is not None:
+    if args.candidate_provider == "vllm-discovery" and candidate_provider is not None and args.skill_library_output is not None:
         args.skill_library_output.parent.mkdir(parents=True, exist_ok=True)
         library = serialize_skill_library(candidate_provider.discovered_skills)
         args.skill_library_output.write_text(json.dumps(library, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -326,7 +331,7 @@ def main() -> int:
     status = "DEVELOPMENT_MODEL_PILOT" if uses_model else "DEVELOPMENT_WIRING_NO_MODEL_RESULTS"
     print(f"[RESULT] status={status}")
     print(f"[RESULT] report_sha256={report.report_sha256}")
-    if candidate_provider is not None and args.skill_library_output is not None:
+    if args.candidate_provider == "vllm-discovery" and candidate_provider is not None and args.skill_library_output is not None:
         print(f"[RESULT] skill_library={args.skill_library_output}")
     if args.router_snapshot_output is not None:
         print(f"[RESULT] router_snapshot={args.router_snapshot_output}")

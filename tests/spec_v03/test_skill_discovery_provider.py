@@ -10,9 +10,25 @@ from cmd_audit.spec_v03.contracts import canonical_sha256
 from cmd_audit.spec_v03.repair_stream import PublicEpisode, PublicEvent, PublicQuery, build_intervention, compile_repair_case
 from cmd_audit.spec_v03.runtime_bundle import deserialize, serialize
 from cmd_audit.spec_v03.skill_discovery_provider import (
-    DiscoveryBudget, OpenAICompatibleSkillDiscoveryProvider, SkillDiscoveryConfig,
+    DiscoveryBudget, FrozenSkillReplayCandidateProvider, OpenAICompatibleSkillDiscoveryProvider, SkillDiscoveryConfig,
     SkillDiscoveryProviderError, _bounded_event, _bounded_ids, load_skill_library_mapping, serialize_skill_library,
 )
+
+
+def test_frozen_candidate_replay_binds_existing_failure_without_model_calls() -> None:
+    bundle = _bundle()
+    failure = _failure(bundle)
+    provider, _transport = _provider(_response({
+        "candidates": [{"operator_id": "process_restore", "skill_key": "restore"}],
+    }))
+    skills = provider.candidates(bundle, event_index=0, failure=failure)
+    replay = FrozenSkillReplayCandidateProvider(skills)
+
+    assert replay.candidates(bundle, event_index=9, failure=failure) == skills
+    assert replay.candidates(
+        bundle, event_index=10,
+        failure=FailureDeposit("other", bundle.case_id, bundle.family_id, "a" * 64, (), "b" * 64, "c" * 64),
+    ) == ()
 
 
 def _bundle(template: str = "drop"):
