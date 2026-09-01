@@ -34,6 +34,7 @@ def main() -> int:
     parser.add_argument("--include-split", action="append", default=None)
     parser.add_argument("--sealed-sidecar", type=Path, required=True)
     parser.add_argument("--selection-report", type=Path, required=True)
+    parser.add_argument("--selection-arm", default="mix_ghost")
     parser.add_argument("--skill-library", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -57,7 +58,9 @@ def main() -> int:
         skill.skill_revision_id: str(skill.program["operator_id"])
         for skill in library
     }
-    frozen = frozen_operators_from_stage5_report(args.selection_report, operators)
+    frozen = frozen_operators_from_stage5_report(
+        args.selection_report, operators, arm=args.selection_arm,
+    )
     provider = FrozenSelectionProposalProvider(frozen)
     sealed = load_sealed_cases(args.sealed_sidecar)
     records = execute_governance_replay(
@@ -71,7 +74,7 @@ def main() -> int:
         "selection_report": str(args.selection_report),
         "included_splits": list(args.include_split or ("T_anchor", "T_final")),
         "model_calls": 0,
-        "selection_source": "frozen_stage5_mix_ghost",
+        "selection_source": f"frozen_stage5_{args.selection_arm}",
     }
     result["split_audit"] = split_audit
     result.pop("report_sha256", None)

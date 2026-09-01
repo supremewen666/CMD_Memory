@@ -6,12 +6,14 @@ set -euo pipefail
 : "${SKILL_LIB:?set SKILL_LIB}"
 
 SEED="${SEED:-20260827}"
+SELECTION_ARM="${SELECTION_ARM:-mix_ghost}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-$RUN_ROOT/sealed_governance}"
 STREAMS="${STREAMS:-halumem_stationary halumem_abrupt_process_state_poison memfail_stationary memfail_abrupt_process_state_poison memtracebench_stationary memtracebench_abrupt_process_state_poison}"
 
 for STREAM in $STREAMS; do
   DATA="$RUN_ROOT/data/$STREAM"
   SELECTION="$RUN_ROOT/matched_allarms/$MODEL_KEY/seed_${SEED}/$STREAM/report.json"
-  OUT="$RUN_ROOT/sealed_governance/$MODEL_KEY/$STREAM/report.json"
+  OUT="$OUTPUT_ROOT/$MODEL_KEY/$STREAM/report.json"
   if jq -e '.variant_metrics | length == 7' "$OUT" >/dev/null 2>&1; then
     echo "[SKIP] $MODEL_KEY $STREAM"
     continue
@@ -27,6 +29,7 @@ for STREAM in $STREAMS; do
     --include-split T_final \
     --sealed-sidecar "$DATA/sealed_evaluator_sidecar.json" \
     --selection-report "$SELECTION" \
+    --selection-arm "$SELECTION_ARM" \
     --skill-library "$SKILL_LIB" \
     --run-id "sealed-governance-$MODEL_KEY-$STREAM" \
     --output "$OUT"
