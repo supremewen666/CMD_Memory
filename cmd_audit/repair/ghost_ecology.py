@@ -920,6 +920,14 @@ class ObservableResidualSelection:
 class ObservableResidualGHOSTRouter:
     """Keep the observable V4 winner until residual evidence can improve it."""
 
+    ROUTING_PROFILES = (
+        "global",
+        "global_pattern",
+        "global_pattern_local",
+        "full_no_support_gate",
+        "full",
+    )
+
     def __init__(
         self,
         *,
@@ -930,6 +938,7 @@ class ObservableResidualGHOSTRouter:
         min_local_support: float = 8.0,
         min_exploration_support: float = 4.0,
         allow_development_proxy: bool = False,
+        routing_profile: str = "full",
     ) -> None:
         if exploration < 0.0:
             raise ValueError("exploration must be non-negative")
@@ -939,6 +948,8 @@ class ObservableResidualGHOSTRouter:
             raise ValueError("hierarchy support thresholds are invalid")
         if min_exploration_support < min_global_support:
             raise ValueError("exploration support cannot precede global support")
+        if routing_profile not in self.ROUTING_PROFILES:
+            raise ValueError("unsupported observable residual routing profile")
         self.seed = int(seed)
         self.exploration = float(exploration)
         self.min_global_support = float(min_global_support)
@@ -946,6 +957,7 @@ class ObservableResidualGHOSTRouter:
         self.min_local_support = float(min_local_support)
         self.min_exploration_support = float(min_exploration_support)
         self.allow_development_proxy = bool(allow_development_proxy)
+        self.routing_profile = routing_profile
         self._stats: dict[tuple[str, ...], tuple[float, float]] = {}
         self._pending: dict[
             str,
@@ -964,7 +976,11 @@ class ObservableResidualGHOSTRouter:
     @property
     def snapshot(self) -> dict[str, object]:
         payload = {
-            "schema_version": "cmd-observable-residual-ghost-posterior-v1",
+            "schema_version": (
+                "cmd-observable-residual-ghost-posterior-v1"
+                if self.routing_profile == "full"
+                else "cmd-observable-residual-ghost-posterior-v2"
+            ),
             "seed": self.seed,
             "exploration": self.exploration,
             "min_global_support": self.min_global_support,
@@ -977,38 +993,55 @@ class ObservableResidualGHOSTRouter:
                 for key, (precision, natural) in sorted(self._stats.items())
             ],
         }
+        if self.routing_profile != "full":
+            payload["routing_profile"] = self.routing_profile
         return {**payload, "snapshot_sha256": content_sha256(payload)}
 
     @classmethod
     def from_snapshot(
-        cls, value: Mapping[str, object]
+        cls,
+        value: Mapping[str, object],
+        *,
+        routing_profile: str | None = None,
     ) -> "ObservableResidualGHOSTRouter":
+        schema_version = value.get("schema_version")
+        expected_fields = {
+            "schema_version",
+            "seed",
+            "exploration",
+            "min_global_support",
+            "min_pattern_support",
+            "min_local_support",
+            "min_exploration_support",
+            "allow_development_proxy",
+            "stats",
+            "snapshot_sha256",
+        }
+        if schema_version == "cmd-observable-residual-ghost-posterior-v2":
+            expected_fields.add("routing_profile")
         _closed(
             value,
-            {
-                "schema_version",
-                "seed",
-                "exploration",
-                "min_global_support",
-                "min_pattern_support",
-                "min_local_support",
-                "min_exploration_support",
-                "allow_development_proxy",
-                "stats",
-                "snapshot_sha256",
-            },
+            expected_fields,
             "observable residual GHOST posterior snapshot",
         )
         payload = dict(value)
         claimed = payload.pop("snapshot_sha256")
         if (
-            value["schema_version"]
-            != "cmd-observable-residual-ghost-posterior-v1"
+            schema_version
+            not in {
+                "cmd-observable-residual-ghost-posterior-v1",
+                "cmd-observable-residual-ghost-posterior-v2",
+            }
             or content_sha256(payload) != claimed
         ):
             raise ValueError(
                 "observable residual GHOST posterior snapshot hash/schema mismatch"
             )
+        embedded_profile = (
+            str(value["routing_profile"])
+            if schema_version == "cmd-observable-residual-ghost-posterior-v2"
+            else "full"
+        )
         result = cls(
             seed=int(value["seed"]),
             exploration=float(value["exploration"]),
@@ -1017,6 +1050,7 @@ class ObservableResidualGHOSTRouter:
             min_local_support=float(value["min_local_support"]),
             min_exploration_support=float(value["min_exploration_support"]),
             allow_development_proxy=bool(value["allow_development_proxy"]),
+            routing_profile=routing_profile or embedded_profile,
         )
         stats: dict[tuple[str, ...], tuple[float, float]] = {}
         for raw in value["stats"]:
@@ -1034,6 +1068,7 @@ class ObservableResidualGHOSTRouter:
     @property
     def diagnostics(self) -> dict[str, object]:
         return {
+            "routing_profile": self.routing_profile,
             "selection_count": self._selection_count,
             "fallback_count": self._fallback_count,
             "fallback_rate": (
@@ -1084,6 +1119,11 @@ class ObservableResidualGHOSTRouter:
         before = str(self.snapshot["snapshot_sha256"])
         active_levels: set[str] = set()
         routed_scores: list[tuple[str, float]] = []
+        exploration_support = (
+            0.0
+            if self.routing_profile == "full_no_support_gate"
+            else self.min_exploration_support
+        )
         exploration_supported_skill_ids = {
             skill.skill_revision_id
             for skill in candidates
@@ -1091,20 +1131,21 @@ class ObservableResidualGHOSTRouter:
                 ("global", skill.skill_revision_id), (1.0, 0.0)
             )[0]
             - 1.0
-            >= self.min_exploration_support
+            >= exploration_support
         }
         exploration_activated = (
-            self.exploration > 0.0
+            self.routing_profile in {"full_no_support_gate", "full"}
+            and self.exploration > 0.0
             and len(exploration_supported_skill_ids) >= 2
         )
         for skill in candidates:
             score = scores[skill.skill_revision_id]
-            for key, weight in self._keys(
+            for key, weight in self._profile_keys(
                 failure, responsibilities, skill
             ):
                 precision, natural = self._stats.get(key, (1.0, 0.0))
                 support = precision - 1.0
-                threshold = {
+                threshold = 0.0 if self.routing_profile == "full_no_support_gate" else {
                     "global": self.min_global_support,
                     "pattern": self.min_pattern_support,
                     "local": self.min_local_support,
@@ -1239,7 +1280,7 @@ class ObservableResidualGHOSTRouter:
             )
             precision, natural = pre_update.get(key, (1.0, 0.0))
             pattern_means[responsibility.pattern_revision_id] = natural / precision
-        for key, weight in self._keys(
+        for key, weight in self._profile_keys(
             pending[1], decision.pattern_responsibilities, selected
         ):
             precision, natural = self._stats.get(key, (1.0, 0.0))
@@ -1253,6 +1294,25 @@ class ObservableResidualGHOSTRouter:
                 natural + weight * target,
             )
         return self.snapshot
+
+    def _profile_keys(
+        self,
+        failure: FailureDeposit,
+        responsibilities: Sequence[PatternResponsibility],
+        skill: SkillRevision,
+    ) -> tuple[tuple[tuple[str, ...], float], ...]:
+        enabled_levels = {
+            "global": frozenset({"global"}),
+            "global_pattern": frozenset({"global", "pattern"}),
+            "global_pattern_local": frozenset({"global", "pattern", "local"}),
+            "full_no_support_gate": frozenset({"global", "pattern", "local"}),
+            "full": frozenset({"global", "pattern", "local"}),
+        }[self.routing_profile]
+        return tuple(
+            (key, weight)
+            for key, weight in self._keys(failure, responsibilities, skill)
+            if key[0] in enabled_levels
+        )
 
     @staticmethod
     def _keys(

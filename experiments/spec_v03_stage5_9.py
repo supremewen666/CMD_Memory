@@ -20,7 +20,7 @@ from cmd_audit.spec_v03.backbone_provider import (
     ProviderBudget,
 )
 from cmd_audit.spec_v03.governance_system_executor import FirstLegalProposalPolicy
-from cmd_audit.spec_v03.experiment_matrix import STAGE5_VARIANTS
+from cmd_audit.spec_v03.experiment_matrix import STAGE5_EXECUTABLE_VARIANTS, STAGE5_VARIANTS
 from cmd_audit.spec_v03.industry_adapters import (
     IndustryAdapter,
     ResourceUsage,
@@ -142,7 +142,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--stage5-arm", action="append", dest="stage5_arms",
-        choices=("random_legal", "best_global", "global_thompson", "niche_thompson", "contextual_bandit", "ghost_hierarchy", "mix_ghost", "oracle_legal"),
+        choices=STAGE5_EXECUTABLE_VARIANTS,
         help="Run only this Stage 5 arm; repeat for multiple arms. Defaults to all arms.",
     )
     parser.add_argument(

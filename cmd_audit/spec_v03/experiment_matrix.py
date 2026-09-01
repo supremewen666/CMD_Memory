@@ -19,6 +19,17 @@ UNRESOLVED = "UNRESOLVED"
 TRACKS = ("controlled_a1", "controlled_a2", "native")
 STAGES = ("stage5", "stage6", "stage7", "stage8", "stage9")
 STAGE5_VARIANTS = ("random_legal", "best_global", "global_thompson", "niche_thompson", "contextual_bandit", "ghost_hierarchy", "mix_ghost", "oracle_legal")
+STAGE5_ROUTING_ABLATION_VARIANTS = (
+    "routing_frozen_backbone",
+    "routing_global",
+    "routing_global_pattern",
+    "routing_global_pattern_local",
+    "routing_full_no_support_gate",
+    "mix_ghost",
+)
+STAGE5_EXECUTABLE_VARIANTS = tuple(
+    dict.fromkeys((*STAGE5_VARIANTS, *STAGE5_ROUTING_ABLATION_VARIANTS))
+)
 STAGE6_VARIANTS = ("no_skill", "seed_frozen", "add_only", "add_dedup", "add_revision", "add_revision_retirement", "full_ecology", "random_key_ecology", "oracle_library")
 STAGE7_VARIANTS = ("detection_only", "in_place", "copy_on_write", "ecc_no_cas", "ecc_cas", "full_governance", "oracle_repair")
 STAGE8A_VARIANTS = ("no_repair", "random_legal", "skill_content_only", "reset_online", "frozen_source", "niche_shuffled", "mean_only", "reset_prefix", "source_prefix", "oracle_legal_operator")

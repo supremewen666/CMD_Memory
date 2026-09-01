@@ -25,7 +25,7 @@ from cmd_audit.repair.ghost_ecology import (
 
 from .backbone_provider import BackboneProvider, ResourceUsage
 from .contracts import DecisionView, canonical_sha256
-from .experiment_matrix import STAGE5_VARIANTS
+from .experiment_matrix import STAGE5_EXECUTABLE_VARIANTS, STAGE5_VARIANTS
 from .prequential_executor import RuntimeOrderManifest
 from .repair_stream import (
     MemoryState,
@@ -44,7 +44,14 @@ from .syndrome_runtime import audit_structural_telemetry, decode_ecc_syndrome
 
 STAGE5_EXECUTOR_SCHEMA = "cmd-spec-v03-stage5-executor-v2"
 _ADAPTIVE_ARMS = frozenset({"best_global", "global_thompson", "niche_thompson", "contextual_bandit"})
-_ROUTER_ARMS = frozenset({"mix_ghost", "ghost_hierarchy"})
+_ROUTING_PROFILE_ARMS = {
+    "routing_global": "global",
+    "routing_global_pattern": "global_pattern",
+    "routing_global_pattern_local": "global_pattern_local",
+    "routing_full_no_support_gate": "full_no_support_gate",
+}
+_ROUTER_ARMS = frozenset({"mix_ghost", "ghost_hierarchy", *_ROUTING_PROFILE_ARMS})
+_PORTABLE_ROUTER_ARMS = frozenset({"mix_ghost", "ghost_hierarchy"})
 ROUTER_SNAPSHOT_BUNDLE_SCHEMA = "cmd-spec-v03-stage5-router-snapshots-v1"
 
 
@@ -322,7 +329,7 @@ class Stage5ExecutionConfig:
             for arm, snapshot in self.initial_router_snapshots.items():
                 if not isinstance(arm, str) or not isinstance(snapshot, Mapping):
                     raise ValueError("initial router snapshots must map a GHOST arm to one snapshot")
-        if not self.arms or len(set(self.arms)) != len(self.arms) or not set(self.arms) <= set(STAGE5_VARIANTS):
+        if not self.arms or len(set(self.arms)) != len(self.arms) or not set(self.arms) <= set(STAGE5_EXECUTABLE_VARIANTS):
             raise ValueError("Stage 5 arms must be a unique non-empty supported subset")
 
     @property
@@ -504,7 +511,7 @@ def router_snapshot_bundle_from_stage5_result(
         if not isinstance(raw_arm, Mapping):
             raise ValueError("Stage 5 arm report must be an object")
         arm = raw_arm.get("arm")
-        if arm not in _ROUTER_ARMS:
+        if arm not in _PORTABLE_ROUTER_ARMS:
             continue
         if raw_arm.get("status") != "COMPLETE":
             continue
@@ -529,7 +536,7 @@ def load_router_snapshot_bundle(value: Mapping[str, object]) -> dict[str, Mappin
     if not isinstance(value["source_model_id"], str) or not value["source_model_id"]:
         raise ValueError("router snapshot bundle requires a source model ID")
     raw_snapshots = value["router_snapshots"]
-    if not isinstance(raw_snapshots, Mapping) or not raw_snapshots or not set(raw_snapshots) <= _ROUTER_ARMS:
+    if not isinstance(raw_snapshots, Mapping) or not raw_snapshots or not set(raw_snapshots) <= _PORTABLE_ROUTER_ARMS:
         raise ValueError("router snapshot bundle must contain supported GHOST arms")
     snapshots: dict[str, Mapping[str, object]] = {}
     for arm, snapshot in raw_snapshots.items():
@@ -644,7 +651,7 @@ class Stage5Executor:
         shared_usage: ResourceUsage,
         prefix_count: int,
     ) -> Stage5ArmReport:
-        if arm not in STAGE5_VARIANTS:
+        if arm not in STAGE5_EXECUTABLE_VARIANTS:
             raise ValueError("unsupported Stage 5 arm")
         if arm == "oracle_legal" and (self.sealed_oracle_provider is None or getattr(self.sealed_oracle_provider, "sealed", False) is not True):
             return Stage5ArmReport(arm, "UNSUPPORTED", (), (), (), {"reason": "sealed_oracle_provider_required"}, canonical_sha256({"arm": arm, "status": "UNSUPPORTED"}), shared_usage)
@@ -682,6 +689,9 @@ class Stage5Executor:
                     if selected not in ids:
                         raise ValueError("sealed oracle selected an action outside the structural legal mask")
                     mode = "sealed_oracle"
+                elif arm == "routing_frozen_backbone":
+                    selected = prediction.selected_skill_revision_id
+                    mode = "observable_backbone"
                 elif policy is not None:
                     selected, mode = policy.choose(tuple(sorted(ids)), prediction, self._context(decision, bundles[row.case_id].memory_state), decode_ecc_syndrome(decision, bundles[row.case_id].memory_state).descriptor.classification)
                 else:
@@ -715,18 +725,34 @@ class Stage5Executor:
     ) -> tuple[ObservableResidualGHOSTRouter | GHOSTEcologyRouter | None, bool]:
         if arm not in _ROUTER_ARMS:
             return None, False
-        imported = (self.config.initial_router_snapshots or {}).get(arm)
+        snapshots = self.config.initial_router_snapshots or {}
+        imported = snapshots.get(arm)
+        if imported is None and arm in _ROUTING_PROFILE_ARMS:
+            imported = snapshots.get("mix_ghost")
         if arm == "mix_ghost":
             router = (
                 ObservableResidualGHOSTRouter.from_snapshot(imported)
                 if imported is not None
                 else ObservableResidualGHOSTRouter(seed=self.config.seed, allow_development_proxy=True)
             )
-        else:
+        elif arm == "ghost_hierarchy":
             router = (
                 GHOSTEcologyRouter.from_snapshot(imported)
                 if imported is not None
                 else GHOSTEcologyRouter(seed=self.config.seed, allow_development_proxy=True)
+            )
+        else:
+            profile = _ROUTING_PROFILE_ARMS[arm]
+            router = (
+                ObservableResidualGHOSTRouter.from_snapshot(
+                    imported, routing_profile=profile
+                )
+                if imported is not None
+                else ObservableResidualGHOSTRouter(
+                    seed=self.config.seed,
+                    allow_development_proxy=True,
+                    routing_profile=profile,
+                )
             )
         if imported is not None:
             self._validate_imported_router_snapshot(router)

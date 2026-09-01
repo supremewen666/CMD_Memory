@@ -10,7 +10,10 @@ import pytest
 from cmd_audit.spec_v03.backbone_provider import BackboneProviderConfig, DeterministicDevelopmentProvider, ProviderBudget
 from cmd_audit.spec_v03.contracts import DecisionView, canonical_sha256
 from cmd_audit.spec_v03.event_order import compile_event_order
-from cmd_audit.spec_v03.experiment_matrix import STAGE5_VARIANTS
+from cmd_audit.spec_v03.experiment_matrix import (
+    STAGE5_ROUTING_ABLATION_VARIANTS,
+    STAGE5_VARIANTS,
+)
 from cmd_audit.spec_v03.prequential_executor import RuntimeOrderManifest, RuntimeOrderRow
 from cmd_audit.spec_v03.repair_stream import MemoryState, PublicEvent, build_intervention, compile_repair_case, iter_public_episodes
 from cmd_audit.spec_v03.runtime_bundle import RuntimeBundle, deserialize
@@ -188,6 +191,50 @@ def test_stage5_can_run_only_the_requested_source_posterior_arms() -> None:
         Stage5ExecutionConfig(
             "stage5-bad-arms", "development-hash-provider", 113, arms=(),
         )
+
+
+def test_stage5_routing_ablation_reuses_one_mix_snapshot_with_explicit_profiles() -> None:
+    bundles, order = _fast_inputs()
+    source = Stage5Executor(
+        Stage5ExecutionConfig(
+            "stage5-ablation-source",
+            "source-model",
+            113,
+            arms=("mix_ghost",),
+        ),
+        _provider("source-model"),
+        _Feedback(),
+    ).run(bundles, order)
+    exported = router_snapshot_bundle_from_stage5_result(
+        {"arms": [asdict(arm) for arm in source.arms]},
+        source_model_id="source-model",
+    )
+    target = Stage5Executor(
+        Stage5ExecutionConfig(
+            "stage5-ablation-target",
+            "target-model",
+            127,
+            arms=STAGE5_ROUTING_ABLATION_VARIANTS,
+            initial_router_snapshots=load_router_snapshot_bundle(exported),
+        ),
+        _provider("target-model"),
+        _Feedback(),
+    ).run(bundles, order)
+    by_arm = {arm.arm: arm for arm in target.arms}
+
+    assert tuple(by_arm) == STAGE5_ROUTING_ABLATION_VARIANTS
+    assert by_arm["routing_frozen_backbone"].imported_router_snapshot is False
+    assert not by_arm["routing_frozen_backbone"].receipt_records[0].posterior_updates
+    expected_profiles = {
+        "routing_global": "global",
+        "routing_global_pattern": "global_pattern",
+        "routing_global_pattern_local": "global_pattern_local",
+        "routing_full_no_support_gate": "full_no_support_gate",
+        "mix_ghost": None,
+    }
+    for arm, profile in expected_profiles.items():
+        assert by_arm[arm].imported_router_snapshot is True
+        assert by_arm[arm].algorithm_snapshot.get("routing_profile") == profile
 
 
 def test_stage5_routes_external_sibling_revisions_without_a_singleton_candidate_shortcut() -> None:

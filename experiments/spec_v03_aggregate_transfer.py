@@ -334,7 +334,14 @@ def validate(path: Path, explicit: str | None, stream: str | None) -> dict[str, 
             ):
                 bad("regime/posterior updates invalid")
             if (
-                arm["arm"] not in {"mix_ghost", "ghost_hierarchy"}
+                arm["arm"] not in {
+                    "mix_ghost",
+                    "ghost_hierarchy",
+                    "routing_global",
+                    "routing_global_pattern",
+                    "routing_global_pattern_local",
+                    "routing_full_no_support_gate",
+                }
                 and row["posterior_updates"]
             ):
                 bad("non-GHOST posterior updates must be unavailable/empty")

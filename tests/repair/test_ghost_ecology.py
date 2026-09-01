@@ -864,6 +864,90 @@ def test_observable_residual_router_snapshot_restores_replayable_routing() -> No
     )
 
 
+def test_observable_residual_routing_profiles_isolate_coordinates_and_round_trip() -> None:
+    failure = _failure()
+    pattern = _pattern()
+    skills = (_skill("left"), _skill("right"))
+    registry = RegistrySnapshot.create(
+        epoch=1,
+        stable_pattern_revision_ids=(pattern.pattern_revision_id,),
+        stable_skill_revision_ids=tuple(row.skill_revision_id for row in skills),
+        config_sha256="observable-residual-profile",
+    )
+    responsibilities = (
+        PatternResponsibility(pattern.pattern_revision_id, 1.0),
+    )
+    router = ObservableResidualGHOSTRouter(
+        routing_profile="global",
+        allow_development_proxy=True,
+    )
+    decision = router.select(
+        failure,
+        pattern_responsibilities=responsibilities,
+        skills=skills,
+        registry=registry,
+        event_index=10,
+        base_scores={
+            skills[0].skill_revision_id: 0.2,
+            skills[1].skill_revision_id: 0.1,
+        },
+        base_selected_skill_revision_id=skills[0].skill_revision_id,
+    )
+    router.observe(
+        decision,
+        DelayedOutcomeFeedback(
+            selection_id=decision.selection_id,
+            selected_skill_revision_id=skills[0].skill_revision_id,
+            probe_id=str(skills[0].success_probe["probe_id"]),
+            selected_at_event_index=10,
+            observed_after_event_index=11,
+            pre_action_prior=0.2,
+            delayed_utility=0.8,
+            valid=True,
+            rolled_back=False,
+            delayed_regression=False,
+            provenance="dev-delayed-outcome-proxy-v1",
+            development_proxy=True,
+        ),
+    )
+
+    assert {row[0][0] for row in router.snapshot["stats"]} == {"global"}
+    assert router.snapshot["routing_profile"] == "global"
+    restored = ObservableResidualGHOSTRouter.from_snapshot(router.snapshot)
+    assert restored.snapshot == router.snapshot
+    assert restored.diagnostics["routing_profile"] == "global"
+
+
+def test_observable_residual_no_support_gate_is_active_at_zero_support() -> None:
+    failure = _failure()
+    pattern = _pattern()
+    skills = (_skill("left"), _skill("right"))
+    registry = RegistrySnapshot.create(
+        epoch=1,
+        stable_pattern_revision_ids=(pattern.pattern_revision_id,),
+        stable_skill_revision_ids=tuple(row.skill_revision_id for row in skills),
+        config_sha256="observable-residual-no-support-gate",
+    )
+    router = ObservableResidualGHOSTRouter(routing_profile="full_no_support_gate")
+    decision = router.select(
+        failure,
+        pattern_responsibilities=(
+            PatternResponsibility(pattern.pattern_revision_id, 1.0),
+        ),
+        skills=skills,
+        registry=registry,
+        event_index=10,
+        base_scores={
+            skills[0].skill_revision_id: 0.2,
+            skills[1].skill_revision_id: 0.1,
+        },
+        base_selected_skill_revision_id=skills[0].skill_revision_id,
+    )
+
+    assert decision.active_levels == ("global", "pattern", "local")
+    assert decision.exploration_activated is True
+
+
 def test_observable_residual_router_rejects_unselected_delayed_feedback() -> None:
     failure = _failure()
     pattern = _pattern()
