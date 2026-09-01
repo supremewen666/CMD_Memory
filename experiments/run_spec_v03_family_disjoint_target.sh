@@ -8,6 +8,7 @@ set -euo pipefail
 : "${ENDPOINT:?set ENDPOINT}"
 
 SEED="${SEED:-20260827}"
+CONDITIONS="${CONDITIONS:-base_reset skills_reset skills_posterior}"
 OUT_ROOT="$RUN_ROOT/family_disjoint"
 SOURCE_LIB="$OUT_ROOT/source_skill_library.json"
 test -s "$SOURCE_LIB"
@@ -17,8 +18,11 @@ for DATASET in halumem memfail memtracebench; do
     STREAM="${DATASET}_${SCHEDULE}"
     DATA="$RUN_ROOT/data/$STREAM"
     SOURCE_SNAPSHOT="$OUT_ROOT/source/$STREAM/router_snapshot.json"
-    test -s "$SOURCE_SNAPSHOT"
-    for CONDITION in base_reset skills_reset skills_posterior; do
+    for CONDITION in $CONDITIONS; do
+      if [[ "$CONDITION" != "base_reset" && "$CONDITION" != "skills_reset" && "$CONDITION" != "skills_posterior" ]]; then
+        echo "unsupported family-disjoint condition: $CONDITION" >&2
+        exit 2
+      fi
       OUT="$OUT_ROOT/target/$MODEL_KEY/$STREAM/$CONDITION"
       mkdir -p "$OUT"
       if jq -e '.results.stage5.arms[] | select(.arm == "mix_ghost" and .status == "COMPLETE")' \
@@ -31,6 +35,7 @@ for DATASET in halumem memfail memtracebench; do
         EXTRA+=(--skill-library "$SOURCE_LIB")
       fi
       if [[ "$CONDITION" == "skills_posterior" ]]; then
+        test -s "$SOURCE_SNAPSHOT"
         EXTRA+=(--initial-router-snapshot "$SOURCE_SNAPSHOT")
       fi
       echo "[RUN] $MODEL_KEY $STREAM $CONDITION"
