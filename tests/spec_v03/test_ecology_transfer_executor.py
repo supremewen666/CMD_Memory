@@ -4,7 +4,13 @@ import pytest
 
 from cmd_audit.repair.ghost_ecology import ObservableResidualGHOSTRouter, SkillRevision
 from cmd_audit.spec_v03.contracts import DecisionView
-from cmd_audit.spec_v03.ecology_transfer_executor import EcologyTransferExecutor, STAGE8A_ARMS, STAGE8B_ARMS
+from cmd_audit.spec_v03.ecology_transfer_executor import (
+    EcologyTransferExecutor,
+    LifecycleCoverageCandidateProvider,
+    STAGE8A_ARMS,
+    STAGE8B_ARMS,
+    _failure,
+)
 from cmd_audit.spec_v03.experiment_matrix import STAGE8A_VARIANTS, STAGE8B_VARIANTS
 from cmd_audit.spec_v03.prequential_executor import RuntimeOrderManifest, RuntimeOrderRow
 from cmd_audit.spec_v03.repair_stream import MemoryState, _make_event, operator_catalog
@@ -102,6 +108,24 @@ def test_stage6_revision_and_retirement_arms_replay_transitions(arm: str) -> Non
     assert any("supersede@t+1" in transition for _skill_id, transition in result.transitions)
     if arm == "add_revision_retirement":
         assert any(transition == "retire@t+1" for _skill_id, transition in result.transitions)
+
+
+def test_stage6_frozen_coverage_triggers_dedup_and_supersede() -> None:
+    bundle = _bundle()
+    parent = _skill()
+    discovered = _skill(failure_id=_failure(bundle).failure_id)
+    dedup = EcologyTransferExecutor().run_stage6(
+        "add_dedup", (bundle,), _order(),
+        candidate_provider=LifecycleCoverageCandidateProvider((discovered,), mode="dedup"),
+    )
+    supersede = EcologyTransferExecutor().run_stage6(
+        "add_revision", (bundle,), _order(), frozen_library=(parent,),
+        candidate_provider=LifecycleCoverageCandidateProvider(
+            (discovered,), mode="supersede", parent_library=(parent,),
+        ),
+    )
+    assert sum(transition.startswith("dedup:") for _skill_id, transition in dedup.transitions) == 1
+    assert sum(transition.startswith("supersede@t+1:") for _skill_id, transition in supersede.transitions) == 1
 
 
 def test_stage8_arm_constants_exactly_match_the_frozen_experiment_matrix() -> None:

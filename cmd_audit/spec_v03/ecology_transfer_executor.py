@@ -49,6 +49,112 @@ class SkillCandidateProvider(Protocol):
         ...
 
 
+class LifecycleCoverageCandidateProvider:
+    """Create one deterministic lifecycle trigger from frozen, replay-safe content.
+
+    This provider is deliberately not a discovery method.  It reuses a frozen
+    candidate at its original FailureMemory deposit and changes only revision
+    identity/lineage so Stage 6 can exercise deduplication or supersession.
+    """
+
+    def __init__(
+        self,
+        skills: Sequence[SkillRevision],
+        *,
+        mode: str,
+        parent_library: Sequence[SkillRevision] = (),
+    ) -> None:
+        if mode not in {"dedup", "supersede"}:
+            raise ValueError("lifecycle coverage mode must be dedup or supersede")
+        if not skills:
+            raise ValueError("lifecycle coverage requires frozen candidate content")
+        grouped: dict[str, list[SkillRevision]] = {}
+        for skill in skills:
+            grouped.setdefault(skill.producing_failure_id, []).append(skill)
+        self._by_failure = {
+            failure_id: tuple(sorted(rows, key=lambda row: row.skill_revision_id))
+            for failure_id, rows in grouped.items()
+        }
+        self._parents_by_operator = {
+            str(skill.program.get("operator_id")): skill
+            for skill in sorted(parent_library, key=lambda row: row.skill_revision_id)
+        }
+        if mode == "supersede" and not self._parents_by_operator:
+            raise ValueError("supersede coverage requires a frozen parent library")
+        self.mode = mode
+        self._emitted = False
+        self._selected: dict[str, str] | None = None
+
+    @property
+    def selected(self) -> Mapping[str, str] | None:
+        return None if self._selected is None else dict(self._selected)
+
+    @staticmethod
+    def _clone(
+        source: SkillRevision,
+        *,
+        skill_id_suffix: str,
+        parent_revision_ids: Sequence[str] = (),
+        derivation_kind: str = "discovery",
+    ) -> SkillRevision:
+        return SkillRevision.create(
+            skill_id=f"{source.skill_id}:{skill_id_suffix}",
+            program=source.program,
+            parameter_schema=source.parameter_schema,
+            preconditions=source.preconditions,
+            postconditions=source.postconditions,
+            success_probe=source.success_probe,
+            mutation_budget=source.mutation_budget,
+            rollback_program=source.rollback_program,
+            producing_failure_id=source.producing_failure_id,
+            parent_revision_ids=parent_revision_ids,
+            derivation_kind=derivation_kind,
+            state="stable",
+        )
+
+    def candidates(
+        self, bundle: RuntimeBundle, *, event_index: int, failure: FailureDeposit,
+    ) -> tuple[SkillRevision, ...]:
+        del event_index
+        if self._emitted or failure.case_id != bundle.case_id:
+            return ()
+        for source in self._by_failure.get(failure.failure_id, ()):
+            try:
+                _typed_replay_gate(source, bundle)
+            except ValueError:
+                continue
+            operator_id = str(source.program.get("operator_id"))
+            if self.mode == "dedup":
+                duplicate = self._clone(source, skill_id_suffix="coverage-duplicate")
+                self._selected = {
+                    "case_id": bundle.case_id,
+                    "operator_id": operator_id,
+                    "source_revision_id": source.skill_revision_id,
+                    "trigger_revision_id": duplicate.skill_revision_id,
+                }
+                self._emitted = True
+                return source, duplicate
+            parent = self._parents_by_operator.get(operator_id)
+            if parent is None:
+                continue
+            successor = self._clone(
+                source,
+                skill_id_suffix="coverage-successor",
+                parent_revision_ids=(parent.skill_revision_id,),
+                derivation_kind="structural_revision",
+            )
+            self._selected = {
+                "case_id": bundle.case_id,
+                "operator_id": operator_id,
+                "source_revision_id": source.skill_revision_id,
+                "parent_revision_id": parent.skill_revision_id,
+                "trigger_revision_id": successor.skill_revision_id,
+            }
+            self._emitted = True
+            return (successor,)
+        return ()
+
+
 class SealedLibraryOracle(Protocol):
     """Evaluator-side capability, injected only for oracle arms."""
 
