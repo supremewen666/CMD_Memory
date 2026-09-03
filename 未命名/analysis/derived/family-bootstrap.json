@@ -1,0 +1,168 @@
+{
+  "block_unit": "family_id; all schedules, seeds, and interventions remain inside their family block",
+  "bootstrap_seed": 20260901,
+  "case_index_count": 136,
+  "effects": [
+    {
+      "ci95": [
+        -0.0724293251391466,
+        0.012286728896103888
+      ],
+      "comparison": "global>reset",
+      "family_count": 49,
+      "family_macro_mean": -0.028571428571428588,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 451,
+      "positive_family_rate": 0.5306122448979592,
+      "tie_family_rate": 0.2653061224489796
+    },
+    {
+      "ci95": [
+        -0.00041326530612244907,
+        0.0
+      ],
+      "comparison": "global_prefix>global",
+      "family_count": 49,
+      "family_macro_mean": -0.00013775510204081635,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 332,
+      "positive_family_rate": 0.0,
+      "tie_family_rate": 0.9795918367346939
+    },
+    {
+      "ci95": [
+        -0.10876778743153105,
+        -0.051681546560723844
+      ],
+      "comparison": "global_prefix>matched",
+      "family_count": 49,
+      "family_macro_mean": -0.07886589105339106,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 332,
+      "positive_family_rate": 0.02040816326530612,
+      "tie_family_rate": 0.14285714285714285
+    },
+    {
+      "ci95": [
+        0.05039839594928881,
+        0.07785043096784165
+      ],
+      "comparison": "matched>reset",
+      "family_count": 49,
+      "family_macro_mean": 0.06392254174397026,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 451,
+      "positive_family_rate": 0.9387755102040817,
+      "tie_family_rate": 0.04081632653061224
+    },
+    {
+      "ci95": [
+        0.012984711270871984,
+        0.04784544294990724
+      ],
+      "comparison": "global>reset",
+      "family_count": 49,
+      "family_macro_mean": 0.03066628014842301,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 451,
+      "positive_family_rate": 0.46938775510204084,
+      "tie_family_rate": 0.40816326530612246
+    },
+    {
+      "ci95": [
+        0.0,
+        0.0195
+      ],
+      "comparison": "global_prefix>global",
+      "family_count": 49,
+      "family_macro_mean": 0.0074285714285714285,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 332,
+      "positive_family_rate": 0.04081632653061224,
+      "tie_family_rate": 0.9591836734693877
+    },
+    {
+      "ci95": [
+        -0.04310384820324231,
+        -0.019997529182127386
+      ],
+      "comparison": "global_prefix>matched",
+      "family_count": 49,
+      "family_macro_mean": -0.031019066392790874,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 332,
+      "positive_family_rate": 0.08163265306122448,
+      "tie_family_rate": 0.24489795918367346
+    },
+    {
+      "ci95": [
+        0.05057316210575138,
+        0.08235630217996287
+      ],
+      "comparison": "matched>reset",
+      "family_count": 49,
+      "family_macro_mean": 0.06628617810760663,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 451,
+      "positive_family_rate": 0.8163265306122449,
+      "tie_family_rate": 0.1836734693877551
+    }
+  ],
+  "iterations": 10000,
+  "model_contrasts": [
+    {
+      "ci95": [
+        0.0245566616419295,
+        0.09692185760667901
+      ],
+      "comparison": "global>reset",
+      "contrast": "Qwen3-14B-Meta-Llama-3.1-8B-Instruct",
+      "family_count": 49,
+      "family_macro_mean": 0.05923770871985159,
+      "paired_event_count": 49,
+      "positive_family_rate": 0.3673469387755102,
+      "tie_family_rate": 0.30612244897959184
+    },
+    {
+      "ci95": [
+        0.0,
+        0.019637755102040817
+      ],
+      "comparison": "global_prefix>global",
+      "contrast": "Qwen3-14B-Meta-Llama-3.1-8B-Instruct",
+      "family_count": 49,
+      "family_macro_mean": 0.007566326530612245,
+      "paired_event_count": 49,
+      "positive_family_rate": 0.061224489795918366,
+      "tie_family_rate": 0.9387755102040817
+    },
+    {
+      "ci95": [
+        0.020434811489530875,
+        0.07970932222185412
+      ],
+      "comparison": "global_prefix>matched",
+      "contrast": "Qwen3-14B-Meta-Llama-3.1-8B-Instruct",
+      "family_count": 49,
+      "family_macro_mean": 0.047846824660600175,
+      "paired_event_count": 49,
+      "positive_family_rate": 0.5510204081632653,
+      "tie_family_rate": 0.3469387755102041
+    },
+    {
+      "ci95": [
+        -0.0114930426716141,
+        0.01740287376314161
+      ],
+      "comparison": "matched>reset",
+      "contrast": "Qwen3-14B-Meta-Llama-3.1-8B-Instruct",
+      "family_count": 49,
+      "family_macro_mean": 0.0023636363636363672,
+      "paired_event_count": 49,
+      "positive_family_rate": 0.20408163265306123,
+      "tie_family_rate": 0.3877551020408163
+    }
+  ],
+  "paired_row_count": 3132,
+  "schema_version": "cmd-spec-v03-family-blocked-bootstrap-v1"
+}

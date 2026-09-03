@@ -1,0 +1,626 @@
+{
+  "library_sha256": "11ccc2c6fb9cc1437dd8394214488bc72211d882e23728c1755be570172f9213",
+  "schema_version": "cmd-spec-v03-skill-library-v1",
+  "skills": [
+    {
+      "derivation_kind": "discovery",
+      "mutation_budget": {
+        "expected_cost": 0.6,
+        "locality_bound": 3,
+        "write_contract": "quarantine projection and cache",
+        "write_set": [
+          "projection_order",
+          "projection_index",
+          "cache_event_ids",
+          "quarantine_set"
+        ]
+      },
+      "parameter_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "parent_revision_ids": [],
+      "postconditions": [
+        {
+          "contract": "exact clean root",
+          "kind": "catalog_invariant"
+        },
+        {
+          "contract": "remove untrusted event and retain audit",
+          "kind": "catalog_safety"
+        }
+      ],
+      "preconditions": [
+        {
+          "contract": "untrusted synthetic event exists",
+          "kind": "catalog_precondition"
+        }
+      ],
+      "producing_failure_id": "stage6-91db7bbb02c3d9ab5c5416e4a931abf276028264c23450024d25d9bbd3cdb3aa",
+      "program": {
+        "expected_cost": 0.6,
+        "kind": "cmd-spec-v03-operator",
+        "operator_family": "poison_quarantine",
+        "operator_id": "poison_quarantine_rebuild",
+        "read_set": [
+          "audit_log",
+          "projection_order",
+          "cache_event_ids"
+        ],
+        "repair_action": "quarantine_and_rebuild_projection",
+        "strategy_id": "quarantine_and_rebuild",
+        "write_contract": "quarantine projection and cache",
+        "write_set": [
+          "projection_order",
+          "projection_index",
+          "cache_event_ids",
+          "quarantine_set"
+        ]
+      },
+      "program_sha256": "708aae560389eec456fc069c8499a945107df4d9ddba3dd66ce876bd5570e737",
+      "rollback_program": {
+        "action": "restore before root"
+      },
+      "skill_id": "catalog:poison_quarantine_rebuild:quarantine-and-rebuild-projection",
+      "skill_revision_id": "skill-revision-00ca40df27bacb6a48fbb91581e83b7f279862348c18f2faf83678a5f59d8cd6",
+      "state": "stable",
+      "success_probe": {
+        "probe_id": "catalog:poison_quarantine_rebuild:invariant-and-safety"
+      }
+    },
+    {
+      "derivation_kind": "discovery",
+      "mutation_budget": {
+        "expected_cost": 0.15,
+        "locality_bound": 2,
+        "write_contract": "state projection",
+        "write_set": [
+          "projection_order",
+          "projection_index",
+          "supersession_edges"
+        ]
+      },
+      "parameter_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "parent_revision_ids": [],
+      "postconditions": [
+        {
+          "contract": "exact clean root",
+          "kind": "catalog_invariant"
+        },
+        {
+          "contract": "remove only synthetic invalidation",
+          "kind": "catalog_safety"
+        }
+      ],
+      "preconditions": [
+        {
+          "contract": "source-derived lineage exists",
+          "kind": "catalog_precondition"
+        }
+      ],
+      "producing_failure_id": "stage6-699274a0ed26de366b10e8bfe8bd71a5d9b6c65e8abcf72b4ca60c559de53985",
+      "program": {
+        "expected_cost": 0.15,
+        "kind": "cmd-spec-v03-operator",
+        "operator_family": "state_supersede",
+        "operator_id": "state_supersede_lineage",
+        "read_set": [
+          "immutable_source_log",
+          "audit_log",
+          "projection_order"
+        ],
+        "repair_action": "supersede_target_lineage",
+        "strategy_id": "targeted",
+        "write_contract": "state projection",
+        "write_set": [
+          "projection_order",
+          "projection_index",
+          "supersession_edges"
+        ]
+      },
+      "program_sha256": "9bd687eff323fb7bb074a5665a7ce46e4b879c2d39f192d069b4ab7fdece2682",
+      "rollback_program": {
+        "action": "restore before root"
+      },
+      "skill_id": "catalog:state_supersede_lineage:targeted-supersede-lineage",
+      "skill_revision_id": "skill-revision-020d6eca2092fd5d1e2d3c8c733f21f68552e7d9f444189715dcd079d81b389f",
+      "state": "stable",
+      "success_probe": {
+        "probe_id": "catalog:state_supersede_lineage:invariant-and-safety"
+      }
+    },
+    {
+      "derivation_kind": "discovery",
+      "mutation_budget": {
+        "expected_cost": 0.7,
+        "locality_bound": 4,
+        "write_contract": "projection, index, scope, cache",
+        "write_set": [
+          "projection_order",
+          "projection_index",
+          "scope_projection",
+          "cache_event_ids"
+        ]
+      },
+      "parameter_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "parent_revision_ids": [],
+      "postconditions": [
+        {
+          "contract": "exact clean root",
+          "kind": "catalog_invariant"
+        },
+        {
+          "contract": "preserve source payloads",
+          "kind": "catalog_safety"
+        }
+      ],
+      "preconditions": [
+        {
+          "contract": "materialized process projection differs from immutable source",
+          "kind": "catalog_precondition"
+        }
+      ],
+      "producing_failure_id": "stage6-af8cdd6ab9a72ddfa3a0f3ffbe9dc0b0752c7f48d1a8fcf3eddde294233e221d",
+      "program": {
+        "expected_cost": 0.7,
+        "kind": "cmd-spec-v03-operator",
+        "operator_family": "process_restore",
+        "operator_id": "process_projection_rebuild",
+        "read_set": [
+          "immutable_source_log"
+        ],
+        "repair_action": "rebuild_process_projection",
+        "strategy_id": "rebuild",
+        "write_contract": "projection, index, scope, cache",
+        "write_set": [
+          "projection_order",
+          "projection_index",
+          "scope_projection",
+          "cache_event_ids"
+        ]
+      },
+      "program_sha256": "bb2262d57cf2169e1b5d7a8494dc254e62f1a957167255db229ebc8e12f9a433",
+      "rollback_program": {
+        "action": "restore before root"
+      },
+      "skill_id": "catalog:process_projection_rebuild:restore-projection-from-source-log",
+      "skill_revision_id": "skill-revision-0397e6b5c23a076a75c6d88b25533ba7bf9cc3d36d628a3cc8d42834f6d429fa",
+      "state": "stable",
+      "success_probe": {
+        "probe_id": "catalog:process_projection_rebuild:invariant-and-safety"
+      }
+    },
+    {
+      "derivation_kind": "discovery",
+      "mutation_budget": {
+        "expected_cost": 0.05,
+        "locality_bound": 1,
+        "write_contract": "cache projection",
+        "write_set": [
+          "cache_event_ids"
+        ]
+      },
+      "parameter_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "parent_revision_ids": [],
+      "postconditions": [
+        {
+          "contract": "exact clean root",
+          "kind": "catalog_invariant"
+        },
+        {
+          "contract": "remove stale cache only",
+          "kind": "catalog_safety"
+        }
+      ],
+      "preconditions": [
+        {
+          "contract": "cache synthetic event exists",
+          "kind": "catalog_precondition"
+        }
+      ],
+      "producing_failure_id": "stage6-3c0c771dc940e829825cc8955bdc4bce562e7663d8616ba6668e540709de71a4",
+      "program": {
+        "expected_cost": 0.05,
+        "kind": "cmd-spec-v03-operator",
+        "operator_family": "process_restore",
+        "operator_id": "process_cache_invalidate",
+        "read_set": [
+          "cache_event_ids"
+        ],
+        "repair_action": "invalidate_stale_cache",
+        "strategy_id": "targeted",
+        "write_contract": "cache projection",
+        "write_set": [
+          "cache_event_ids"
+        ]
+      },
+      "program_sha256": "c198052c5db71c64a539625fe1b79b3fa666a7f4928af2d8de3d6d33c584555a",
+      "rollback_program": {
+        "action": "restore before root"
+      },
+      "skill_id": "catalog:process_cache_invalidate:restore-projection-from-source-log",
+      "skill_revision_id": "skill-revision-03da549dedb9d0ddd9a305dc2de788670c90b5ca2a4921ca2de89539eba05a27",
+      "state": "stable",
+      "success_probe": {
+        "probe_id": "catalog:process_cache_invalidate:invariant-and-safety"
+      }
+    },
+    {
+      "derivation_kind": "discovery",
+      "mutation_budget": {
+        "expected_cost": 0.15,
+        "locality_bound": 1,
+        "write_contract": "quarantine projection",
+        "write_set": [
+          "projection_order",
+          "projection_index",
+          "quarantine_set"
+        ]
+      },
+      "parameter_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "parent_revision_ids": [],
+      "postconditions": [
+        {
+          "contract": "exact clean root",
+          "kind": "catalog_invariant"
+        },
+        {
+          "contract": "remove untrusted event and retain audit",
+          "kind": "catalog_safety"
+        }
+      ],
+      "preconditions": [
+        {
+          "contract": "untrusted synthetic event exists",
+          "kind": "catalog_precondition"
+        }
+      ],
+      "producing_failure_id": "stage6-a708961b385cf338b6692072ea3b3e8829f288d1cedb55ebf21513427b715309",
+      "program": {
+        "expected_cost": 0.15,
+        "kind": "cmd-spec-v03-operator",
+        "operator_family": "poison_quarantine",
+        "operator_id": "poison_quarantine_audit",
+        "read_set": [
+          "audit_log",
+          "projection_order"
+        ],
+        "repair_action": "quarantine_untrusted_event",
+        "strategy_id": "quarantine_only",
+        "write_contract": "quarantine projection",
+        "write_set": [
+          "projection_order",
+          "projection_index",
+          "quarantine_set"
+        ]
+      },
+      "program_sha256": "faf9705c18c4b3c45395ed2f280af68cab3f7cbda3b72d63d2679d147076cf76",
+      "rollback_program": {
+        "action": "restore before root"
+      },
+      "skill_id": "catalog:poison_quarantine_audit:quarantine-untrusted-event-only",
+      "skill_revision_id": "skill-revision-0654ed21e5f4b97f9e5ce4bb8d944f5a1cc87c963b092441c59becce7af69e25",
+      "state": "stable",
+      "success_probe": {
+        "probe_id": "catalog:poison_quarantine_audit:invariant-and-safety"
+      }
+    },
+    {
+      "derivation_kind": "discovery",
+      "mutation_budget": {
+        "expected_cost": 0.1,
+        "locality_bound": 2,
+        "write_contract": "projection",
+        "write_set": [
+          "projection_order",
+          "projection_index"
+        ]
+      },
+      "parameter_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "parent_revision_ids": [],
+      "postconditions": [
+        {
+          "contract": "exact clean root",
+          "kind": "catalog_invariant"
+        },
+        {
+          "contract": "preserve source payloads",
+          "kind": "catalog_safety"
+        }
+      ],
+      "preconditions": [
+        {
+          "contract": "process target exists",
+          "kind": "catalog_precondition"
+        }
+      ],
+      "producing_failure_id": "stage6-7500787343f261619cbd9440959337e7559b05d15eb0cfbd34cfe095b6295c7e",
+      "program": {
+        "expected_cost": 0.1,
+        "kind": "cmd-spec-v03-operator",
+        "operator_family": "process_restore",
+        "operator_id": "process_restore",
+        "read_set": [
+          "immutable_source_log",
+          "projection_order"
+        ],
+        "repair_action": "restore_projection_segment",
+        "strategy_id": "targeted",
+        "write_contract": "projection",
+        "write_set": [
+          "projection_order",
+          "projection_index"
+        ]
+      },
+      "program_sha256": "a0278d96868416af06bf28e3c17da5f1a38353d0a0036d7672ce04c5d572ce20",
+      "rollback_program": {
+        "action": "restore before root"
+      },
+      "skill_id": "catalog:process_restore:restore-projection-segment",
+      "skill_revision_id": "skill-revision-0802fd590593d17f5da4925592f81260e77ec14a32e26761e15fbeb2ea575911",
+      "state": "stable",
+      "success_probe": {
+        "probe_id": "catalog:process_restore:invariant-and-safety"
+      }
+    },
+    {
+      "derivation_kind": "discovery",
+      "mutation_budget": {
+        "expected_cost": 0.05,
+        "locality_bound": 1,
+        "write_contract": "scope projection",
+        "write_set": [
+          "scope_projection"
+        ]
+      },
+      "parameter_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "parent_revision_ids": [],
+      "postconditions": [
+        {
+          "contract": "exact clean root",
+          "kind": "catalog_invariant"
+        },
+        {
+          "contract": "preserve source payloads",
+          "kind": "catalog_safety"
+        }
+      ],
+      "preconditions": [
+        {
+          "contract": "scope target exists",
+          "kind": "catalog_precondition"
+        }
+      ],
+      "producing_failure_id": "stage6-289ea9a50d50024893a82638cf44446e5e7ec0d840553ab58e3fdfd8dc21a663",
+      "program": {
+        "expected_cost": 0.05,
+        "kind": "cmd-spec-v03-operator",
+        "operator_family": "process_restore",
+        "operator_id": "process_scope_repair",
+        "read_set": [
+          "immutable_source_log",
+          "scope_projection"
+        ],
+        "repair_action": "repair_target_scope",
+        "strategy_id": "targeted",
+        "write_contract": "scope projection",
+        "write_set": [
+          "scope_projection"
+        ]
+      },
+      "program_sha256": "ff74cf37644a8d1e3768c63b344d7dea622e8ca83ebb528ce413361d79f3a609",
+      "rollback_program": {
+        "action": "restore before root"
+      },
+      "skill_id": "catalog:process_scope_repair:restore-projection-from-source-log",
+      "skill_revision_id": "skill-revision-120555736571dc091bde220b34a470dfb1028d851b41bd0dc05a315817d9db9c",
+      "state": "stable",
+      "success_probe": {
+        "probe_id": "catalog:process_scope_repair:invariant-and-safety"
+      }
+    },
+    {
+      "derivation_kind": "discovery",
+      "mutation_budget": {
+        "expected_cost": 0.65,
+        "locality_bound": 3,
+        "write_contract": "state projection and lineage",
+        "write_set": [
+          "projection_order",
+          "projection_index",
+          "supersession_edges"
+        ]
+      },
+      "parameter_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "parent_revision_ids": [],
+      "postconditions": [
+        {
+          "contract": "exact clean root",
+          "kind": "catalog_invariant"
+        },
+        {
+          "contract": "remove only synthetic invalidation",
+          "kind": "catalog_safety"
+        }
+      ],
+      "preconditions": [
+        {
+          "contract": "source-derived lineage exists",
+          "kind": "catalog_precondition"
+        }
+      ],
+      "producing_failure_id": "stage6-0a7da4b1f94da891d3551b65b75a19d413f8cce2be3517fb1698b8db9f72bfd4",
+      "program": {
+        "expected_cost": 0.65,
+        "kind": "cmd-spec-v03-operator",
+        "operator_family": "state_supersede",
+        "operator_id": "state_supersede_rebuild",
+        "read_set": [
+          "immutable_source_log",
+          "audit_log",
+          "projection_order",
+          "supersession_edges"
+        ],
+        "repair_action": "cascade_supersession_rebuild",
+        "strategy_id": "cascade",
+        "write_contract": "state projection and lineage",
+        "write_set": [
+          "projection_order",
+          "projection_index",
+          "supersession_edges"
+        ]
+      },
+      "program_sha256": "8dedd09626ba0e85aff788c2857804b79b4597957a606b0c773f85fab869aac9",
+      "rollback_program": {
+        "action": "restore before root"
+      },
+      "skill_id": "catalog:state_supersede_rebuild:cascade-supersede-rebuild",
+      "skill_revision_id": "skill-revision-15c4cf010ae1b099eb2134a49aa2ac489863ed11893dc7da0235697160c66e7b",
+      "state": "stable",
+      "success_probe": {
+        "probe_id": "catalog:state_supersede_rebuild:invariant-and-safety"
+      }
+    },
+    {
+      "derivation_kind": "discovery",
+      "mutation_budget": {
+        "expected_cost": 0.1,
+        "locality_bound": 2,
+        "write_contract": "projection order",
+        "write_set": [
+          "projection_order",
+          "projection_index"
+        ]
+      },
+      "parameter_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "parent_revision_ids": [],
+      "postconditions": [
+        {
+          "contract": "exact clean root",
+          "kind": "catalog_invariant"
+        },
+        {
+          "contract": "preserve source payloads",
+          "kind": "catalog_safety"
+        }
+      ],
+      "preconditions": [
+        {
+          "contract": "typed: swapped neighboring source events",
+          "kind": "catalog_precondition"
+        }
+      ],
+      "producing_failure_id": "stage6-b24b4fcdc30c23434c71fa2df9f8b362e82be27ed08088a86de43590763818b6",
+      "program": {
+        "expected_cost": 0.1,
+        "kind": "cmd-spec-v03-operator",
+        "operator_family": "process_restore",
+        "operator_id": "process_replay_order",
+        "read_set": [
+          "immutable_source_log",
+          "projection_order"
+        ],
+        "repair_action": "replay_local_order",
+        "strategy_id": "targeted",
+        "write_contract": "projection order",
+        "write_set": [
+          "projection_order",
+          "projection_index"
+        ]
+      },
+      "program_sha256": "955c6aa4e513feee7b7c1e70712de7defdecc95a8797ad76993c0fd811b266b0",
+      "rollback_program": {
+        "action": "restore before root"
+      },
+      "skill_id": "catalog:process_replay_order:replay-local-order-of-swapped-neighboring-events",
+      "skill_revision_id": "skill-revision-2ee573828f4011b730fcc0e8c9bcd7ac80e33758b134cec240ad60fbc610615a",
+      "state": "stable",
+      "success_probe": {
+        "probe_id": "catalog:process_replay_order:invariant-and-safety"
+      }
+    },
+    {
+      "derivation_kind": "discovery",
+      "mutation_budget": {
+        "expected_cost": 0.05,
+        "locality_bound": 1,
+        "write_contract": "index projection",
+        "write_set": [
+          "projection_index"
+        ]
+      },
+      "parameter_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "parent_revision_ids": [],
+      "postconditions": [
+        {
+          "contract": "exact clean root",
+          "kind": "catalog_invariant"
+        },
+        {
+          "contract": "preserve source payloads",
+          "kind": "catalog_safety"
+        }
+      ],
+      "preconditions": [
+        {
+          "contract": "index target exists",
+          "kind": "catalog_precondition"
+        }
+      ],
+      "producing_failure_id": "stage6-2ab1deddad204c0ab1b6ceecf67ca234cd5c2d726c35d758567a9cb9e9e3a88d",
+      "program": {
+        "expected_cost": 0.05,
+        "kind": "cmd-spec-v03-operator",
+        "operator_family": "process_restore",
+        "operator_id": "process_rebuild_index",
+        "read_set": [
+          "projection_order",
+          "projection_index"
+        ],
+        "repair_action": "rebuild_index_only",
+        "strategy_id": "targeted",
+        "write_contract": "index projection",
+        "write_set": [
+          "projection_index"
+        ]
+      },
+      "program_sha256": "14ed3a2f575257795cf2fd915abdc2cade809053c66a2bf4efd06bc75ce13f51",
+      "rollback_program": {
+        "action": "restore before root"
+      },
+      "skill_id": "catalog:process_rebuild_index:rebuild-index-only",
+      "skill_revision_id": "skill-revision-6731e142702ac5706e1b6748c5d568d645ce88dab94e10350b86f479d29f0f20",
+      "state": "stable",
+      "success_probe": {
+        "probe_id": "catalog:process_rebuild_index:invariant-and-safety"
+      }
+    }
+  ]
+}

@@ -20,11 +20,13 @@
       "offline_score_threshold": 0.8,
       "backend_usage": {
         "mode": "enforcing_proxy_receipt",
-        "receipt_path": "/ABS/PATH/usage/lightmem-{namespace}.json"
+        "receipt_path": "/ABS/PATH/usage/lightmem-{namespace}.json",
+        "bootstrap_url": "http://127.0.0.1:9100"
       }
     },
     "lycheemem": {
       "base_url": "http://127.0.0.1:9000/instances/{namespace}",
+      "manager_url": "http://127.0.0.1:9000",
       "instance_receipt_path": "/ABS/PATH/lychee-instances/{namespace}.json",
       "expected_commit": "0000000000000000000000000000000000000000",
       "api_key_env": "LYCHEEMEM_API_KEY",
@@ -34,7 +36,8 @@
       "include_skills": false,
       "backend_usage": {
         "mode": "enforcing_proxy_receipt",
-        "receipt_path": "/ABS/PATH/usage/lycheemem-{namespace}.json"
+        "receipt_path": "/ABS/PATH/usage/lycheemem-{namespace}.json",
+        "bootstrap_url": "http://127.0.0.1:9100"
       }
     },
     "mem0": {
@@ -42,7 +45,8 @@
       "add_per_event": true,
       "backend_usage": {
         "mode": "enforcing_proxy_receipt",
-        "receipt_path": "/ABS/PATH/usage/mem0-{namespace}.json"
+        "receipt_path": "/ABS/PATH/usage/mem0-{namespace}.json",
+        "bootstrap_url": "http://127.0.0.1:9100"
       }
     }
   }

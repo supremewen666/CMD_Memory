@@ -1,0 +1,187 @@
+{
+  "attempts": [
+    {
+      "counts": {
+        "dedup_arm": {
+          "birth": 1,
+          "dedup": 1,
+          "retire": 0,
+          "seed": 0,
+          "supersede": 0
+        },
+        "supersede_arm": {
+          "birth": 0,
+          "dedup": 0,
+          "retire": 0,
+          "seed": 11,
+          "supersede": 1
+        }
+      },
+      "stream": "halumem_abrupt_process_state_poison"
+    }
+  ],
+  "counts": {
+    "dedup_arm": {
+      "birth": 1,
+      "dedup": 1,
+      "retire": 0,
+      "seed": 0,
+      "supersede": 0
+    },
+    "supersede_arm": {
+      "birth": 0,
+      "dedup": 0,
+      "retire": 0,
+      "seed": 11,
+      "supersede": 1
+    }
+  },
+  "dedup_trigger": {
+    "case_id": "case-e3a08aef1eb3498a4c9333522af0ad54a7013ac946179941dbf19709d0b35d96",
+    "operator_id": "process_restore",
+    "source_revision_id": "skill-revision-0802fd590593d17f5da4925592f81260e77ec14a32e26761e15fbeb2ea575911",
+    "trigger_revision_id": "skill-revision-b60d559291070901f6a4139dcd0dc4b1b3e3915974193a97043ad745098475d6"
+  },
+  "evidence_scope": "mechanism_coverage_not_ecology_effectiveness",
+  "results": {
+    "dedup": {
+      "arm": "add_dedup",
+      "ecology_snapshot_sha256": "64aff99b9bb4d80cb63eed0f102a55e5fac377fb95e2e7b7d2136a3db70cbde2",
+      "evidence_state_sha256s": [
+        "e7bc4da443347c4a120934621f5e7fa8e1c7926bc722588eefb4ecf53cc75dea"
+      ],
+      "order_manifest_sha256": "32163b9635d27f8bc34d5368c394a780a9fddfe787fae2035a27220fea9f8fb1",
+      "reason": null,
+      "residual_snapshot_sha256": "04e49eda680d470a0e563f7bda02c95d70549ea97a409988e6a75ed88fe0a27c",
+      "router_snapshot_sha256": "04e49eda680d470a0e563f7bda02c95d70549ea97a409988e6a75ed88fe0a27c",
+      "skill_content_sha256s": [
+        "a0278d96868416af06bf28e3c17da5f1a38353d0a0036d7672ce04c5d572ce20"
+      ],
+      "snapshot_sha256": "f92ceff89d6ede5c033d9f8d372e50aec332bdd0b8b7da29a3ca68a78f9c62e7",
+      "stage": "stage6",
+      "status": "READY_NO_MODEL_RESULTS",
+      "transitions": [
+        [
+          "skill-revision-0802fd590593d17f5da4925592f81260e77ec14a32e26761e15fbeb2ea575911",
+          "birth@t+1"
+        ],
+        [
+          "skill-revision-b60d559291070901f6a4139dcd0dc4b1b3e3915974193a97043ad745098475d6",
+          "dedup:skill-revision-0802fd590593d17f5da4925592f81260e77ec14a32e26761e15fbeb2ea575911"
+        ]
+      ]
+    },
+    "supersede": {
+      "arm": "add_revision",
+      "ecology_snapshot_sha256": "b7b7a10b0699d949cf37569ad68501dbdba7e07cc6dbe50235d8bafdd6734493",
+      "evidence_state_sha256s": [
+        "188da5416a4a73f7bed500b9c880b993f3c32552e0f697351f7a4cc7373c78e4",
+        "1ef67027d1f7557632c491196db39252f043040dd4d12c679762a370fa9706d3",
+        "328e58143a8eaa9ce31517ad49fc05c2c3983534cf47e2f91438b7efa3f267c2",
+        "3b5145f7e6a78b0788878d948328b322442767caf68b29cc6b21c1300a6da3a3",
+        "42ab66750449d8199ca44c5af19037cb07fa1df525df60313674c112e1e3a5e8",
+        "497978223452094e248e15dcf5351dbf835c97e08b3d643b641a6ed651af7faa",
+        "4ad7d3f9ebc9353e0490b8ec5063da782266b0a0f48943840fc91745fdc75e2f",
+        "a0425f37d114f14774e3e932873148c42c25e5ab24911e76ad023bb593821d64",
+        "bae45d0c36f38895f90c05a92e1ff5a77e21112b4c6eee2fc47a7aa900ec8517",
+        "dde183b8ec8b8821eeea3d9cb36700f3c7689841b96fbbd355f3ec33cbdf14ea",
+        "de5f72f3ed62cc9e96356ed2493cfb15fcea15022ff4f97175218424afe2c9ec",
+        "df5a09d6cb7cfa353a7e788d285cc66579a3c15026ba84e1ae6745b6351868b8"
+      ],
+      "order_manifest_sha256": "32163b9635d27f8bc34d5368c394a780a9fddfe787fae2035a27220fea9f8fb1",
+      "reason": null,
+      "residual_snapshot_sha256": "04e49eda680d470a0e563f7bda02c95d70549ea97a409988e6a75ed88fe0a27c",
+      "router_snapshot_sha256": "04e49eda680d470a0e563f7bda02c95d70549ea97a409988e6a75ed88fe0a27c",
+      "skill_content_sha256s": [
+        "14ed3a2f575257795cf2fd915abdc2cade809053c66a2bf4efd06bc75ce13f51",
+        "6f6d55032163bc521a8ee3d685c522edbd5c91fd39bd32672348cb3ae35a7ea0",
+        "708aae560389eec456fc069c8499a945107df4d9ddba3dd66ce876bd5570e737",
+        "8dedd09626ba0e85aff788c2857804b79b4597957a606b0c773f85fab869aac9",
+        "955c6aa4e513feee7b7c1e70712de7defdecc95a8797ad76993c0fd811b266b0",
+        "9bd687eff323fb7bb074a5665a7ce46e4b879c2d39f192d069b4ab7fdece2682",
+        "a0278d96868416af06bf28e3c17da5f1a38353d0a0036d7672ce04c5d572ce20",
+        "a0278d96868416af06bf28e3c17da5f1a38353d0a0036d7672ce04c5d572ce20",
+        "bb2262d57cf2169e1b5d7a8494dc254e62f1a957167255db229ebc8e12f9a433",
+        "c198052c5db71c64a539625fe1b79b3fa666a7f4928af2d8de3d6d33c584555a",
+        "faf9705c18c4b3c45395ed2f280af68cab3f7cbda3b72d63d2679d147076cf76",
+        "ff74cf37644a8d1e3768c63b344d7dea622e8ca83ebb528ce413361d79f3a609"
+      ],
+      "snapshot_sha256": "e83f02b53e5c4a0c1c4d2c0dae27314524b99409d3803a2c3a28735f7653f0a4",
+      "stage": "stage6",
+      "status": "READY_NO_MODEL_RESULTS",
+      "transitions": [
+        [
+          "skill-revision-1227ea8c41058c3e12d2a4de7f6efe3e76cc2ace157c48fa362b4770bd7bbd90",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-22affff9a9923fc4ef4dd7d261c68f68551202f22129dcb9063cbd21c8d105b2",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-4648a4831b781e4216187513af9e4580cd1b2a0ac98c1bd5fee679b43a94596e",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-584284441fb5f7a7ec5331a2fcbe5709b3e0b60633a25acc025e99b8fa74c7fa",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-6c1b15e761d7118d44010c3639c2526a742455567f96ebac83248db0a83f5655",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-7d058073af6a9045fad25a842dc839f6c861cacc0fc1ffd214a9783f3a44aa5b",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-7f3f9f60263a8d09e1902d9b2754d1e875917534a8284a0dabec81a7582a2c04",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-9e07b73bbdb9dab076544ae0ff7add3d962d8f60c42c06ad1d452026d95e03cd",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-a4ae4baf962590455de4206648c17733c9e0cb685b80a9c580d854825eb3e501",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-b62e43bc74ac948f6b5973a29eba1b10a7948d7b8df5ff68d615819761ec4bbc",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-eb3f11f4fa976d4d926e1264dd5211b7c54fb3b24f6d8d06e83deeb3dacb516b",
+          "seed@t0"
+        ],
+        [
+          "skill-revision-ffe988ec5208ac8b46a05aa4c26fb84da90980163959980dfb370dd235c5c23a",
+          "supersede@t+1:skill-revision-6c1b15e761d7118d44010c3639c2526a742455567f96ebac83248db0a83f5655"
+        ]
+      ]
+    }
+  },
+  "schema_version": "cmd-spec-v03-lifecycle-coverage-v1",
+  "split": "D_lifecycle",
+  "split_audit": {
+    "excluded_family_count": 17,
+    "family_overlap_count": 0,
+    "included_splits": [
+      "D_lifecycle"
+    ],
+    "order_schedule": "abrupt_process_state_poison",
+    "order_seed": 20260828,
+    "schema_version": "cmd-spec-v03-family-disjoint-audit-v1",
+    "selected_case_count": 9,
+    "selected_family_count": 3
+  },
+  "status": "COMPLETE",
+  "stream": "halumem_abrupt_process_state_poison",
+  "supersede_trigger": {
+    "case_id": "case-e3a08aef1eb3498a4c9333522af0ad54a7013ac946179941dbf19709d0b35d96",
+    "operator_id": "process_restore",
+    "parent_revision_id": "skill-revision-6c1b15e761d7118d44010c3639c2526a742455567f96ebac83248db0a83f5655",
+    "source_revision_id": "skill-revision-0802fd590593d17f5da4925592f81260e77ec14a32e26761e15fbeb2ea575911",
+    "trigger_revision_id": "skill-revision-ffe988ec5208ac8b46a05aa4c26fb84da90980163959980dfb370dd235c5c23a"
+  }
+}

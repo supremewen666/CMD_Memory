@@ -1,0 +1,161 @@
+{
+  "block_unit": "family_id; schedules, seeds, and interventions remain inside each family block",
+  "bootstrap_seed": 20260901,
+  "case_index_count": 136,
+  "effects": [
+    {
+      "ci95": [
+        0.04862654883381922,
+        0.07531415512633627
+      ],
+      "comparison": "mix_ghost>routing_frozen_backbone",
+      "direction": "POSITIVE",
+      "family_count": 49,
+      "family_macro_mean": 0.061451044703595706,
+      "mechanism": "full_router",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.9387755102040817,
+      "tie_family_rate": 0.061224489795918366
+    },
+    {
+      "ci95": [
+        0.027323812560738566,
+        0.055357932458697745
+      ],
+      "comparison": "routing_global>routing_frozen_backbone",
+      "direction": "POSITIVE",
+      "family_count": 49,
+      "family_macro_mean": 0.041194120505344996,
+      "mechanism": "global_residual",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.7346938775510204,
+      "tie_family_rate": 0.14285714285714285
+    },
+    {
+      "ci95": [
+        0.00385204081632653,
+        0.015535714285714281
+      ],
+      "comparison": "routing_global_pattern_local>routing_global_pattern",
+      "direction": "POSITIVE",
+      "family_count": 49,
+      "family_macro_mean": 0.009196428571428569,
+      "mechanism": "local_residual",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.1836734693877551,
+      "tie_family_rate": 0.8163265306122449
+    },
+    {
+      "ci95": [
+        0.0003252551020408162,
+        0.006556691873177833
+      ],
+      "comparison": "routing_global_pattern>routing_global",
+      "direction": "POSITIVE",
+      "family_count": 49,
+      "family_macro_mean": 0.0027377915451895036,
+      "mechanism": "pattern_residual",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.16326530612244897,
+      "tie_family_rate": 0.8163265306122449
+    },
+    {
+      "ci95": [
+        0.012161830357142862,
+        0.03575804026967931
+      ],
+      "comparison": "mix_ghost>routing_full_no_support_gate",
+      "direction": "POSITIVE",
+      "family_count": 49,
+      "family_macro_mean": 0.02329992711370263,
+      "mechanism": "support_gate",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.3673469387755102,
+      "tie_family_rate": 0.5918367346938775
+    },
+    {
+      "ci95": [
+        0.056681995566083554,
+        0.09915640184645282
+      ],
+      "comparison": "mix_ghost>routing_frozen_backbone",
+      "direction": "POSITIVE",
+      "family_count": 49,
+      "family_macro_mean": 0.07743318756073857,
+      "mechanism": "full_router",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.8367346938775511,
+      "tie_family_rate": 0.16326530612244897
+    },
+    {
+      "ci95": [
+        0.054096118804664736,
+        0.09421369351311956
+      ],
+      "comparison": "routing_global>routing_frozen_backbone",
+      "direction": "POSITIVE",
+      "family_count": 49,
+      "family_macro_mean": 0.07354288143828958,
+      "mechanism": "global_residual",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.8163265306122449,
+      "tie_family_rate": 0.1836734693877551
+    },
+    {
+      "ci95": [
+        0.001498724489795918,
+        0.007793367346938769
+      ],
+      "comparison": "routing_global_pattern_local>routing_global_pattern",
+      "direction": "POSITIVE",
+      "family_count": 49,
+      "family_macro_mean": 0.004298469387755099,
+      "mechanism": "local_residual",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.16326530612244897,
+      "tie_family_rate": 0.8367346938775511
+    },
+    {
+      "ci95": [
+        -0.002786989795918368,
+        0.002283163265306122
+      ],
+      "comparison": "routing_global_pattern>routing_global",
+      "direction": "INCONCLUSIVE",
+      "family_count": 49,
+      "family_macro_mean": -0.0002359693877551024,
+      "mechanism": "pattern_residual",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.10204081632653061,
+      "tie_family_rate": 0.7755102040816326
+    },
+    {
+      "ci95": [
+        0.0007351949708454804,
+        0.016397002551020404
+      ],
+      "comparison": "mix_ghost>routing_full_no_support_gate",
+      "direction": "POSITIVE",
+      "family_count": 49,
+      "family_macro_mean": 0.007119169096209914,
+      "mechanism": "support_gate",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.32653061224489793,
+      "tie_family_rate": 0.4897959183673469
+    }
+  ],
+  "iterations": 10000,
+  "paired_row_count": 3010,
+  "reports_observed": 24,
+  "schema_version": "cmd-spec-v03-routing-family-bootstrap-v1"
+}
