@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import sys
 import time
+import traceback
 from typing import Callable, Mapping, Sequence
 from urllib import error, parse, request as urllib_request
 
@@ -618,6 +619,27 @@ def read_stdin_request(*, expected_system_id: str) -> AdapterRequestView:
 def emit(value: Mapping[str, object]) -> None:
     sys.stdout.write(_canonical_json(value) + "\n")
     sys.stdout.flush()
+
+
+def record_wrapper_failure(system_id: str, exc: BaseException) -> None:
+    """Persist diagnostics without contaminating the closed JSON stdout channel."""
+    destination = os.environ.get("CMD_WRAPPER_ERROR_LOG")
+    if not destination:
+        return
+    path = Path(destination)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    causes: list[dict[str, str]] = []
+    current: BaseException | None = exc
+    while current is not None:
+        causes.append({"type": type(current).__name__, "message": str(current)})
+        current = current.__cause__
+    entry = {
+        "system_id": system_id,
+        "causes": causes,
+        "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+    }
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(_canonical_json(entry) + "\n")
 
 
 def cli_protocol_path(argv: Sequence[str]) -> Path:
