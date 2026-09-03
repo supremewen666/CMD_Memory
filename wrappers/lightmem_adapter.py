@@ -109,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         meter = BackendUsageMeter(protocol.system["backend_usage"], namespace=namespace_for(request))
         if not meter.claim_eligible:
             raise UnmeteredBackend("controlled results require enforcing backend usage metering")
+        meter.bootstrap(timeout_seconds=min(30.0, ledger.remaining_wall_seconds))
         before_usage = meter.snapshot()
         try:
             results = retrieve_lightmem(request, protocol, ledger=ledger)

@@ -36,7 +36,7 @@ def retrieve_lycheemem(
 ) -> object:
     config = protocol.system
     fields = {
-        "base_url", "instance_receipt_path", "expected_commit", "api_key_env", "timeout_seconds",
+        "base_url", "manager_url", "instance_receipt_path", "expected_commit", "api_key_env", "timeout_seconds",
         "consolidate", "include_graph", "include_skills", "backend_usage",
     }
     if set(config) != fields:
@@ -53,6 +53,16 @@ def retrieve_lycheemem(
     if len(expected_commit) != 40 or any(char not in "0123456789abcdef" for char in expected_commit):
         raise ProtocolError("LycheeMemory expected_commit must be an exact git commit")
     receipt_path = Path(receipt_template.replace("{namespace}", namespace))
+    manager_url = str(config["manager_url"]).rstrip("/")
+    if not manager_url:
+        raise ProtocolError("LycheeMemory manager_url is required")
+    ensure = transport(
+        manager_url + "/admin/ensure", {"Content-Type": "application/json"},
+        {"scope": namespace, "base_url": base_url, "official_commit": expected_commit},
+        min(120.0, float(config["timeout_seconds"])),
+    )
+    if ensure.get("status") != "ready" or ensure.get("scope") != namespace:
+        raise ProtocolError("LycheeMemory isolated instance manager failed")
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -145,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         meter = BackendUsageMeter(protocol.system["backend_usage"], namespace=namespace_for(request))
         if not meter.claim_eligible:
             raise UnmeteredBackend("controlled results require enforcing backend usage metering")
+        meter.bootstrap(timeout_seconds=min(30.0, ledger.remaining_wall_seconds))
         before_usage = meter.snapshot()
         try:
             results = retrieve_lycheemem(request, protocol, ledger=ledger)

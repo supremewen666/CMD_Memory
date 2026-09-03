@@ -303,23 +303,37 @@ class BackendUsageMeter:
     """
 
     def __init__(self, config: object, *, namespace: str) -> None:
-        if not isinstance(config, Mapping) or set(config) != {"mode", "receipt_path"}:
+        if not isinstance(config, Mapping) or set(config) != {"mode", "receipt_path", "bootstrap_url"}:
             raise ProtocolError("backend_usage must use the closed schema")
         mode = config["mode"]
         if mode not in {"enforcing_proxy_receipt", "development_unmetered"}:
             raise ProtocolError("backend_usage mode is unsupported")
         receipt_path = config["receipt_path"]
+        bootstrap_url = config["bootstrap_url"]
         if mode == "enforcing_proxy_receipt" and (not isinstance(receipt_path, str) or not receipt_path):
             raise ProtocolError("enforcing backend usage requires a receipt_path")
-        if mode == "development_unmetered" and receipt_path is not None:
-            raise ProtocolError("development_unmetered backend usage must set receipt_path to null")
+        if mode == "enforcing_proxy_receipt" and (not isinstance(bootstrap_url, str) or not bootstrap_url):
+            raise ProtocolError("enforcing backend usage requires a bootstrap_url")
+        if mode == "development_unmetered" and (receipt_path is not None or bootstrap_url is not None):
+            raise ProtocolError("development_unmetered backend usage must set receipt_path and bootstrap_url to null")
         self.mode = str(mode)
         self.namespace = namespace
         self.path = None if receipt_path is None else Path(str(receipt_path).replace("{namespace}", namespace))
+        self.bootstrap_url = None if bootstrap_url is None else str(bootstrap_url).rstrip("/")
 
     @property
     def claim_eligible(self) -> bool:
         return self.mode == "enforcing_proxy_receipt"
+
+    def bootstrap(self, *, timeout_seconds: float = 30.0) -> None:
+        if self.bootstrap_url is None:
+            return
+        response = post_json(
+            self.bootstrap_url + "/admin/ensure", {"Content-Type": "application/json"},
+            {"scope": self.namespace}, timeout_seconds,
+        )
+        if response.get("status") != "ready" or response.get("scope") != self.namespace:
+            raise ProtocolError("backend usage proxy bootstrap failed")
 
     def snapshot(self) -> UsageSnapshot | None:
         if self.path is None:

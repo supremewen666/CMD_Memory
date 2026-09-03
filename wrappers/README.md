@@ -52,8 +52,10 @@ natively emits a CMD repair operator.
 4. Ensure every LightMem storage path/collection that needs isolation contains
    `{namespace}`. Mem0 is additionally scoped by the official `user_id` filter.
 5. Start one isolated LycheeMemory service for every evaluated case namespace.
-   A service manager or reverse proxy must resolve the `{namespace}` endpoint
-   template to that process and create the receipt below before the wrapper runs.
+   `spec_v03_lychee_instance_manager.py` resolves the `{namespace}` endpoint to
+   an official Uvicorn process with an independent working directory, SQLite
+   files, LanceDB directory, and port. It creates the receipt below before the
+   wrapper writes any event and releases the process after the final raw search.
    Do not point controlled runs at a shared personal service.
 
 ```json
@@ -88,11 +90,13 @@ that writes an atomic cumulative receipt before and after each backend call:
 }
 ```
 
-Use `backend_usage.mode=enforcing_proxy_receipt` for reported experiments. A
+Use `backend_usage.mode=enforcing_proxy_receipt` for reported experiments and
+set `bootstrap_url` to `spec_v03_metering_proxy.py`; the bootstrap creates the
+namespace's zero receipt before the official SDK call. A
 local wiring smoke may use:
 
 ```json
-{"mode": "development_unmetered", "receipt_path": null}
+{"mode": "development_unmetered", "receipt_path": null, "bootstrap_url": null}
 ```
 
 The executable wrappers return `UNSUPPORTED` in this unmetered mode, while the
@@ -124,6 +128,16 @@ python -m experiments.spec_v03_stage5_9 \
 
 The current budget is per `AdapterRequest` (per Stage 9 case), not a cumulative
 whole-run cap. Aggregate usage remains available in the Stage 9 resource ledger.
+
+## Local controlled services
+
+`run_spec_v03_industry_services.sh` supervises three localhost services: the
+shared CPU embedding endpoint, the namespace-scoped enforcing model proxy, and
+the official-process LycheeMemory instance manager. Before starting it, run
+`spec_v03_configure_industry_runtime.py` once to bind the protocol and official
+SDK configs to those endpoints. Use a new empty `INDUSTRY_RUNTIME_ROOT` for a
+confirmatory run; stale Lychee instance directories fail closed rather than
+claiming a second empty-at-start execution.
 
 ## Output discipline
 

@@ -37,3 +37,7 @@ data/probe_cases.bak.*/
 data/probe_cases/T1_T2_400_FULL.json
 papers/
 repos/
+results/
+.claude/
+.codex
+docs/

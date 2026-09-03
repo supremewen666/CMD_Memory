@@ -101,10 +101,11 @@ def _protocol(tmp_path: Path) -> Path:
                 "force_extract": True,
                 "offline_update": True,
                 "offline_score_threshold": 0.8,
-                "backend_usage": {"mode": "development_unmetered", "receipt_path": None},
+                "backend_usage": {"mode": "development_unmetered", "receipt_path": None, "bootstrap_url": None},
             },
             "lycheemem": {
                 "base_url": "http://127.0.0.1:8002/instances/{namespace}",
+                "manager_url": "http://127.0.0.1:8002",
                 "instance_receipt_path": str(tmp_path / "lychee-{namespace}.json"),
                 "expected_commit": "c" * 40,
                 "api_key_env": "LYCHEEMEM_API_KEY",
@@ -112,11 +113,11 @@ def _protocol(tmp_path: Path) -> Path:
                 "consolidate": True,
                 "include_graph": True,
                 "include_skills": False,
-                "backend_usage": {"mode": "development_unmetered", "receipt_path": None},
+                "backend_usage": {"mode": "development_unmetered", "receipt_path": None, "bootstrap_url": None},
             },
             "mem0": {
                 "config_path": str(mem0_config), "add_per_event": True,
-                "backend_usage": {"mode": "development_unmetered", "receipt_path": None},
+                "backend_usage": {"mode": "development_unmetered", "receipt_path": None, "bootstrap_url": None},
             },
         },
     }), encoding="utf-8")
@@ -317,6 +318,8 @@ def test_lycheemem_wrapper_uses_append_consolidate_and_raw_search(tmp_path: Path
     def transport(url, _headers, body, timeout):
         calls.append((url, dict(body)))
         timeouts.append(timeout)
+        if url.endswith("/admin/ensure"):
+            return {"status": "ready", "scope": namespace_for(request)}
         if url.endswith("/memory/search"):
             return {"semantic_results": [{"constructed_context": "official-lychee-result"}]}
         return {"status": "ok"}
@@ -324,9 +327,12 @@ def test_lycheemem_wrapper_uses_append_consolidate_and_raw_search(tmp_path: Path
     ledger = UsageLedger.start(request.budget)
     result = retrieve_lycheemem(request, protocol, transport=transport, ledger=ledger)
     assert [url.rsplit("/", 1)[-1] for url, _body in calls] == [
-        "append-turn", "append-turn", "consolidate", "search",
+        "ensure", "append-turn", "append-turn", "consolidate", "search",
     ]
-    session_ids = {body["session_id"] for url, body in calls if not url.endswith("/memory/search")}
+    session_ids = {
+        body["session_id"] for url, body in calls
+        if "/memory/" in url and not url.endswith("/memory/search")
+    }
     assert session_ids == {namespace_for(request)}
     assert calls[-1][1]["top_k"] == 5
     assert calls[-1][1]["include_skills"] is False
@@ -363,6 +369,7 @@ def test_backend_usage_meter_records_enforcing_proxy_delta(tmp_path: Path) -> No
     meter = BackendUsageMeter({
         "mode": "enforcing_proxy_receipt",
         "receipt_path": str(tmp_path / "{namespace}.json"),
+        "bootstrap_url": "http://127.0.0.1:9999",
     }, namespace=namespace)
     before = meter.snapshot()
     write(4, 70, 17, 0)
