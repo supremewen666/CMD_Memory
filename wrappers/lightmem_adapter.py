@@ -13,7 +13,7 @@ try:
         AdapterRequestView, BackendUsageMeter, NativeResponseUnavailable, ProtocolConfig,
         ProtocolError, UnmeteredBackend, UnsupportedRuntime,
         UsageLedger, WrapperError, cli_protocol_path, emit, event_text, expand_namespace,
-        json_safe, namespace_for, public_events, response_mapping, retrieval_query,
+        json_safe, namespace_for, public_events, record_wrapper_failure, response_mapping, retrieval_query,
         select_with_shared_head, wrapper_revision,
     )
 except ImportError:  # Direct execution inside the pinned official virtualenv.
@@ -21,7 +21,7 @@ except ImportError:  # Direct execution inside the pinned official virtualenv.
         AdapterRequestView, BackendUsageMeter, NativeResponseUnavailable, ProtocolConfig,
         ProtocolError, UnmeteredBackend, UnsupportedRuntime,
         UsageLedger, WrapperError, cli_protocol_path, emit, event_text, expand_namespace,
-        json_safe, namespace_for, public_events, response_mapping, retrieval_query,
+        json_safe, namespace_for, public_events, record_wrapper_failure, response_mapping, retrieval_query,
         select_with_shared_head, wrapper_revision,
     )
 
@@ -118,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         operator, reason = select_with_shared_head(request, protocol, results, ledger)
         emit(response_mapping(status="OK", operator=operator, reason=reason, ledger=ledger, revision=wrapper_revision("lightmem", protocol)))
     except Exception as exc:
+        record_wrapper_failure("lightmem", exc)
         if ledger is None:
             try:
                 from .industry_common import Budget

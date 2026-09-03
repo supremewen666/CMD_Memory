@@ -14,7 +14,7 @@ try:
         AdapterRequestView, BackendUsageMeter, NativeResponseUnavailable, PostJson,
         ProtocolConfig, ProtocolError, UnmeteredBackend, UnsupportedRuntime, UsageLedger,
         WrapperError, cli_protocol_path, emit, event_text, json_safe,
-        namespace_for, post_json, public_events, response_mapping, retrieval_query,
+        namespace_for, post_json, public_events, record_wrapper_failure, response_mapping, retrieval_query,
         select_with_shared_head, wrapper_revision,
     )
 except ImportError:  # Direct execution inside the pinned official virtualenv.
@@ -22,7 +22,7 @@ except ImportError:  # Direct execution inside the pinned official virtualenv.
         AdapterRequestView, BackendUsageMeter, NativeResponseUnavailable, PostJson,
         ProtocolConfig, ProtocolError, UnmeteredBackend, UnsupportedRuntime, UsageLedger,
         WrapperError, cli_protocol_path, emit, event_text, json_safe,
-        namespace_for, post_json, public_events, response_mapping, retrieval_query,
+        namespace_for, post_json, public_events, record_wrapper_failure, response_mapping, retrieval_query,
         select_with_shared_head, wrapper_revision,
     )
 
@@ -164,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         operator, reason = select_with_shared_head(request, protocol, results, ledger)
         emit(response_mapping(status="OK", operator=operator, reason=reason, ledger=ledger, revision=wrapper_revision("lycheemem", protocol)))
     except Exception as exc:
+        record_wrapper_failure("lycheemem", exc)
         if ledger is None:
             try:
                 from .industry_common import Budget

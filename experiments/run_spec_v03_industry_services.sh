@@ -8,6 +8,8 @@ set -euo pipefail
 : "${EMBED_MODEL:?set EMBED_MODEL}"
 
 CMD_PYTHON="${CMD_PYTHON:-python}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 RUNTIME_ROOT="${INDUSTRY_RUNTIME_ROOT:-$RUN_ROOT/industry_runtime_v1}"
 LOG_ROOT="$RUN_ROOT/logs"
 mkdir -p "$RUNTIME_ROOT/usage" "$RUNTIME_ROOT/lychee-instances" \
