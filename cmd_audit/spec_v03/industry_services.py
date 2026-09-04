@@ -244,8 +244,7 @@ class LycheeInstanceManager:
             port = self._available_port()
             log = (instance_root / "server.log").open("ab")
             command = (
-                str(self.python), "-m", "uvicorn", "src.api.server:create_app", "--factory",
-                "--host", "127.0.0.1", "--port", str(port),
+                str(self.python), str(self.repository / "main.py"), "--port", str(port),
             )
             process = subprocess.Popen(command, cwd=instance_root, env=self._environment(scope, instance_root), stdout=log, stderr=subprocess.STDOUT)
             deadline = time.monotonic() + self.startup_timeout_seconds
