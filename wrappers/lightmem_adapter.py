@@ -42,6 +42,31 @@ def normalize_lightmem_timestamp(value: str) -> str:
     raise ProtocolError("LightMem event timestamp format is unsupported")
 
 
+def normalize_lightmem_extraction_usage(extracted_results: object) -> object:
+    """Keep LightMem's internal token accounting compatible with missing SDK usage."""
+    if not isinstance(extracted_results, list):
+        return extracted_results
+    normalized = []
+    for item in extracted_results:
+        if isinstance(item, dict) and "usage" in item and item["usage"] is None:
+            item = {**item, "usage": {}}
+        normalized.append(item)
+    return normalized
+
+
+def install_lightmem_usage_compat(lightmem_module: object, utils_module: object) -> None:
+    original = utils_module.process_extraction_results
+    if getattr(original, "_cmd_usage_compat", False):
+        return
+
+    def compatible(extracted_results, *args, **kwargs):
+        return original(normalize_lightmem_extraction_usage(extracted_results), *args, **kwargs)
+
+    compatible._cmd_usage_compat = True
+    utils_module.process_extraction_results = compatible
+    lightmem_module.process_extraction_results = compatible
+
+
 def retrieve_lightmem(
     request: AdapterRequestView,
     protocol: ProtocolConfig,
@@ -69,7 +94,10 @@ def retrieve_lightmem(
     if memory_class is None:
         try:
             with redirect_stdout(sys.stderr):
+                import lightmem.memory.lightmem as lightmem_module
+                import lightmem.memory.utils as utils_module
                 from lightmem.memory.lightmem import LightMemory
+                install_lightmem_usage_compat(lightmem_module, utils_module)
             memory_class = LightMemory
         except (ImportError, ModuleNotFoundError) as exc:
             raise UnsupportedRuntime("official LightMem SDK is not installed") from exc

@@ -97,5 +97,10 @@ def test_lychee_manager_binds_official_checkout_and_isolated_paths(tmp_path: Pat
     assert env["EMBEDDING_MODEL"] == "all-MiniLM-L6-v2"
     assert env["EMBEDDING_API_BASE"] == "http://127.0.0.1:8003/v1"
     assert env["EMBEDDING_DIM"] == "384"
+    command = manager._command(9234)
+    assert command[:2] == ("/python", "-c")
+    assert "dotenv.load_dotenv" in command[2]
+    assert str(repository / "main.py") in command[2]
+    assert "9234" in command[2]
     with pytest.raises(ValueError, match="claim"):
         manager.ensure(SCOPE, claimed_base_url="http://wrong", claimed_commit=commit)

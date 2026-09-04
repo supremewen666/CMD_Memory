@@ -229,6 +229,16 @@ class LycheeInstanceManager:
             "CUDA_VISIBLE_DEVICES": "",
         }
 
+    def _command(self, port: int) -> tuple[str, ...]:
+        main = str(self.repository / "main.py")
+        bootstrap = (
+            "import runpy,sys,dotenv;"
+            "dotenv.load_dotenv=lambda *args,**kwargs: False;"
+            f"sys.argv=[{main!r},'--port',{str(port)!r}];"
+            f"runpy.run_path({main!r},run_name='__main__')"
+        )
+        return str(self.python), "-c", bootstrap
+
     def ensure(self, scope: str, *, claimed_base_url: str, claimed_commit: str) -> dict[str, object]:
         scope = valid_scope(scope)
         expected_base = f"{self.public_base_url}/instances/{scope}"
@@ -244,9 +254,9 @@ class LycheeInstanceManager:
             (instance_root / "data").mkdir(parents=True)
             port = self._available_port()
             log = (instance_root / "server.log").open("ab")
-            command = (
-                str(self.python), str(self.repository / "main.py"), "--port", str(port),
-            )
+            # The pinned checkout's development .env uses override=True. Disable only
+            # that loader so each isolated process receives its audited environment.
+            command = self._command(port)
             process = subprocess.Popen(command, cwd=instance_root, env=self._environment(scope, instance_root), stdout=log, stderr=subprocess.STDOUT)
             deadline = time.monotonic() + self.startup_timeout_seconds
             ready_url = f"http://127.0.0.1:{port}/openapi.json"
