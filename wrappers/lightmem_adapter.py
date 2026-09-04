@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stdout
+from datetime import datetime
 import json
 from pathlib import Path
 import sys
@@ -24,6 +25,21 @@ except ImportError:  # Direct execution inside the pinned official virtualenv.
         json_safe, namespace_for, public_events, record_wrapper_failure, response_mapping, retrieval_query,
         select_with_shared_head, wrapper_revision,
     )
+
+
+def normalize_lightmem_timestamp(value: str) -> str:
+    """Translate public benchmark timestamps to an ISO form LightMem accepts."""
+    normalized = value.strip()
+    try:
+        return datetime.fromisoformat(normalized.replace("Z", "+00:00")).isoformat()
+    except ValueError:
+        pass
+    for pattern in ("%b %d, %Y, %H:%M:%S", "%b %d, %Y, %H:%M"):
+        try:
+            return datetime.strptime(normalized, pattern).isoformat()
+        except ValueError:
+            continue
+    raise ProtocolError("LightMem event timestamp format is unsupported")
 
 
 def retrieve_lightmem(
@@ -68,7 +84,7 @@ def retrieve_lightmem(
                 message = {"role": "user", "content": event_text(event)}
                 timestamp = event.get("timestamp")
                 if isinstance(timestamp, str) and timestamp:
-                    message["time_stamp"] = timestamp
+                    message["time_stamp"] = normalize_lightmem_timestamp(timestamp)
                 memory.add_memory(
                     messages=[message], force_segment=config["force_segment"],
                     force_extract=config["force_extract"],

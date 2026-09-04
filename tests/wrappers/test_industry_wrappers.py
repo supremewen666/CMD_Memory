@@ -19,7 +19,7 @@ from wrappers.industry_common import (
     response_mapping,
     select_with_shared_head,
 )
-from wrappers.lightmem_adapter import retrieve_lightmem
+from wrappers.lightmem_adapter import normalize_lightmem_timestamp, retrieve_lightmem
 from wrappers.lycheemem_adapter import retrieve_lycheemem
 from wrappers.mem0_adapter import retrieve_mem0
 
@@ -258,6 +258,11 @@ def test_lightmem_wrapper_calls_official_python_api(tmp_path: Path) -> None:
     assert instance.retrieval[1] == 5
     assert namespace_for(request) in instance.config["embedding_retriever"]["configs"]["path"]
     assert results == [{"memory": "official-lightmem-result"}]
+
+
+def test_lightmem_timestamp_normalization_accepts_public_benchmark_format() -> None:
+    assert normalize_lightmem_timestamp("Sep 04, 2025, 19:58:38") == "2025-09-04T19:58:38"
+    assert normalize_lightmem_timestamp("2025-09-04T19:58:38") == "2025-09-04T19:58:38"
 
 
 def test_lightmem_wrapper_rejects_shared_persistent_store(tmp_path: Path) -> None:
