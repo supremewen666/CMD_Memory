@@ -93,6 +93,9 @@ def test_lychee_manager_binds_official_checkout_and_isolated_paths(tmp_path: Pat
     env = manager._environment(SCOPE, tmp_path / "instances" / SCOPE)
     assert env["LLM_API_BASE"] == f"http://127.0.0.1:9100/{SCOPE}/v1"
     assert SCOPE in env["COMPACT_MEMORY_DB_PATH"]
+    assert env["EMBEDDING_BACKEND"] == "http"
+    assert env["EMBEDDING_MODEL"] == "all-MiniLM-L6-v2"
+    assert env["EMBEDDING_API_BASE"] == "http://127.0.0.1:8003/v1"
     assert env["EMBEDDING_DIM"] == "384"
     with pytest.raises(ValueError, match="claim"):
         manager.ensure(SCOPE, claimed_base_url="http://wrong", claimed_commit=commit)

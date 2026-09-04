@@ -19,6 +19,7 @@ def main() -> int:
     from sentence_transformers import SentenceTransformer
 
     model = SentenceTransformer(args.model_path, local_files_only=True, device="cpu")
+    dimension = int(model.get_sentence_embedding_dimension())
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *values: object) -> None:
@@ -34,14 +35,14 @@ def main() -> int:
 
         def do_GET(self) -> None:
             if self.path == "/health":
-                self.send_json(200, {"status": "ok"})
+                self.send_json(200, {"status": "ok", "dim": dimension})
             elif self.path == "/v1/models":
                 self.send_json(200, {"object": "list", "data": [{"id": args.served_model_name, "object": "model"}]})
             else:
                 self.send_json(404, {"error": "not_found"})
 
         def do_POST(self) -> None:
-            if self.path != "/v1/embeddings":
+            if self.path not in {"/v1/embeddings", "/v1/embeddings/query"}:
                 self.send_json(404, {"error": "not_found"})
                 return
             try:
