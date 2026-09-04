@@ -377,7 +377,16 @@ def post_json(url: str, headers: Mapping[str, str], body: Mapping[str, object], 
     try:
         with urllib_request.urlopen(req, timeout=timeout_seconds) as response:
             raw = response.read().decode("utf-8")
-    except (error.HTTPError, error.URLError, TimeoutError, OSError) as exc:
+    except error.HTTPError as exc:
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        except OSError:
+            detail = ""
+        message = f"official API request failed with HTTP {exc.code}"
+        if detail:
+            message += f": {detail}"
+        raise WrapperError(message) from exc
+    except (error.URLError, TimeoutError, OSError) as exc:
         raise WrapperError("official API request failed") from exc
     try:
         decoded = json.loads(raw)

@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -117,7 +118,12 @@ class MeteringProxy:
         max_output = payload.get("max_tokens", payload.get("max_completion_tokens", 0)) if isinstance(payload, dict) else 0
         if isinstance(max_output, bool) or not isinstance(max_output, int) or max_output < 0:
             raise ValueError("max output token reservation is invalid")
-        reserved = {"llm_calls": 1, "input_tokens": len(body), "output_tokens": max_output, "gpu_seconds": 0}
+        reserved = {
+            "llm_calls": 1,
+            "input_tokens": max(1, math.ceil(len(body) / 4)),
+            "output_tokens": max_output,
+            "gpu_seconds": 0,
+        }
         with self.receipts.lock(scope):
             self.receipts.ensure(scope)
             current = self.receipts.read(scope)
@@ -188,6 +194,20 @@ class LycheeInstanceManager:
         self._instances: dict[str, LycheeInstance] = {}
         self._lock = threading.Lock()
 
+    def _available_port(self) -> int:
+        used = {instance.port for instance in self._instances.values()}
+        port = self.first_port
+        while port in used:
+            port += 1
+        while True:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                try:
+                    probe.bind(("127.0.0.1", port))
+                except OSError:
+                    port += 1
+                    continue
+            return port
+
     def _environment(self, scope: str, instance_root: Path) -> dict[str, str]:
         data = instance_root / "data"
         python_path = str(self.repository)
@@ -221,7 +241,7 @@ class LycheeInstanceManager:
             if instance_root.exists():
                 raise ValueError("stale Lychee instance directory prevents empty-at-start claim")
             (instance_root / "data").mkdir(parents=True)
-            port = self.first_port + len(self._instances)
+            port = self._available_port()
             log = (instance_root / "server.log").open("ab")
             command = (
                 str(self.python), "-m", "uvicorn", "src.api.server:create_app", "--factory",

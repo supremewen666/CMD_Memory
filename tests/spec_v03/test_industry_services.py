@@ -57,6 +57,17 @@ def test_metering_proxy_rejects_before_upstream_when_budget_is_exhausted(tmp_pat
     assert json.loads(body)["error"]["type"] == "budget_exhausted"
 
 
+def test_metering_proxy_reserves_estimated_tokens_not_request_bytes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    store = UsageReceiptStore(tmp_path, ProxyLimits(1, 100, 20, 10))
+    proxy = MeteringProxy(upstream="http://127.0.0.1:8001/v1", receipts=store)
+    monkeypatch.setattr("cmd_audit.spec_v03.industry_services.request.urlopen", lambda *_args, **_kwargs: _Response())
+    body = json.dumps({"max_tokens": 8, "messages": [{"content": "x" * 120}]}).encode()
+    status, _body, _content_type = proxy.forward(
+        SCOPE, "chat/completions", body, {"Content-Type": "application/json"},
+    )
+    assert status == 200
+
+
 def test_scope_contract_is_closed() -> None:
     assert valid_scope(SCOPE) == SCOPE
     with pytest.raises(ValueError):
