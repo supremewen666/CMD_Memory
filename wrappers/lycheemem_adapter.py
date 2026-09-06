@@ -48,6 +48,12 @@ def retrieve_lycheemem(
     receipt_template = str(config["instance_receipt_path"])
     if "{namespace}" not in base_url_template or "{namespace}" not in receipt_template:
         raise ProtocolError("LycheeMemory endpoint and instance receipt must be namespace-bound")
+    try:
+        timeout = float(config["timeout_seconds"])
+    except (TypeError, ValueError) as exc:
+        raise ProtocolError("LycheeMemory timeout_seconds is invalid") from exc
+    if timeout <= 0:
+        raise ProtocolError("LycheeMemory timeout_seconds must be positive")
     base_url = base_url_template.replace("{namespace}", namespace).rstrip("/")
     expected_commit = str(config["expected_commit"]).lower()
     if len(expected_commit) != 40 or any(char not in "0123456789abcdef" for char in expected_commit):
@@ -59,7 +65,7 @@ def retrieve_lycheemem(
     ensure = transport(
         manager_url + "/admin/ensure", {"Content-Type": "application/json"},
         {"scope": namespace, "base_url": base_url, "official_commit": expected_commit},
-        min(120.0, float(config["timeout_seconds"])),
+        min(timeout, ledger.remaining_wall_seconds) if ledger is not None else timeout,
     )
     if ensure.get("status") != "ready" or ensure.get("scope") != namespace:
         raise ProtocolError("LycheeMemory isolated instance manager failed")
@@ -77,12 +83,6 @@ def retrieve_lycheemem(
         or receipt.get("empty_at_start") is not True
     ):
         raise ProtocolError("LycheeMemory isolated-instance receipt is invalid")
-    try:
-        timeout = float(config["timeout_seconds"])
-    except (TypeError, ValueError) as exc:
-        raise ProtocolError("LycheeMemory timeout_seconds is invalid") from exc
-    if timeout <= 0:
-        raise ProtocolError("LycheeMemory timeout_seconds must be positive")
     headers = {"Content-Type": "application/json"}
     api_key = os.environ.get(str(config["api_key_env"]))
     if api_key:

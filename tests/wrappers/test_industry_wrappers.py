@@ -356,6 +356,35 @@ def test_lycheemem_wrapper_uses_append_consolidate_and_raw_search(tmp_path: Path
     assert all(0 < timeout <= request.budget.wall_clock_seconds for timeout in timeouts)
 
 
+def test_lycheemem_manager_startup_uses_configured_budget_beyond_120_seconds(tmp_path: Path) -> None:
+    path = _protocol(tmp_path)
+    raw_protocol = json.loads(path.read_text(encoding="utf-8"))
+    raw_protocol["systems"]["lycheemem"]["timeout_seconds"] = 240.0
+    path.write_text(json.dumps(raw_protocol), encoding="utf-8")
+    raw_request = _request("lycheemem")
+    raw_request["budget"]["wall_clock_seconds"] = 300.0
+    request = AdapterRequestView.parse(raw_request, expected_system_id="lycheemem")
+    _write_lychee_instance_receipt(path, request)
+    protocol = ProtocolConfig.load(path, system_id="lycheemem")
+    timeouts: list[float] = []
+
+    def transport(url, _headers, _body, timeout):
+        timeouts.append(timeout)
+        if url.endswith("/admin/ensure"):
+            return {"status": "ready", "scope": namespace_for(request)}
+        if url.endswith("/memory/search"):
+            return {"semantic_results": []}
+        return {"status": "ok"}
+
+    retrieve_lycheemem(
+        request,
+        protocol,
+        transport=transport,
+        ledger=UsageLedger.start(request.budget),
+    )
+    assert 120.0 < timeouts[0] <= 240.0
+
+
 def test_protocol_rejects_unisolated_lycheemem_service(tmp_path: Path) -> None:
     path = _protocol(tmp_path)
     raw = json.loads(path.read_text(encoding="utf-8"))
