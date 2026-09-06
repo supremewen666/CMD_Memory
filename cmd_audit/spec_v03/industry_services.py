@@ -100,10 +100,14 @@ class UsageReceiptStore:
 
 
 class MeteringProxy:
-    def __init__(self, *, upstream: str, receipts: UsageReceiptStore, timeout_seconds: float = 300.0) -> None:
+    def __init__(
+        self, *, upstream: str, receipts: UsageReceiptStore,
+        timeout_seconds: float = 300.0, disable_thinking: bool = False,
+    ) -> None:
         self.upstream = upstream.rstrip("/")
         self.receipts = receipts
         self.timeout_seconds = timeout_seconds
+        self.disable_thinking = disable_thinking
 
     def ensure(self, scope: str) -> dict[str, object]:
         self.receipts.ensure(scope)
@@ -115,6 +119,15 @@ class MeteringProxy:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
             raise ValueError("proxy request body must be JSON") from exc
+        if self.disable_thinking and suffix.rstrip("/").endswith("chat/completions"):
+            if not isinstance(payload, dict):
+                raise ValueError("chat completion body must be a JSON object")
+            template_kwargs = payload.get("chat_template_kwargs", {})
+            if not isinstance(template_kwargs, dict):
+                raise ValueError("chat_template_kwargs must be a JSON object")
+            payload = dict(payload)
+            payload["chat_template_kwargs"] = {**template_kwargs, "enable_thinking": False}
+            body = _json_bytes(payload)
         max_output = payload.get("max_tokens", payload.get("max_completion_tokens", 0)) if isinstance(payload, dict) else 0
         if isinstance(max_output, bool) or not isinstance(max_output, int) or max_output < 0:
             raise ValueError("max output token reservation is invalid")
@@ -178,7 +191,7 @@ class LycheeInstanceManager:
         self, *, repository: Path, python: Path, root: Path, receipt_root: Path,
         official_commit: str, public_base_url: str, llm_proxy_base_url: str,
         embedding_base_url: str, embedding_model: str, first_port: int = 9200,
-        startup_timeout_seconds: float = 180.0,
+        startup_timeout_seconds: float = 180.0, request_timeout_seconds: float = 300.0,
     ) -> None:
         if len(official_commit) != 40 or any(char not in "0123456789abcdef" for char in official_commit.lower()):
             raise ValueError("official_commit must be exact")
@@ -191,6 +204,9 @@ class LycheeInstanceManager:
         self.llm_proxy_base_url = llm_proxy_base_url.rstrip("/")
         self.embedding_base_url, self.embedding_model = embedding_base_url.rstrip("/"), embedding_model
         self.first_port, self.startup_timeout_seconds = first_port, startup_timeout_seconds
+        if request_timeout_seconds <= 0:
+            raise ValueError("request_timeout_seconds must be positive")
+        self.request_timeout_seconds = request_timeout_seconds
         self._instances: dict[str, LycheeInstance] = {}
         self._lock = threading.Lock()
 
@@ -287,7 +303,7 @@ class LycheeInstanceManager:
         target = f"http://127.0.0.1:{instance.port}/{suffix.lstrip('/')}"
         req = request.Request(target, data=body, method="POST", headers={"Content-Type": headers.get("Content-Type", "application/json")})
         try:
-            with request.urlopen(req, timeout=300.0) as response:
+            with request.urlopen(req, timeout=self.request_timeout_seconds) as response:
                 result = response.status, response.read(), response.headers.get("Content-Type", "application/json")
         except error.HTTPError as exc:
             result = exc.code, exc.read(), exc.headers.get("Content-Type", "application/json")

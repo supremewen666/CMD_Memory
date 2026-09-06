@@ -20,11 +20,12 @@ def main() -> int:
     parser.add_argument("--max-output-tokens", type=int, default=4096)
     parser.add_argument("--max-gpu-seconds", type=int, default=300)
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
+    parser.add_argument("--disable-thinking", action="store_true")
     args = parser.parse_args()
     limits = ProxyLimits(args.max_llm_calls, args.max_input_tokens, args.max_output_tokens, args.max_gpu_seconds)
     service = MeteringProxy(
         upstream=args.upstream, receipts=UsageReceiptStore(args.receipt_root, limits),
-        timeout_seconds=args.timeout_seconds,
+        timeout_seconds=args.timeout_seconds, disable_thinking=args.disable_thinking,
     )
     serve(service, host=args.host, port=args.port)
     return 0

@@ -68,6 +68,28 @@ def test_metering_proxy_reserves_estimated_tokens_not_request_bytes(monkeypatch:
     assert status == 200
 
 
+def test_metering_proxy_can_enforce_non_thinking_controlled_inference(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    store = UsageReceiptStore(tmp_path, ProxyLimits(1, 1000, 20, 10))
+    proxy = MeteringProxy(
+        upstream="http://127.0.0.1:8001/v1", receipts=store,
+        disable_thinking=True,
+    )
+    seen: dict[str, object] = {}
+
+    def urlopen(req, **_kwargs):
+        seen.update(json.loads(req.data))
+        return _Response()
+
+    monkeypatch.setattr("cmd_audit.spec_v03.industry_services.request.urlopen", urlopen)
+    status, _body, _content_type = proxy.forward(
+        SCOPE, "chat/completions",
+        json.dumps({"max_tokens": 8, "messages": [], "chat_template_kwargs": {"foo": "bar"}}).encode(),
+        {"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert seen["chat_template_kwargs"] == {"foo": "bar", "enable_thinking": False}
+
+
 def test_scope_contract_is_closed() -> None:
     assert valid_scope(SCOPE) == SCOPE
     with pytest.raises(ValueError):
@@ -89,6 +111,7 @@ def test_lychee_manager_binds_official_checkout_and_isolated_paths(tmp_path: Pat
         receipt_root=tmp_path / "receipts", official_commit=commit,
         public_base_url="http://127.0.0.1:9000", llm_proxy_base_url="http://127.0.0.1:9100",
         embedding_base_url="http://127.0.0.1:8003", embedding_model="all-MiniLM-L6-v2",
+        request_timeout_seconds=900.0,
     )
     env = manager._environment(SCOPE, tmp_path / "instances" / SCOPE)
     assert env["LLM_API_BASE"] == f"http://127.0.0.1:9100/{SCOPE}/v1"
@@ -97,6 +120,7 @@ def test_lychee_manager_binds_official_checkout_and_isolated_paths(tmp_path: Pat
     assert env["EMBEDDING_MODEL"] == "all-MiniLM-L6-v2"
     assert env["EMBEDDING_API_BASE"] == "http://127.0.0.1:8003/v1"
     assert env["EMBEDDING_DIM"] == "384"
+    assert manager.request_timeout_seconds == 900.0
     command = manager._command(9234)
     assert command[:2] == ("/python", "-c")
     assert "dotenv.load_dotenv" in command[2]
