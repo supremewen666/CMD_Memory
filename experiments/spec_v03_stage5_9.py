@@ -25,8 +25,8 @@ from cmd_audit.spec_v03.family_disjoint import select_runtime_splits
 from cmd_audit.spec_v03.industry_adapters import (
     IndustryAdapter,
     ResourceUsage,
-    lightmem_adapter,
-    lycheemem_adapter,
+    erskill_adapter,
+    memskill_adapter,
     mem0_adapter,
 )
 from cmd_audit.spec_v03.prequential_executor import RuntimeOrderManifest
@@ -73,14 +73,14 @@ def _load_industry_adapters(config_path: Path | None) -> dict[str, IndustryAdapt
     raw_config: object = {}
     if config_path is not None:
         raw_config = json.loads(config_path.read_text(encoding="utf-8"))
-    if not isinstance(raw_config, dict) or set(raw_config) - {"lightmem", "lycheemem", "mem0"}:
-        raise ValueError("industry adapters config must be a JSON object with only lightmem, lycheemem, and mem0")
+    if not isinstance(raw_config, dict) or set(raw_config) - {"memskill", "erskill", "mem0"}:
+        raise ValueError("industry adapters config must be a JSON object with only memskill, erskill, and mem0")
     for system_id, config in raw_config.items():
         if not isinstance(config, dict):
             raise ValueError(f"{system_id} adapter configuration must be a JSON object")
     return {
-        "lightmem": lightmem_adapter(raw_config.get("lightmem")),
-        "lycheemem": lycheemem_adapter(raw_config.get("lycheemem")),
+        "memskill": memskill_adapter(raw_config.get("memskill")),
+        "erskill": erskill_adapter(raw_config.get("erskill")),
         "mem0": mem0_adapter(raw_config.get("mem0")),
     }
 
@@ -109,7 +109,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--track", choices=("controlled_a1", "controlled_a2", "native"), default="controlled_a1")
     parser.add_argument(
         "--industry-adapters-config", type=Path,
-        help="Closed JSON configuration for pinned LightMem, LycheeMem, and Mem0 OSS wrappers.",
+        help="Closed JSON configuration for pinned MemSkill, ERSkill, and Mem0 OSS wrappers.",
     )
     parser.add_argument("--system-max-llm-calls", type=_non_negative_int, default=0)
     parser.add_argument("--system-max-input-tokens", type=_non_negative_int, default=0)

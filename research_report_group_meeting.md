@@ -81,7 +81,7 @@ CMD 与 MemAudit 的关系最紧密：MemAudit 提供记忆审计/归因思想�
 ```mermaid
 flowchart LR
     A[Deployment-visible\nMemoryState] --> B[MemAudit telemetry]
-    B --> C[EccSyndrome]
+    B --> C[Contract]
     C --> D[Typed legal candidate mask]
     D --> E[Mix GHOST router]
     E --> F[Selected repair skill]
@@ -101,7 +101,7 @@ flowchart LR
 运行时 ABI 是：
 
 ```text
-EccSyndrome
+Contract
   -> shadow transition
   -> EccRepairReceipt
   -> delayed settlement
@@ -260,7 +260,7 @@ Llama 上 global residual、local residual 和 support gate 都有可见贡献�
 - 对未见 family 的泛化：source–target overlap audit 显示当前 development run 的 target overlap rate 为 **1.0**；
 - confirmatory safe repair：结构 gate 全通过不等于真实 false-commit rate 已被验证；
 - answer-quality 提升：还缺 receipt-bound before/after 的正式模型预测和官方评分；
-- 超越 Mem0、LightMem、LycheeMem 等 deployed memory systems：industry controlled/native result table 仍为空；
+- 超越 Mem0、MemSkill、ERSkill 等 memory baselines：controlled result table 仍为空；
 - 跨机制总分：process fault、state drift、poison 必须分别报告。
 
 完整开发结果见 [`未命名/analysis/paper-analysis.md`](未命名/analysis/paper-analysis.md) 与 [`未命名/analysis/derived/routing-ablation.md`](未命名/analysis/derived/routing-ablation.md)。
@@ -299,7 +299,7 @@ F-DATA scale + human audit + family/constructor holdout
 
 CMD 的核心观点是：**Agent memory failure 不应只被看成一次检索错误或一次回答错误，而应被看成一个需要诊断、受约束修复、验证、回滚、记账和持续学习的状态系统问题。**
 
-项目已经完成了从 `EccSyndrome` 到 `EccRepairReceipt` 的 gold-free runtime loop，并在开发实验中观察到 Mix GHOST 相对多种路由基线的稳定平均优势。与此同时，项目主动保留了关键负结果：A–B–A 生态记忆证据尚不显著、development transfer 存在完全 case overlap、结构安全代理不能替代正式 answer-quality 与 false-commit 评估。
+项目已经完成了从 `Contract` 到 `EccRepairReceipt` 的 gold-free runtime loop，并在开发实验中观察到 Mix GHOST 相对多种路由基线的稳定平均优势。与此同时，项目主动保留了关键负结果：A–B–A 生态记忆证据尚不显著、development transfer 存在完全 case overlap、结构安全代理不能替代正式 answer-quality 与 false-commit 评估。
 
 因此，当前最准确的项目定位是：
 

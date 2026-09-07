@@ -2,9 +2,7 @@
 set -euo pipefail
 
 : "${RUN_ROOT:?set RUN_ROOT}"
-: "${MODERN_PY:?set MODERN_PY to the Lychee/Mem0 environment Python}"
-: "${LYCHEE_REPO:?set LYCHEE_REPO}"
-: "${LYCHEE_COMMIT:?set LYCHEE_COMMIT}"
+: "${MODERN_PY:?set MODERN_PY to the Mem0/embedding environment Python}"
 : "${EMBED_MODEL:?set EMBED_MODEL}"
 
 CMD_PYTHON="${CMD_PYTHON:-python}"
@@ -12,39 +10,37 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 RUNTIME_ROOT="${INDUSTRY_RUNTIME_ROOT:-$RUN_ROOT/industry_runtime_v1}"
 LOG_ROOT="$RUN_ROOT/logs"
-mkdir -p "$RUNTIME_ROOT/usage" "$RUNTIME_ROOT/lychee-instances" \
-  "$RUNTIME_ROOT/lychee-receipts" "$LOG_ROOT"
+SERVICE_HOST="${SERVICE_HOST:-127.0.0.1}"
+EMBED_PORT="${EMBED_PORT:-8003}"
+METERING_PORT="${METERING_PORT:-9100}"
+MODEL_UPSTREAM="${MODEL_UPSTREAM:-http://127.0.0.1:8001}"
+SYSTEM_MAX_LLM_CALLS="${SYSTEM_MAX_LLM_CALLS:-20}"
+SYSTEM_MAX_INPUT_TOKENS="${SYSTEM_MAX_INPUT_TOKENS:-100000}"
+SYSTEM_MAX_OUTPUT_TOKENS="${SYSTEM_MAX_OUTPUT_TOKENS:-4096}"
+SYSTEM_MAX_GPU_SECONDS="${SYSTEM_MAX_GPU_SECONDS:-300}"
+mkdir -p "$RUNTIME_ROOT/usage" "$LOG_ROOT"
 
-"$MODERN_PY" experiments/spec_v03_embedding_server.py \
-  --model-path "$EMBED_MODEL" --host 127.0.0.1 --port 8003 \
+"$MODERN_PY" "$REPO_ROOT/experiments/spec_v03_embedding_server.py" \
+  --model-path "$EMBED_MODEL" --host "$SERVICE_HOST" --port "$EMBED_PORT" \
   > "$LOG_ROOT/industry-embedding.log" 2>&1 &
 EMBED_PID=$!
 
-"$CMD_PYTHON" experiments/spec_v03_metering_proxy.py \
-  --host 127.0.0.1 --port 9100 --upstream http://127.0.0.1:8001 \
+"$CMD_PYTHON" "$REPO_ROOT/experiments/spec_v03_metering_proxy.py" \
+  --host "$SERVICE_HOST" --port "$METERING_PORT" --upstream "$MODEL_UPSTREAM" \
   --receipt-root "$RUNTIME_ROOT/usage" \
-  --max-llm-calls 20 --max-input-tokens 100000 \
-  --max-output-tokens 4096 --max-gpu-seconds 300 \
+  --max-llm-calls "$SYSTEM_MAX_LLM_CALLS" \
+  --max-input-tokens "$SYSTEM_MAX_INPUT_TOKENS" \
+  --max-output-tokens "$SYSTEM_MAX_OUTPUT_TOKENS" \
+  --max-gpu-seconds "$SYSTEM_MAX_GPU_SECONDS" \
   > "$LOG_ROOT/industry-metering-proxy.log" 2>&1 &
 METER_PID=$!
 
-"$CMD_PYTHON" experiments/spec_v03_lychee_instance_manager.py \
-  --host 127.0.0.1 --port 9000 --repository "$LYCHEE_REPO" \
-  --python "$MODERN_PY" --official-commit "$LYCHEE_COMMIT" \
-  --instance-root "$RUNTIME_ROOT/lychee-instances" \
-  --receipt-root "$RUNTIME_ROOT/lychee-receipts" \
-  --public-base-url http://127.0.0.1:9000 \
-  --llm-proxy-base-url http://127.0.0.1:9100 \
-  --embedding-base-url http://127.0.0.1:8003 \
-  > "$LOG_ROOT/industry-lychee-manager.log" 2>&1 &
-LYCHEE_PID=$!
-
 cleanup() {
-  kill "$LYCHEE_PID" "$METER_PID" "$EMBED_PID" 2>/dev/null || true
+  kill "$METER_PID" "$EMBED_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-for URL in http://127.0.0.1:8003/health http://127.0.0.1:9100/health http://127.0.0.1:9000/health; do
+for URL in "http://$SERVICE_HOST:$EMBED_PORT/health" "http://$SERVICE_HOST:$METERING_PORT/health"; do
   for _ in $(seq 1 120); do
     curl -sf "$URL" >/dev/null && break
     sleep 1
@@ -54,4 +50,4 @@ for URL in http://127.0.0.1:8003/health http://127.0.0.1:9100/health http://127.
 done
 
 echo "[READY] controlled industry services"
-wait -n "$EMBED_PID" "$METER_PID" "$LYCHEE_PID"
+wait -n "$EMBED_PID" "$METER_PID"

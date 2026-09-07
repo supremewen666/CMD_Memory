@@ -1,4 +1,4 @@
-"""Local controlled-track services for metering and Lychee isolation."""
+"""Local controlled-track service for namespace-scoped model metering."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ import math
 import os
 from pathlib import Path
 import re
-import socket
-import subprocess
 import threading
 import time
 from typing import Mapping
@@ -18,7 +16,6 @@ from urllib import error, request
 
 
 USAGE_SCHEMA = "cmd-metered-model-usage-receipt-v1"
-INSTANCE_SCHEMA = "cmd-lycheemem-isolated-instance-v1"
 _SCOPE = re.compile(r"cmd-[a-f0-9]{24}\Z")
 
 
@@ -178,149 +175,6 @@ class MeteringProxy:
             return status, raw, content_type
 
 
-@dataclass
-class LycheeInstance:
-    scope: str
-    port: int
-    process: subprocess.Popen[bytes]
-    base_url: str
-
-
-class LycheeInstanceManager:
-    def __init__(
-        self, *, repository: Path, python: Path, root: Path, receipt_root: Path,
-        official_commit: str, public_base_url: str, llm_proxy_base_url: str,
-        embedding_base_url: str, embedding_model: str, first_port: int = 9200,
-        startup_timeout_seconds: float = 180.0, request_timeout_seconds: float = 300.0,
-    ) -> None:
-        if len(official_commit) != 40 or any(char not in "0123456789abcdef" for char in official_commit.lower()):
-            raise ValueError("official_commit must be exact")
-        actual = subprocess.run(("git", "-C", str(repository), "rev-parse", "HEAD"), check=True, capture_output=True, text=True).stdout.strip().lower()
-        if actual != official_commit.lower():
-            raise ValueError("LycheeMemory checkout does not match official_commit")
-        self.repository, self.python, self.root, self.receipt_root = repository, python, root, receipt_root
-        self.official_commit = official_commit.lower()
-        self.public_base_url = public_base_url.rstrip("/")
-        self.llm_proxy_base_url = llm_proxy_base_url.rstrip("/")
-        self.embedding_base_url, self.embedding_model = embedding_base_url.rstrip("/"), embedding_model
-        self.first_port, self.startup_timeout_seconds = first_port, startup_timeout_seconds
-        if request_timeout_seconds <= 0:
-            raise ValueError("request_timeout_seconds must be positive")
-        self.request_timeout_seconds = request_timeout_seconds
-        self._instances: dict[str, LycheeInstance] = {}
-        self._lock = threading.Lock()
-
-    def _available_port(self) -> int:
-        used = {instance.port for instance in self._instances.values()}
-        port = self.first_port
-        while port in used:
-            port += 1
-        while True:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-                try:
-                    probe.bind(("127.0.0.1", port))
-                except OSError:
-                    port += 1
-                    continue
-            return port
-
-    def _environment(self, scope: str, instance_root: Path) -> dict[str, str]:
-        data = instance_root / "data"
-        python_path = str(self.repository)
-        if os.environ.get("PYTHONPATH"):
-            python_path += os.pathsep + os.environ["PYTHONPATH"]
-        return {
-            **os.environ,
-            "PYTHONPATH": python_path,
-            "LLM_MODEL": "openai/Qwen3-14B", "LLM_API_KEY": "EMPTY",
-            "LLM_API_BASE": f"{self.llm_proxy_base_url}/{scope}/v1",
-            "EMBEDDING_BACKEND": "http",
-            "EMBEDDING_MODEL": self.embedding_model, "EMBEDDING_API_KEY": "EMPTY",
-            "EMBEDDING_API_BASE": self.embedding_base_url + "/v1", "EMBEDDING_DIM": "384",
-            "EXPERIMENTAL_TRANSFORMER_RERANK": "false",
-            "COMPACT_MEMORY_DB_PATH": str(data / "compact_memory.db"),
-            "COMPACT_VECTOR_DB_PATH": str(data / "compact_vector"),
-            "SESSION_DB_PATH": str(data / "sessions.db"), "USER_DB_PATH": str(data / "users.db"),
-            "SKILL_STORE_PATH": str(data / "skills"), "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
-            "CUDA_VISIBLE_DEVICES": "",
-        }
-
-    def _command(self, port: int) -> tuple[str, ...]:
-        main = str(self.repository / "main.py")
-        bootstrap = (
-            "import runpy,sys,dotenv;"
-            "dotenv.load_dotenv=lambda *args,**kwargs: False;"
-            f"sys.argv=[{main!r},'--port',{str(port)!r}];"
-            f"runpy.run_path({main!r},run_name='__main__')"
-        )
-        return str(self.python), "-c", bootstrap
-
-    def ensure(self, scope: str, *, claimed_base_url: str, claimed_commit: str) -> dict[str, object]:
-        scope = valid_scope(scope)
-        expected_base = f"{self.public_base_url}/instances/{scope}"
-        if claimed_base_url.rstrip("/") != expected_base or claimed_commit.lower() != self.official_commit:
-            raise ValueError("Lychee instance claim does not match manager configuration")
-        with self._lock:
-            existing = self._instances.get(scope)
-            if existing is not None and existing.process.poll() is None:
-                return {"status": "ready", "scope": scope}
-            instance_root = self.root / scope
-            if instance_root.exists():
-                raise ValueError("stale Lychee instance directory prevents empty-at-start claim")
-            (instance_root / "data").mkdir(parents=True)
-            port = self._available_port()
-            log = (instance_root / "server.log").open("ab")
-            # The pinned checkout's development .env uses override=True. Disable only
-            # that loader so each isolated process receives its audited environment.
-            command = self._command(port)
-            process = subprocess.Popen(command, cwd=instance_root, env=self._environment(scope, instance_root), stdout=log, stderr=subprocess.STDOUT)
-            deadline = time.monotonic() + self.startup_timeout_seconds
-            ready_url = f"http://127.0.0.1:{port}/openapi.json"
-            while time.monotonic() < deadline:
-                if process.poll() is not None:
-                    raise RuntimeError("LycheeMemory official process exited during startup")
-                try:
-                    with request.urlopen(ready_url, timeout=2.0) as response:
-                        if response.status == 200:
-                            break
-                except (error.URLError, TimeoutError):
-                    time.sleep(0.5)
-            else:
-                process.terminate()
-                raise TimeoutError("LycheeMemory official process did not become ready")
-            receipt = {
-                "schema_version": INSTANCE_SCHEMA, "scope": scope, "base_url": expected_base,
-                "official_commit": self.official_commit, "empty_at_start": True,
-            }
-            atomic_json(self.receipt_root / f"{scope}.json", receipt)
-            self._instances[scope] = LycheeInstance(scope, port, process, expected_base)
-            return {"status": "ready", "scope": scope}
-
-    def forward(self, scope: str, suffix: str, body: bytes, headers: Mapping[str, str]) -> tuple[int, bytes, str]:
-        instance = self._instances.get(valid_scope(scope))
-        if instance is None or instance.process.poll() is not None:
-            raise ValueError("Lychee instance is not ready")
-        target = f"http://127.0.0.1:{instance.port}/{suffix.lstrip('/')}"
-        req = request.Request(target, data=body, method="POST", headers={"Content-Type": headers.get("Content-Type", "application/json")})
-        try:
-            with request.urlopen(req, timeout=self.request_timeout_seconds) as response:
-                result = response.status, response.read(), response.headers.get("Content-Type", "application/json")
-        except error.HTTPError as exc:
-            result = exc.code, exc.read(), exc.headers.get("Content-Type", "application/json")
-        if suffix.rstrip("/") == "memory/search" and instance.process.poll() is None:
-            instance.process.terminate()
-            try:
-                instance.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                instance.process.kill()
-        return result
-
-    def close(self) -> None:
-        for instance in self._instances.values():
-            if instance.process.poll() is None:
-                instance.process.terminate()
-
-
 class ServiceHandler(BaseHTTPRequestHandler):
     server_version = "CMDIndustryService/1"
 
@@ -350,16 +204,10 @@ class ServiceHandler(BaseHTTPRequestHandler):
             body = self._body()
             if self.path == "/admin/ensure":
                 payload = json.loads(body)
-                if isinstance(service, MeteringProxy):
-                    result = service.ensure(valid_scope(payload.get("scope")))
-                else:
-                    result = service.ensure(
-                        valid_scope(payload.get("scope")), claimed_base_url=str(payload.get("base_url", "")),
-                        claimed_commit=str(payload.get("official_commit", "")),
-                    )
+                result = service.ensure(valid_scope(payload.get("scope")))
                 self._send(200, _json_bytes(result))
                 return
-            match = re.fullmatch(r"/(?:instances/)?(cmd-[a-f0-9]{24})/(.+)", self.path)
+            match = re.fullmatch(r"/(cmd-[a-f0-9]{24})/(.+)", self.path)
             if match is None:
                 raise ValueError("invalid service path")
             status, response_body, content_type = service.forward(match.group(1), match.group(2), body, self.headers)

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from cmd_audit.repair.ecc import EccSyndrome, MemAuditEccAdapter
+from cmd_audit.repair.ecc import Contract, MemAuditEccAdapter
 from cmd_audit.repair.incident_triage import ProcessFaultSubtype
 
 from .contracts import DecisionView, canonical_sha256
@@ -51,7 +51,7 @@ class RuntimeSyndrome:
     """A descriptor plus an optional ECC syndrome; clean/unknown abstain."""
 
     descriptor: SyndromeDescriptor
-    ecc_syndrome: EccSyndrome | None
+    ecc_syndrome: Contract | None
 
     @property
     def abstains(self) -> bool:

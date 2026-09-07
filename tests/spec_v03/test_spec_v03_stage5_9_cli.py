@@ -129,29 +129,29 @@ def test_cli_rejects_invalid_system_budget(
 
 def test_industry_adapter_config_is_closed_and_unconfigured_is_fail_closed(tmp_path) -> None:
     unconfigured = subject._load_industry_adapters(None)
-    assert set(unconfigured) == {"lightmem", "lycheemem", "mem0"}
+    assert set(unconfigured) == {"memskill", "erskill", "mem0"}
     assert all(isinstance(adapter, UnsupportedAdapter) for adapter in unconfigured.values())
 
     config = tmp_path / "industry.json"
     config.write_text(json.dumps({
-        "lightmem": {
+        "memskill": {
             "command": ["python", "wrapper.py"],
-            "repository": "/opt/lightmem",
+            "repository": "/opt/memskill",
             "pinned_commit": "a" * 40,
             "supported_tracks": ["controlled_a1", "native"],
             "timeout_seconds": 300,
         },
     }), encoding="utf-8")
     adapters = subject._load_industry_adapters(config)
-    assert isinstance(adapters["lightmem"], PinnedJsonSubprocessAdapter)
-    assert isinstance(adapters["lycheemem"], UnsupportedAdapter)
+    assert isinstance(adapters["memskill"], PinnedJsonSubprocessAdapter)
+    assert isinstance(adapters["erskill"], UnsupportedAdapter)
     assert isinstance(adapters["mem0"], UnsupportedAdapter)
 
 
 def test_industry_adapter_config_rejects_unknown_system(tmp_path) -> None:
     config = tmp_path / "industry.json"
     config.write_text(json.dumps({"unknown": {}}), encoding="utf-8")
-    with pytest.raises(ValueError, match="only lightmem"):
+    with pytest.raises(ValueError, match="only memskill"):
         subject._load_industry_adapters(config)
 
 
@@ -208,7 +208,7 @@ def test_main_injects_configured_adapters_and_cli_budget(tmp_path, monkeypatch: 
     assert subject.main() == 0
     capabilities = captured["capabilities"]
     assert isinstance(capabilities.industry_adapters["mem0"], PinnedJsonSubprocessAdapter)
-    assert isinstance(capabilities.industry_adapters["lightmem"], UnsupportedAdapter)
+    assert isinstance(capabilities.industry_adapters["memskill"], UnsupportedAdapter)
     assert captured["budget"].to_mapping() == {
         "llm_calls": 3,
         "input_tokens": 10,

@@ -58,24 +58,20 @@ def test_stage_eligibility_omits_inapplicable_combinations() -> None:
         "niche_shuffled", "mean_only", "reset_prefix", "source_prefix", "oracle_legal_operator",
     }
     assert {node["system_arm_id"] for node in by_stage["stage9"]} == {
-        "full-context", "bm25-rag", "no-repair", "oracle", "cmd", "lightmem", "lycheemem", "mem0",
+        "full-context", "bm25-rag", "no-repair", "oracle", "cmd", "memskill", "erskill", "mem0",
     }
-    assert not any(node["system_arm_id"] == "lightmem" for stage in ("stage5", "stage6", "stage7", "stage8") for node in by_stage[stage])
+    assert not any(node["system_arm_id"] == "memskill" for stage in ("stage5", "stage6", "stage7", "stage8") for node in by_stage[stage])
 
 
-def test_only_eligible_unsupported_runs_remain_in_denominator() -> None:
-    development = build_experiment_matrix()
-    systems = tuple(
-        SystemArm(**{**row, "supported_tracks": ("controlled_a1", "controlled_a2")})
-        if row["arm_id"] == "lightmem" else SystemArm(**row)
-        for row in development["systems"]
-    )
-    manifest = build_experiment_matrix(systems=systems)
-    rows = [node for node in manifest["run_dag"]["nodes"] if node["stage"] == "stage9" and node["system_arm_id"] == "lightmem" and node["track"] == "native"]
-
-    assert rows and {row["execution_status"] for row in rows} == {"unsupported"}
-    assert {row["denominator_status"] for row in rows} == {"included"}
-    assert not any(node["execution_status"] == "unsupported" for node in manifest["run_dag"]["nodes"] if node["stage"] != "stage9")
+def test_skill_competitors_are_controlled_only() -> None:
+    manifest = build_experiment_matrix()
+    rows = [node for node in manifest["run_dag"]["nodes"] if node["stage"] == "stage9"]
+    for system in ("memskill", "erskill", "mem0"):
+        tracks = {row["track"] for row in rows if row["system_arm_id"] == system}
+        assert tracks == {"controlled_a1", "controlled_a2"}
+    assert {row["track"] for row in rows if row["system_arm_id"] == "cmd"} == {
+        "controlled_a1", "controlled_a2", "native",
+    }
 
 
 def test_confirmatory_requires_complete_external_pins_and_freezes() -> None:

@@ -34,12 +34,12 @@ STAGE6_VARIANTS = ("no_skill", "seed_frozen", "add_only", "add_dedup", "add_revi
 STAGE7_VARIANTS = ("detection_only", "in_place", "copy_on_write", "ecc_no_cas", "ecc_cas", "full_governance", "oracle_repair")
 STAGE8A_VARIANTS = ("no_repair", "random_legal", "skill_content_only", "reset_online", "frozen_source", "niche_shuffled", "mean_only", "reset_prefix", "source_prefix", "oracle_legal_operator")
 STAGE8B_VARIANTS = ("seed_only", "source_skills", "target_native_skills", "oracle_library")
-STAGE9_VARIANTS = ("full_context", "bm25_rag", "cmd_full", "cmd_no_mix_ghost", "cmd_no_ecology", "cmd_no_ecc_cas", "lightmem", "lycheemem", "mem0", "no_repair", "oracle")
+STAGE9_VARIANTS = ("full_context", "bm25_rag", "cmd_full", "cmd_no_mix_ghost", "cmd_no_ecology", "cmd_no_ecc_cas", "memskill", "erskill", "mem0", "no_repair", "oracle")
 _BUDGET_FIELDS = frozenset({"llm_calls", "input_tokens", "output_tokens", "wall_clock_seconds", "gpu_seconds"})
 _FORBIDDEN_CMD_COMPONENTS = frozenset({"cmd_diagnosis", "cmd_router", "cmd_ecc"})
 _NODE_FIELDS = frozenset({"run_id", "stage", "substage", "experiment_variant_id", "model_arm_id", "system_arm_id", "track", "family_id", "seed", "execution_status", "denominator_status", "score_namespace", "reporting_stratum"})
-_STAGE9_SYSTEM = {"full_context": "full-context", "bm25_rag": "bm25-rag", "cmd_full": "cmd", "cmd_no_mix_ghost": "cmd", "cmd_no_ecology": "cmd", "cmd_no_ecc_cas": "cmd", "lightmem": "lightmem", "lycheemem": "lycheemem", "mem0": "mem0", "no_repair": "no-repair", "oracle": "oracle"}
-_STAGE9_TRACKS = {variant: ("controlled_a1", "controlled_a2", "native") if variant in {"cmd_full", "lightmem", "lycheemem", "mem0"} else ("controlled_a1", "controlled_a2") for variant in STAGE9_VARIANTS}
+_STAGE9_SYSTEM = {"full_context": "full-context", "bm25_rag": "bm25-rag", "cmd_full": "cmd", "cmd_no_mix_ghost": "cmd", "cmd_no_ecology": "cmd", "cmd_no_ecc_cas": "cmd", "memskill": "memskill", "erskill": "erskill", "mem0": "mem0", "no_repair": "no-repair", "oracle": "oracle"}
+_STAGE9_TRACKS = {variant: ("controlled_a1", "controlled_a2", "native") if variant == "cmd_full" else ("controlled_a1", "controlled_a2") for variant in STAGE9_VARIANTS}
 
 
 @dataclass(frozen=True)
@@ -130,9 +130,9 @@ def _default_system_arms() -> tuple[SystemArm, ...]:
         SystemArm("full-context", "full_context", ("controlled_a1", "controlled_a2"), (), "builtin:full-context", UNRESOLVED),
         SystemArm("bm25-rag", "bm25_rag", ("controlled_a1", "controlled_a2"), (), "builtin:bm25-rag", UNRESOLVED),
         SystemArm("cmd", "cmd", all_tracks, ("cmd_diagnosis", "cmd_router", "cmd_ecc"), "cmd:repair-runtime", UNRESOLVED),
-        SystemArm("lightmem", "lightmem", all_tracks, ("lightmem-adapter",), "lightmem:adapter", UNRESOLVED),
-        SystemArm("lycheemem", "lycheemem", all_tracks, ("lycheemem-adapter",), "lycheemem:adapter", UNRESOLVED),
-        SystemArm("mem0", "mem0", all_tracks, ("mem0-adapter",), "mem0:adapter", UNRESOLVED),
+        SystemArm("memskill", "memskill", ("controlled_a1", "controlled_a2"), ("evolving-memory-skills",), "memskill:adapter", UNRESOLVED),
+        SystemArm("erskill", "erskill", ("controlled_a1", "controlled_a2"), ("evolving-retrieval-skills",), "erskill:adapter", UNRESOLVED),
+        SystemArm("mem0", "mem0", ("controlled_a1", "controlled_a2"), ("mem0-adapter",), "mem0:adapter", UNRESOLVED),
         SystemArm("no-repair", "no_repair", ("controlled_a1", "controlled_a2"), (), "builtin:no-repair", UNRESOLVED),
         SystemArm("oracle", "oracle", ("controlled_a1", "controlled_a2"), ("sealed-evaluator-oracle",), "builtin:oracle", UNRESOLVED),
         SystemArm("random-legal", "random_legal", ("controlled_a1", "controlled_a2"), ("legal-action-sampler",), "builtin:random-legal", UNRESOLVED),

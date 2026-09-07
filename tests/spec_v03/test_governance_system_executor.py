@@ -110,7 +110,7 @@ def test_stage9_namespaces_and_unconfigured_adapters_keep_the_denominator(drop_b
     executor = GovernanceSystemExecutor()
     budget = ResourceUsage(2, 100, 100, 3.0, 0)
     controlled = executor.execute_stage9(bundle, ExecutionOrder(2), system_id="cmd_full", run_id="r9", track="controlled_a1", budget=budget, cmd_provider=FirstLegalProposalPolicy())
-    native = executor.execute_stage9(bundle, ExecutionOrder(2), system_id="lightmem", run_id="r9", track="native", budget=budget)
+    native = executor.execute_stage9(bundle, ExecutionOrder(2), system_id="memskill", run_id="r9", track="native", budget=budget)
     assert controlled.score_namespace == "controlled"
     assert native.score_namespace == "native"
     assert native.adapter_status == "UNSUPPORTED"
@@ -156,24 +156,25 @@ def test_cmd_profiles_are_distinct_and_missing_capability_fails_closed(drop_bund
     assert incomplete.governance is None
 
 
-def test_controlled_industry_legal_action_uses_common_governance_but_native_stays_native(drop_bundle) -> None:
+def test_controlled_industry_legal_action_uses_common_governance_but_native_is_unsupported(drop_bundle) -> None:
     executor = GovernanceSystemExecutor()
     budget = ResourceUsage(2, 10, 10, 1.0, 0)
     adapter = _LegalIndustryAdapter()
     controlled = executor.execute_stage9(
-        drop_bundle, ExecutionOrder(5), system_id="lightmem", run_id="industry", track="controlled_a1",
-        budget=budget, industry_adapters={"lightmem": adapter},
+        drop_bundle, ExecutionOrder(5), system_id="memskill", run_id="industry", track="controlled_a1",
+        budget=budget, industry_adapters={"memskill": adapter},
     )
     native = executor.execute_stage9(
-        drop_bundle, ExecutionOrder(5), system_id="lightmem", run_id="industry", track="native",
-        budget=budget, industry_adapters={"lightmem": adapter},
+        drop_bundle, ExecutionOrder(5), system_id="memskill", run_id="industry", track="native",
+        budget=budget, industry_adapters={"memskill": adapter},
     )
     assert controlled.governance is not None
     assert controlled.governance.committed
     assert controlled.governance.invariant_passed and controlled.governance.safety_passed
     assert controlled.resource_ledger.observed_usage == ResourceUsage(1, 4, 2, 0.1, 0)
     assert native.governance is None
-    assert native.adapter_status == "OK"
+    assert native.adapter_status == "UNSUPPORTED"
+    assert native.adapter_reason == "native_track_unsupported"
 
 
 def test_stage9_all_systems_share_budget_and_records_are_closed(drop_bundle) -> None:

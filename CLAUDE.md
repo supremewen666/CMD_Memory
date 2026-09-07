@@ -4,7 +4,7 @@
 
 > **Runtime contract override (2026-08-23).** The live system is now a
 > gold-free ECC memory-state correction loop:
-> `MemAudit telemetry -> EccSyndrome -> GHOST repair selection -> shadow state
+> `MemAudit telemetry -> Contract -> GHOST repair selection -> shadow state
 > repair -> ECC checks -> commit/rollback -> EccRepairReceipt -> incident sinks
 > + router evolution`. Runtime detection, selection, mutation, acceptance,
 > receipt creation, and router updates must never read dataset gold/labels or

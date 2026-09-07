@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from cmd_audit.repair.ecc import EccRepairReceipt, EccSyndrome, MemAuditEccAdapter
+from cmd_audit.repair.ecc import Contract, EccRepairReceipt, MemAuditEccAdapter
 from cmd_audit.repair.incident_store import IncidentLedger
 from cmd_audit.repair.incident_triage import (
     IncidentMechanism,
@@ -45,11 +45,11 @@ def test_runtime_observation_with_gold_field_fails_before_decode() -> None:
 
 def test_process_fault_signals_decode_to_one_typed_ecc_syndrome() -> None:
     syndrome = MemAuditEccAdapter().decode(_observation())
-    assert isinstance(syndrome, EccSyndrome)
+    assert isinstance(syndrome, Contract)
     assert syndrome.mechanism is IncidentMechanism.PROCESS_FAULT
     assert syndrome.repair_family is RepairFamily.PIPELINE_PATCH
     assert syndrome.process_fault_subtype is ProcessFaultSubtype.RETRIEVAL
-    assert syndrome.content_hash == EccSyndrome.from_mapping(
+    assert syndrome.content_hash == Contract.from_mapping(
         syndrome.to_mapping()
     ).content_hash
 
@@ -181,7 +181,7 @@ class _ShadowStore:
         return self.root
 
     def apply_shadow(
-        self, syndrome: EccSyndrome, selected_skill_revision_id: str
+        self, syndrome: Contract, selected_skill_revision_id: str
     ) -> None:
         assert syndrome.state_root == "state-before"
         assert selected_skill_revision_id == "skill-1"
@@ -202,7 +202,7 @@ class _EccEvaluator:
         self.answer_replay_calls = 0
 
     def evaluate_ecc(
-        self, syndrome: EccSyndrome, *, before_root: str, shadow_root: str
+        self, syndrome: Contract, *, before_root: str, shadow_root: str
     ) -> dict[str, object]:
         self.ecc_calls += 1
         assert syndrome.syndrome_id

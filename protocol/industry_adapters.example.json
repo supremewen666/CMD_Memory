@@ -1,49 +1,46 @@
 {
-  "lightmem": {
+  "memskill": {
     "command": [
-      "/ABS/PATH/LightMem/.venv/bin/python",
-      "/Users/supremewen/CMD_Counterfactual_Memory_Debugger/wrappers/lightmem_adapter.py",
+      "/ABS/PATH/CMD_Memory/.venv/bin/python",
+      "/ABS/PATH/CMD_Memory/wrappers/memskill_adapter.py",
       "--protocol-config",
-      "/Users/supremewen/CMD_Counterfactual_Memory_Debugger/protocol/controlled_memory_protocol.json"
+      "/ABS/PATH/CMD_Memory/protocol/controlled_memory_protocol.json"
     ],
-    "repository": "/ABS/PATH/LightMem",
+    "repository": "/ABS/PATH/CMD_Memory",
     "pinned_commit": "0000000000000000000000000000000000000000",
     "supported_tracks": [
       "controlled_a1",
-      "controlled_a2",
-      "native"
+      "controlled_a2"
     ],
     "timeout_seconds": 300
   },
-  "lycheemem": {
+  "erskill": {
     "command": [
-      "/ABS/PATH/LycheeMem/.venv/bin/python",
-      "/Users/supremewen/CMD_Counterfactual_Memory_Debugger/wrappers/lycheemem_adapter.py",
+      "/ABS/PATH/CMD_Memory/.venv/bin/python",
+      "/ABS/PATH/CMD_Memory/wrappers/erskill_adapter.py",
       "--protocol-config",
-      "/Users/supremewen/CMD_Counterfactual_Memory_Debugger/protocol/controlled_memory_protocol.json"
+      "/ABS/PATH/CMD_Memory/protocol/controlled_memory_protocol.json"
     ],
-    "repository": "/ABS/PATH/LycheeMem",
+    "repository": "/ABS/PATH/CMD_Memory",
     "pinned_commit": "0000000000000000000000000000000000000000",
     "supported_tracks": [
       "controlled_a1",
-      "controlled_a2",
-      "native"
+      "controlled_a2"
     ],
     "timeout_seconds": 300
   },
   "mem0": {
     "command": [
       "/ABS/PATH/mem0/.venv/bin/python",
-      "/Users/supremewen/CMD_Counterfactual_Memory_Debugger/wrappers/mem0_adapter.py",
+      "/ABS/PATH/CMD_Memory/wrappers/mem0_adapter.py",
       "--protocol-config",
-      "/Users/supremewen/CMD_Counterfactual_Memory_Debugger/protocol/controlled_memory_protocol.json"
+      "/ABS/PATH/CMD_Memory/protocol/controlled_memory_protocol.json"
     ],
     "repository": "/ABS/PATH/mem0",
     "pinned_commit": "0000000000000000000000000000000000000000",
     "supported_tracks": [
       "controlled_a1",
-      "controlled_a2",
-      "native"
+      "controlled_a2"
     ],
     "timeout_seconds": 300
   }

@@ -393,7 +393,7 @@ def claim_ledger(result: Mapping[str, Any]) -> list[dict[str, str]]:
         {
             "claim": "CMD outperforms deployed memory systems.",
             "status": "NOT_ESTABLISHED",
-            "boundary": "Requires controlled LightMem, LycheeMem, and Mem0 result tables.",
+            "boundary": "Requires controlled MemSkill, ERSkill, and Mem0 result tables.",
         },
         {
             "claim": "The conclusions extend to an external frontier model.",

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cmd_audit.repair.ecc import EccRepairReceipt, EccSyndrome, MemAuditEccAdapter
+from cmd_audit.repair.ecc import Contract, EccRepairReceipt, MemAuditEccAdapter
 from cmd_audit.repair.incident_store import IncidentLedger
 from cmd_audit.repair.incident_triage import (
     ClassificationStatus,
@@ -310,7 +310,7 @@ def test_receipt_settlement_binds_incident_sink_and_router_update(tmp_path: Path
         event_index=10,
     )
     selected = ecology.skills[decision.selected_skill_revision_id]
-    syndrome = EccSyndrome(
+    syndrome = Contract(
         syndrome_id="syndrome-1",
         observation_id="observation-1",
         incident_id="incident-1",

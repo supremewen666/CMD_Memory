@@ -13,8 +13,8 @@ from cmd_audit.spec_v03.industry_adapters import (
     BuiltinRandomLegal,
     PinnedJsonSubprocessAdapter,
     ResourceUsage,
-    lightmem_adapter,
-    lycheemem_adapter,
+    erskill_adapter,
+    memskill_adapter,
     mem0_adapter,
 )
 
@@ -26,14 +26,14 @@ def _request(*, budget: ResourceUsage | None = None) -> AdapterRequest:
         observation={"current_state": {"state_root": "a" * 64}}, provenance={"source": "public"},
     )
     return AdapterRequest.from_decision(
-        run_id="stage9:case-1", system_id="lightmem", track="controlled_a1", decision=decision,
+        run_id="stage9:case-1", system_id="memskill", track="controlled_a1", decision=decision,
         legal_operator_ids=("process_restore", "process_cache_invalidate"), budget=budget or ResourceUsage(2, 100, 100, 2.0, 0),
     )
 
 
 def _adapter(tmp_path: Path, command: tuple[str, ...], *, pinned: str = "a" * 40, timeout: float = 1.0) -> PinnedJsonSubprocessAdapter:
     return PinnedJsonSubprocessAdapter(
-        capability_id="lightmem:adapter", command=command, repository=tmp_path,
+        capability_id="memskill:adapter", command=command, repository=tmp_path,
         pinned_commit=pinned, timeout_seconds=timeout,
     )
 
@@ -54,7 +54,7 @@ def _fake_run(monkeypatch: pytest.MonkeyPatch, *, head: str = "a" * 40, output: 
 
 
 def _response(*, operator: str | None = "process_restore", usage: ResourceUsage | None = None) -> str:
-    return json.dumps(AdapterResponse("OK", operator, None if operator else "abstain", usage or ResourceUsage(1, 10, 5, 0.1, 0), "lightmem:adapter").to_mapping())
+    return json.dumps(AdapterResponse("OK", operator, None if operator else "abstain", usage or ResourceUsage(1, 10, 5, 0.1, 0), "memskill:adapter").to_mapping())
 
 
 def test_builtin_adapters_are_closed_and_deterministic() -> None:
@@ -73,7 +73,7 @@ def test_resource_usage_rejects_non_finite_values(value: float) -> None:
 
 def test_unconfigured_industry_factories_are_unsupported_without_results() -> None:
     request = _request()
-    for factory in (lightmem_adapter, lycheemem_adapter, mem0_adapter):
+    for factory in (memskill_adapter, erskill_adapter, mem0_adapter):
         response = factory().invoke(request)
         assert response.status == "UNSUPPORTED"
         assert response.selected_operator_id is None

@@ -82,12 +82,12 @@ The runtime does not import `InterventionSpec`, `RepairCase`, evaluator labels, 
 The repository also contains:
 
 - an F-DATA compiler with source/template quotas, family and constructor blocking, 3-5 seeded event orders, physical runtime/lockbox separation, checksums, compiler-closure hashes, and explicit freeze authorization;
-- executable Stage 5-9 runners covering all frozen matrix arms: shared-backbone router isolation, typed-skill ecology transitions, repair governance, cross-model residual/content transfer, and controlled/native industry tracks;
+- executable Stage 5-9 runners covering all frozen matrix arms: shared-backbone router isolation, typed-skill ecology transitions, repair governance, cross-model residual/content transfer, and controlled competitor tracks;
 - a closed runtime-bundle codec and batch loader that reconstructs the complete serving `MemoryState`, verifies its root and `DecisionView` bindings, and rejects evaluator-side fields;
 - a unified `stage59_runner` plus `experiments/spec_v03_stage5_9.py` entry point that writes one content-addressed report and preserves missing model, feedback, oracle, discovery, or baseline capabilities as `UNSUPPORTED` denominator rows;
 - separate reporting strata for Qwen3, Llama 3.1, and GPT-4o so incompatible model scales or closed/open implementations cannot be averaged into one headline number.
 
-LightMem, LycheeMem, and Mem0 now have a closed pinned-subprocess adapter contract. Exact upstream checkouts and native wrappers are not configured, and no model/API or industry-comparison result is claimed here. In the controlled track, a configured adapter's legal proposal is replayed through the same CMD COW/ECC/CAS governance; the native track records the adapter's own execution semantics separately.
+MemSkill, ERSkill, and Mem0 now have a closed pinned-subprocess adapter contract. Exact upstream checkouts and frozen competitor artifacts are not configured, and no model/API or competitor-comparison result is claimed here. In the controlled track, a configured adapter's legal proposal is replayed through the same CMD COW/ECC/CAS governance. MemSkill and ERSkill use frozen, split-audited evidence exports; native scoring is outside the current repair-action contract.
 
 ## Independent Pilot Validation
 
@@ -117,7 +117,7 @@ audited public sources and development runtime
   -> resolve exact model snapshots and baseline commits
   -> explicitly authorize F-DATA and lockbox publication
   -> execute frozen Mix GHOST/ecology/repair experiments
-  -> execute controlled-stack and native-recipe baselines
+  -> execute controlled-stack baselines and report native-task results only as external context
 ```
 
 Before F-DATA freeze, add benchmark-scale distribution targets and confirmatory source-family holdouts. The compiler must continue to fail closed when a source adapter cannot preserve semantic evidence or when an intervention lacks deterministic root, invariant, safety, locality, and rollback oracles. `DEVELOPMENT_UNPINNED` experiment manifests and development bundles must never be presented as confirmatory results.

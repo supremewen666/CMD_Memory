@@ -93,7 +93,7 @@ The intended claim hierarchy is:
 - `C2 Transfer`: frozen Mix GHOST parameter memory transfers across model families and can be efficiently recalibrated with a small target-only prefix.
 - `C3 Ecology`: a governed skill population produces held-out specialization and adapts to regime shifts beyond static, add-only, and random-partition controls.
 - `C4 Repair`: the complete system improves safe repair outcomes on three mutually exclusive incident classes while preserving clean memories.
-- `C5 Systems`: under controlled budgets, CMD compares favorably with representative open-source memory systems, with native-recipe results reported separately.
+- `C5 Systems`: under controlled budgets, CMD compares favorably with MemSkill, ERSkill, Mem0 OSS, and retrieval baselines through one shared repair-action interface.
 
 The paper MUST NOT describe router posterior updates alone as skill evolution. It MUST NOT describe a growing number of skills alone as ecological evolution.
 
@@ -955,8 +955,8 @@ Minimum systems:
 
 - full context, where feasible;
 - BM25 or simple RAG;
-- LightMem;
-- LycheeMem;
+- MemSkill;
+- ERSkill;
 - Mem0 OSS;
 - CMD full;
 - CMD without Mix GHOST;
@@ -981,10 +981,10 @@ Each memory system retains its defining storage and retrieval mechanism. Where a
 
 The controlled comparison has two subtracks:
 
-- `A1 End-to-end memory`: each system ingests the same clean or corrupted event stream and uses only its own native ingestion, retrieval, consolidation, and mutation controller. No CMD diagnosis, router, skill, or ECC component is inserted into a baseline.
+- `A1 Evidence-to-repair`: each system receives the same gold-free event stream. MemSkill and ERSkill produce frozen, split-audited skill evidence; Mem0 produces retrieved memory evidence. One frozen shared head maps that evidence into the legal repair-action space, after which every proposal passes the same COW/ECC/CAS governance. Results MUST be labelled `method + shared repair head`.
 - `A2 Primitive repair capability`: a common, non-learning harness presents the same already-triggered incident snapshot and requests a declared repair goal through each system's public update/delete/forget interface. The harness may translate schemas and enforce budgets, but may not select a target using CMD predictions, add rollback, or synthesize a repair the baseline does not expose. This subtrack measures public repair capability, not autonomous incident detection.
 
-Autonomous end-to-end repair claims come only from `A1`. Primitive capability claims come only from `A2`. An unsupported operation is a capability result, not a zero-quality implementation supplied by CMD.
+Comparative repair claims come only from `A1`. Primitive capability claims come only from `A2`. An unsupported operation is a capability result, not a zero-quality implementation supplied by CMD.
 
 For primary controlled `A1`, every system has the same data entitlement:
 
@@ -997,9 +997,9 @@ For primary controlled `A1`, every system has the same data entitlement:
 
 Systems may consume the common entitlement only through their declared native learning/consolidation interfaces. Inability to exploit a data phase is reported as a system property. CMD may not import a residual snapshot or skill learned from events that were withheld from competitors in the primary C5 comparison. A supplemental native-supervision track may preserve unequal official recipes, but it cannot pass C5.
 
-#### Track B: Native-recipe
+#### Track B: Native-task context
 
-Each system runs its official recommended configuration and pinned public version. This track estimates deployment reality, not isolated algorithmic superiority.
+Official native-task results may be cited in a separate context table. They are not Stage 9 repair results and cannot establish isolated algorithmic superiority on CMD-RepairStream.
 
 Report for every system:
 
@@ -1016,7 +1016,7 @@ Mem0 MUST use a pinned open-source implementation for controlled comparisons. Ho
 
 #### Baseline fairness rules
 
-- Baseline adapters may translate schemas but MUST NOT add CMD diagnosis, routing, ECC, or receipt logic.
+- Competitor evidence generators MUST NOT use CMD diagnosis, routing, evaluator fields, or receipts. The shared head and governance are frozen common evaluation components and MUST be identical for every controlled arm.
 - The strongest baseline configuration is selected on `D_skill`/development data and frozen.
 - Failed or unsupported baseline operations remain in the denominator.
 - Full-context results are a non-budget-matched reference when the context exceeds the common ceiling and must be labeled accordingly.
@@ -1232,7 +1232,7 @@ The primary paper SHOULD avoid a full Cartesian product. Use orthogonal slices:
 | Table 3 | Mix GHOST and full gates | skill lifecycle variants | ecology |
 | Figure 3 | same as Table 3 | population and anchor checkpoints | niche evolution |
 | Table 4 | Mix GHOST and full ecology | governance ablations by incident | safe repair |
-| Table 5 | matched models and budgets | LightMem, LycheeMem, Mem0 OSS, CMD | systems comparison |
+| Table 5 | matched models and budgets | MemSkill, ERSkill, Mem0 OSS, CMD | skill-system comparison |
 | Appendix | native configurations and complete model matrix | all | deployment context |
 
 Closed-model results appear as separate columns or panels. They are not averaged with open-model results.
@@ -1257,7 +1257,7 @@ Pass only if the complete governance path improves SafeRepairSuccess over no-rep
 
 ### Gate C5: Industry comparison
 
-Define `Delta_C5 = Utility_CMD - Utility_strongest_eligible_system` in controlled `A1`. Pass only if the multiplicity-corrected lower confidence bound for `Delta_C5` is positive, CMD meets the common token/call/latency or monetary budget, and false commit, safety violation, and clean false repair satisfy their frozen non-inferiority margins. Only locally executed, pinned systems with the common data entitlement are eligible. Native-recipe results may support deployment relevance but cannot establish isolated algorithmic superiority.
+Define `Delta_C5 = Utility_CMD - Utility_strongest_eligible_system` in controlled `A1`. Pass only if the multiplicity-corrected lower confidence bound for `Delta_C5` is positive, CMD meets the common token/call/latency or monetary budget, and false commit, safety violation, and clean false repair satisfy their frozen non-inferiority margins. Only locally executed, pinned systems with the common data entitlement are eligible. Native-task results may provide context but cannot establish isolated algorithmic superiority.
 
 ## 19. Negative-result policy
 
@@ -1295,7 +1295,7 @@ Define `Delta_C5 = Utility_CMD - Utility_strongest_eligible_system` in controlle
 ### Round 4: Systems comparison
 
 - controlled-stack comparison on the sealed common cases;
-- native-recipe comparison as a separate deployment track;
+- native-task results as non-ranked external context;
 - complete cost and capability disclosure.
 
 ## 21. Required outputs
@@ -1325,7 +1325,7 @@ Stages 5-9 now have a common executable surface over the closed runtime bundle a
 - Stage 6 executes all nine ecology arms with typed operator replay gates and `t+1` birth, supersede, quarantine, and retirement semantics.
 - Stage 7 executes all seven governance arms through explicit COW, ECC, CAS, rollback, and receipt-provenance component switches.
 - Stage 8A/8B names and semantics are bound directly to the frozen experiment matrix, with skill content, evidence state, and residual state transported independently.
-- Stage 9 gives CMD ablations distinct capability profiles, replays controlled-stack baseline proposals through common governance, and separates native-recipe records.
+- Stage 9 gives CMD ablations distinct capability profiles and replays controlled competitor proposals through common governance; native-task outputs are outside its repair-action contract.
 
 `experiments/spec_v03_stage5_9.py` compiles these outputs into one content-addressed report. A development smoke over public HaluMem data and the deterministic non-model proposal policy completed successfully. This is wiring evidence only: unconfigured model providers, delayed outcome channels, sealed oracles, discovery providers, and industry wrappers remain `UNSUPPORTED`, and no empirical score is inferred from the smoke.
 
@@ -1362,7 +1362,7 @@ Before any result is called confirmatory, verify:
 - [ ] Clean and unknown cases remain in the denominator.
 - [ ] Process fault, state drift, and poison are reported separately.
 - [ ] Cross-model results are not averaged into one score.
-- [ ] Controlled-stack and native-recipe comparisons are separated.
+- [ ] Controlled repair results and native-task context are separated.
 - [ ] Baselines are pinned and configured using development data only.
 - [ ] Safety, locality, cost, and utility appear together.
 - [ ] Claim gates are evaluated exactly as preregistered.

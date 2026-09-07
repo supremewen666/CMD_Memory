@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import subprocess
-
 import pytest
 
 from cmd_audit.spec_v03.industry_services import (
-    LycheeInstanceManager, MeteringProxy, ProxyLimits, UsageReceiptStore, valid_scope,
+    MeteringProxy, ProxyLimits, UsageReceiptStore, valid_scope,
 )
 
 
@@ -94,37 +92,3 @@ def test_scope_contract_is_closed() -> None:
     assert valid_scope(SCOPE) == SCOPE
     with pytest.raises(ValueError):
         valid_scope("shared")
-
-
-def test_lychee_manager_binds_official_checkout_and_isolated_paths(tmp_path: Path) -> None:
-    repository = tmp_path / "LycheeMem"
-    repository.mkdir()
-    subprocess.run(("git", "init", "-q", str(repository)), check=True)
-    subprocess.run(("git", "-C", str(repository), "config", "user.email", "test@example.com"), check=True)
-    subprocess.run(("git", "-C", str(repository), "config", "user.name", "Test"), check=True)
-    (repository / "README").write_text("fixture", encoding="utf-8")
-    subprocess.run(("git", "-C", str(repository), "add", "README"), check=True)
-    subprocess.run(("git", "-C", str(repository), "commit", "-q", "-m", "fixture"), check=True)
-    commit = subprocess.run(("git", "-C", str(repository), "rev-parse", "HEAD"), check=True, capture_output=True, text=True).stdout.strip()
-    manager = LycheeInstanceManager(
-        repository=repository, python=Path("/python"), root=tmp_path / "instances",
-        receipt_root=tmp_path / "receipts", official_commit=commit,
-        public_base_url="http://127.0.0.1:9000", llm_proxy_base_url="http://127.0.0.1:9100",
-        embedding_base_url="http://127.0.0.1:8003", embedding_model="all-MiniLM-L6-v2",
-        request_timeout_seconds=900.0,
-    )
-    env = manager._environment(SCOPE, tmp_path / "instances" / SCOPE)
-    assert env["LLM_API_BASE"] == f"http://127.0.0.1:9100/{SCOPE}/v1"
-    assert SCOPE in env["COMPACT_MEMORY_DB_PATH"]
-    assert env["EMBEDDING_BACKEND"] == "http"
-    assert env["EMBEDDING_MODEL"] == "all-MiniLM-L6-v2"
-    assert env["EMBEDDING_API_BASE"] == "http://127.0.0.1:8003/v1"
-    assert env["EMBEDDING_DIM"] == "384"
-    assert manager.request_timeout_seconds == 900.0
-    command = manager._command(9234)
-    assert command[:2] == ("/python", "-c")
-    assert "dotenv.load_dotenv" in command[2]
-    assert str(repository / "main.py") in command[2]
-    assert "9234" in command[2]
-    with pytest.raises(ValueError, match="claim"):
-        manager.ensure(SCOPE, claimed_base_url="http://wrong", claimed_commit=commit)

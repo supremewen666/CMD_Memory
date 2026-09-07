@@ -27,7 +27,7 @@ RESPONSE_SCHEMA = "cmd-spec-v03-industry-adapter-response-v1"
 PROTOCOL_SCHEMA = "cmd-controlled-memory-protocol-v1"
 USAGE_RECEIPT_SCHEMA = "cmd-metered-model-usage-receipt-v1"
 CONTROLLED_TRACKS = frozenset({"controlled_a1", "controlled_a2"})
-SYSTEM_IDS = frozenset({"lightmem", "lycheemem", "mem0"})
+SYSTEM_IDS = frozenset({"memskill", "erskill", "mem0"})
 
 
 class WrapperError(RuntimeError):
@@ -118,6 +118,7 @@ class UsageLedger:
     input_tokens: int = 0
     output_tokens: int = 0
     gpu_seconds: int = 0
+    accounted_wall_seconds: float = 0.0
 
     @classmethod
     def start(cls, budget: Budget) -> "UsageLedger":
@@ -125,7 +126,7 @@ class UsageLedger:
 
     @property
     def elapsed(self) -> float:
-        return max(0.0, time.monotonic() - self.started_at)
+        return self.accounted_wall_seconds + max(0.0, time.monotonic() - self.started_at)
 
     @property
     def remaining_wall_seconds(self) -> float:
@@ -154,23 +155,33 @@ class UsageLedger:
 
     def record_batch(
         self, *, llm_calls: int, input_tokens: int, output_tokens: int, gpu_seconds: int = 0,
+        wall_clock_seconds: float = 0.0,
     ) -> None:
         if any(
             isinstance(value, bool) or not isinstance(value, int) or value < 0
             for value in (llm_calls, input_tokens, output_tokens, gpu_seconds)
         ):
             raise ProtocolError("model usage must contain non-negative integer counters")
+        if (
+            isinstance(wall_clock_seconds, bool)
+            or not isinstance(wall_clock_seconds, (int, float))
+            or not math.isfinite(float(wall_clock_seconds))
+            or wall_clock_seconds < 0
+        ):
+            raise ProtocolError("wall-clock usage must be a finite non-negative number")
         projected = (
             self.llm_calls + llm_calls,
             self.input_tokens + input_tokens,
             self.output_tokens + output_tokens,
             self.gpu_seconds + gpu_seconds,
+            self.elapsed + float(wall_clock_seconds),
         )
         if (
             projected[0] > self.budget.llm_calls
             or projected[1] > self.budget.input_tokens
             or projected[2] > self.budget.output_tokens
             or projected[3] > self.budget.gpu_seconds
+            or projected[4] > self.budget.wall_clock_seconds
         ):
             # The parent response contract cannot carry counters above the
             # request budget. Saturate a failed result at that contract's cap.
@@ -178,8 +189,13 @@ class UsageLedger:
             self.input_tokens = min(projected[1], self.budget.input_tokens)
             self.output_tokens = min(projected[2], self.budget.output_tokens)
             self.gpu_seconds = min(projected[3], self.budget.gpu_seconds)
+            self.accounted_wall_seconds = min(
+                self.accounted_wall_seconds + float(wall_clock_seconds),
+                self.budget.wall_clock_seconds,
+            )
             raise BudgetExhausted("reported model usage exceeded the unified budget")
-        self.llm_calls, self.input_tokens, self.output_tokens, self.gpu_seconds = projected
+        self.llm_calls, self.input_tokens, self.output_tokens, self.gpu_seconds = projected[:4]
+        self.accounted_wall_seconds += float(wall_clock_seconds)
 
     def mapping(self, *, wall_clock_seconds: float | None = None) -> dict[str, object]:
         return {
@@ -262,7 +278,7 @@ class ProtocolConfig:
         if not isinstance(head, Mapping) or set(head) != head_fields:
             raise ProtocolError("shared head config must use the closed schema")
         if not isinstance(systems, Mapping) or set(systems) != SYSTEM_IDS or not isinstance(systems.get(system_id), Mapping):
-            raise ProtocolError("systems config must contain exactly the three official systems")
+            raise ProtocolError("systems config must contain exactly memskill, erskill, and mem0")
         _nonempty_text(head["endpoint"], "head.endpoint")
         _nonempty_text(head["model_id"], "head.model_id")
         _nonempty_text(head["model_snapshot"], "head.model_snapshot")
@@ -613,7 +629,12 @@ def response_mapping(
 
 def wrapper_revision(system_id: str, protocol: ProtocolConfig) -> str:
     usage = protocol.system.get("backend_usage")
-    mode = usage.get("mode") if isinstance(usage, Mapping) else "invalid-metering"
+    if isinstance(usage, Mapping):
+        mode = usage.get("mode")
+    elif "artifact_path" in protocol.system:
+        mode = "frozen-evidence"
+    else:
+        mode = "invalid-metering"
     return f"{system_id}:controlled-wrapper-v1:{mode}:protocol-{protocol.protocol_sha256[:16]}:model-{canonical_sha256(protocol.head['model_snapshot'])[:12]}"
 
 

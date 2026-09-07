@@ -306,12 +306,12 @@ def _capability_factory(system: str, config: Mapping[str, object] | None) -> Ind
     )
 
 
-def lightmem_adapter(config: Mapping[str, object] | None = None) -> IndustryAdapter:
-    return _capability_factory("lightmem", config)
+def memskill_adapter(config: Mapping[str, object] | None = None) -> IndustryAdapter:
+    return _capability_factory("memskill", config)
 
 
-def lycheemem_adapter(config: Mapping[str, object] | None = None) -> IndustryAdapter:
-    return _capability_factory("lycheemem", config)
+def erskill_adapter(config: Mapping[str, object] | None = None) -> IndustryAdapter:
+    return _capability_factory("erskill", config)
 
 
 def mem0_adapter(config: Mapping[str, object] | None = None) -> IndustryAdapter:

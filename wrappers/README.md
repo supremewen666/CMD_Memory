@@ -1,146 +1,156 @@
-# Controlled Industry-System Wrappers
+# Controlled Competitor Wrappers
 
-These wrappers connect Stage 9 to fixed official checkouts without importing
-their dependency trees into the CMD process.
+Stage 9 compares CMD with two skill-level methods and one deployed memory
+system under the same legal repair API:
 
 ```text
-Stage59Runner
-  -> PinnedJsonSubprocessAdapter (closed JSON stdin/stdout)
-  -> official-system venv + thin wrapper
-  -> official Python SDK or dedicated localhost service
-  -> shared pinned Qwen3 repair head
-  -> legal operator ID or abstention
+CMD-RepairStream decision view
+  -> MemSkill / ERSkill / Mem0 evidence
+  -> frozen shared repair head
+  -> legal OperatorSpec or abstention
+  -> common COW + ECC + CAS governance
 ```
 
-## Controlled call paths
+## Competitors
 
-- `lightmem_adapter.py`: `LightMemory.from_config` -> `add_memory` -> optional
-  offline update -> `retrieve(limit=top_k)`.
-- `lycheemem_adapter.py`: `POST /memory/append-turn` -> synchronous
-  `POST /memory/consolidate` -> raw `POST /memory/search`. The service must be a
-  dedicated, isolated instance because the raw search API is not case-scoped.
-  The wrapper requires a namespace-bound endpoint and an isolated-instance
-  receipt before it will write or search.
-- `mem0_adapter.py`: `Memory.from_config` -> `add(user_id=namespace)` ->
-  `search(filters={"user_id": namespace}, top_k=top_k)`.
+- `memskill_adapter.py` consumes evidence exported by an official pinned
+  MemSkill checkpoint. Its skills concern memory construction and evolution;
+  the shared head maps that evidence to CMD's legal repair API.
+- `erskill_adapter.py` consumes frozen retrieval evidence from an official
+  ERSkill artifact when available, or from an explicitly labelled
+  `paper_faithful_erskill_reimplementation`.
+- `mem0_adapter.py` executes the pinned Mem0 OSS SDK and scopes state by the
+  case namespace.
 
-MCP, Lychee `/memory/reason`, Lychee smart-search synthesis, and Mem0 Cloud are
-not used in the controlled track. They belong to the future native response
-contract.
+MemSkill and ERSkill are not described as native memory-repair systems. Their
+controlled labels are `MemSkill + shared repair head` and
+`ERSkill + shared repair head`. Native-track scoring is intentionally disabled
+for all three competitors because the current response contract represents a
+repair action, not each project's native answer format.
 
-Use these labels in controlled-track tables and figures:
+## Frozen Skill Evidence
 
-- `LightMem + shared repair head`
-- `LycheeMem + shared repair head`
-- `Mem0 OSS + shared repair head`
-- `CMD`
-
-The first three labels deliberately do not imply that an official system
-natively emits a CMD repair operator.
-
-## Required setup
-
-1. Clone each official repository, checkout an exact 40-character commit, and
-   install it in its own `.venv`.
-2. Copy `protocol/controlled_memory_protocol.example.json` to
-   `protocol/controlled_memory_protocol.json` and replace every placeholder.
-   Set LycheeMemory `expected_commit` to the same commit used by its adapter
-   entry and isolated service receipt.
-3. Copy `protocol/industry_adapters.example.json` to an experiment-local config,
-   replace repository/venv paths and exact commits, and keep wrapper paths
-   absolute. The adapter sets the official repository as the subprocess cwd.
-4. Ensure every LightMem storage path/collection that needs isolation contains
-   `{namespace}`. Mem0 is additionally scoped by the official `user_id` filter.
-5. Start one isolated LycheeMemory service for every evaluated case namespace.
-   `spec_v03_lychee_instance_manager.py` resolves the `{namespace}` endpoint to
-   an official Uvicorn process with an independent working directory, SQLite
-   files, LanceDB directory, and port. It creates the receipt below before the
-   wrapper writes any event and releases the process after the final raw search.
-   Do not point controlled runs at a shared personal service.
-
-```json
-{
-  "schema_version": "cmd-lycheemem-isolated-instance-v1",
-  "scope": "cmd-<case namespace>",
-  "base_url": "http://127.0.0.1:9000/instances/cmd-<case namespace>",
-  "official_commit": "<exact 40-character LycheeMemory commit>",
-  "empty_at_start": true
-}
-```
-
-The shared head endpoint, model snapshot, top-k, temperature, prompt contract,
-and system settings are covered by the protocol SHA emitted in
-`adapter_revision`.
-
-## Resource accounting
-
-The wrapper measures shared-head usage directly from the OpenAI-compatible
-response. Official SDKs often consume provider usage internally, so claim-
-eligible runs must route their model traffic through a budget-enforcing proxy
-that writes an atomic cumulative receipt before and after each backend call:
-
-```json
-{
-  "schema_version": "cmd-metered-model-usage-receipt-v1",
-  "scope": "cmd-<case namespace>",
-  "llm_calls": 7,
-  "input_tokens": 12000,
-  "output_tokens": 900,
-  "gpu_seconds": 12
-}
-```
-
-Use `backend_usage.mode=enforcing_proxy_receipt` for reported experiments and
-set `bootstrap_url` to `spec_v03_metering_proxy.py`; the bootstrap creates the
-namespace's zero receipt before the official SDK call. A
-local wiring smoke may use:
-
-```json
-{"mode": "development_unmetered", "receipt_path": null, "bootstrap_url": null}
-```
-
-The executable wrappers return `UNSUPPORTED` in this unmetered mode, while the
-SDK/API functions remain available for local contract tests. This prevents an
-unmetered smoke result from entering the Stage 9 comparison as `OK`. The proxy,
-not just the post-hoc receipt reader, must stop backend model calls before a
-budget is exceeded. If an endpoint nevertheless reports an overrun, the wrapper
-returns `FAILED/budget_exhausted`; counters that crossed a limit are saturated
-at that limit because the parent `AdapterResponse` contract rejects over-budget
-values.
-
-## Run Stage 9
+The two skill competitors use `cmd-frozen-skill-evidence-v1`. The artifact is
+generated after competitor training and before `T_final` evaluation:
 
 ```bash
-python -m experiments.spec_v03_stage5_9 \
-  --runtime-cases /ABS/PATH/runtime_cases.jsonl \
-  --event-order /ABS/PATH/event_order.json \
+python experiments/spec_v03_export_skill_competitor_inputs.py \
+  --runtime-cases "$DATA/runtime_cases.json" \
+  --event-order "$DATA/event_order_manifest.json" \
+  --split-manifest "$DATA/split_manifest.json" \
+  --include-split T_final \
+  --output "$RUN_ROOT/industry/inputs/$STREAM.json"
+```
+
+This export contains only serving-visible decision views. It deliberately
+omits incident labels, legal or oracle operators, sealed outcomes, and future
+events. The pinned competitor implementation consumes these records and emits
+the JSONL evidence rows frozen below.
+
+```json
+{
+  "schema_version": "cmd-frozen-skill-evidence-v1",
+  "system_id": "memskill",
+  "implementation": "official_memskill_checkpoint_export",
+  "artifact_revision": "checkpoint-7",
+  "producer_repository": "https://github.com/ViktorAxelsen/MemSkill",
+  "producer_commit": "40-character exact git commit",
+  "frozen": true,
+  "training_splits": ["D_skill", "D_router"],
+  "records": {
+    "case-id": {
+      "evidence": [{"memory": "visible, retrieved evidence"}],
+      "selected_skill_ids": ["capture_temporal_context"],
+      "retrieval_trace": [{"primitive": "semantic_search", "rank": 1}],
+      "source_event_ids": ["event-id"],
+      "usage": {
+        "llm_calls": 1,
+        "input_tokens": 1000,
+        "output_tokens": 100,
+        "wall_clock_seconds": 2.0,
+        "gpu_seconds": 2
+      }
+    }
+  }
+}
+```
+
+The wrapper rejects artifacts that are mutable, trained on evaluation splits,
+do not match their configured digest, cite events outside the serving view, or
+contain evaluator-only keys. Recorded evidence-construction usage is charged
+before the shared-head call.
+
+## Reproducibility Boundary
+
+1. Pin each competitor checkout to an exact commit.
+2. Train or adapt only on `D_skill`, `D_router`, `D_cal`, and `D_lifecycle`.
+3. Freeze the checkpoint and export one evidence record per evaluation case.
+4. Record `official_memskill_checkpoint_export` for official MemSkill.
+5. Record `official_erskill_artifact` only for an author-released artifact;
+   otherwise use `paper_faithful_erskill_reimplementation` in every table.
+6. Put exact artifact paths and digests in
+   `controlled_memory_protocol.json`, then run Stage 9.
+
+Convert each competitor's per-case JSONL export into the closed artifact. Each
+input row is the record shown above plus a top-level `case_id`:
+
+```bash
+python experiments/spec_v03_freeze_skill_evidence.py \
+  --system-id memskill \
+  --implementation official_memskill_checkpoint_export \
+  --artifact-revision "$MEMSKILL_CHECKPOINT" \
+  --producer-repository https://github.com/ViktorAxelsen/MemSkill \
+  --producer-commit "$MEMSKILL_COMMIT" \
+  --training-split D_skill \
+  --training-split D_router \
+  --records "$RUN_ROOT/industry/exports/memskill.jsonl" \
+  --output "$RUN_ROOT/industry/frozen/memskill.json"
+
+python experiments/spec_v03_freeze_skill_evidence.py \
+  --system-id erskill \
+  --implementation paper_faithful_erskill_reimplementation \
+  --artifact-revision "$ERSKILL_REVISION" \
+  --producer-repository "$ERSKILL_REPOSITORY" \
+  --producer-commit "$ERSKILL_COMMIT" \
+  --training-split D_skill \
+  --training-split D_router \
+  --records "$RUN_ROOT/industry/exports/erskill.jsonl" \
+  --output "$RUN_ROOT/industry/frozen/erskill.json"
+```
+
+Bind both frozen artifacts and the Mem0 metering endpoint in one operation:
+
+```bash
+python experiments/spec_v03_configure_industry_runtime.py \
+  --protocol "$RUN_ROOT/industry/controlled_memory_protocol.json" \
+  --mem0-config "$RUN_ROOT/industry/configs/mem0-controlled.json" \
+  --memskill-artifact "$RUN_ROOT/industry/frozen/memskill.json" \
+  --erskill-artifact "$RUN_ROOT/industry/frozen/erskill.json" \
+  --erskill-implementation paper_faithful_erskill_reimplementation \
+  --usage-root "$RUN_ROOT/industry_runtime/usage" \
+  --metering-url http://127.0.0.1:9100
+```
+
+## Run
+
+```bash
+python experiments/spec_v03_stage5_9.py \
+  --runtime-cases /ABS/PATH/runtime_cases.json \
+  --event-order /ABS/PATH/event_order_manifest.json \
+  --split-manifest /ABS/PATH/split_manifest.json \
+  --include-split T_final \
   --output /ABS/PATH/stage9_report.json \
-  --run-id controlled-industry-pilot \
+  --run-id controlled-competitors \
   --stage stage9 \
   --track controlled_a1 \
   --industry-adapters-config /ABS/PATH/industry_adapters.json \
-  --system-max-llm-calls 20 \
-  --system-max-input-tokens 100000 \
-  --system-max-output-tokens 4096 \
-  --system-max-wall-seconds 300 \
-  --system-max-gpu-seconds 300
+  --system-max-llm-calls 64 \
+  --system-max-input-tokens 500000 \
+  --system-max-output-tokens 16384 \
+  --system-max-wall-seconds 1200 \
+  --system-max-gpu-seconds 600
 ```
 
-The current budget is per `AdapterRequest` (per Stage 9 case), not a cumulative
-whole-run cap. Aggregate usage remains available in the Stage 9 resource ledger.
-
-## Local controlled services
-
-`run_spec_v03_industry_services.sh` supervises three localhost services: the
-shared CPU embedding endpoint, the namespace-scoped enforcing model proxy, and
-the official-process LycheeMemory instance manager. Before starting it, run
-`spec_v03_configure_industry_runtime.py` once to bind the protocol and official
-SDK configs to those endpoints. Use a new empty `INDUSTRY_RUNTIME_ROOT` for a
-confirmatory run; stale Lychee instance directories fail closed rather than
-claiming a second empty-at-start execution.
-
-## Output discipline
-
-Wrappers write exactly one `AdapterResponse` JSON object to stdout. SDK logging
-is redirected to stderr. Native track requests fail closed because the current
-`AdapterResponse` cannot faithfully represent native answer/memory outputs.
+`run_spec_v03_industry_services.sh` now supervises only the shared embedding
+endpoint and enforcing model proxy used by Mem0. Frozen skill artifacts carry
+their measured inference usage directly.

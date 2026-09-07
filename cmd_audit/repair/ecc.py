@@ -135,8 +135,8 @@ def _require_gold_free(value: object, path: str = "runtime") -> None:
 
 
 @dataclass(frozen=True)
-class EccSyndrome:
-    """A decoded, deployment-visible error syndrome.
+class Contract:
+    """A decoded, deployment-visible repair contract.
 
     It is already one-hot at the incident-mechanism boundary.  Evaluation
     labels are neither represented nor accepted by this type.
@@ -231,7 +231,7 @@ class EccSyndrome:
         }
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, object]) -> "EccSyndrome":
+    def from_mapping(cls, value: Mapping[str, object]) -> "Contract":
         if not isinstance(value, Mapping) or set(value) != _SYNDROME_FIELDS:
             raise ValueError("ECC syndrome mapping is not closed")
         raw = dict(value)
@@ -367,7 +367,7 @@ class EccRepairReceipt:
 class MemAuditEccAdapter:
     """Decode deployment-visible MemAudit signals into ECC state."""
 
-    def decode(self, observation: Mapping[str, object]) -> EccSyndrome:
+    def decode(self, observation: Mapping[str, object]) -> Contract:
         if not isinstance(observation, Mapping) or set(observation) != _OBSERVATION_FIELDS:
             raise ValueError("runtime evidence boundary rejects non-closed observation")
         process_subtype = observation["process_fault_subtype"]
@@ -431,7 +431,7 @@ class MemAuditEccAdapter:
             ensure_ascii=False,
             allow_nan=False,
         )
-        return EccSyndrome(syndrome_id=syndrome_id, **body)
+        return Contract(syndrome_id=syndrome_id, **body)
 
     def append_incident(
         self,
@@ -449,15 +449,15 @@ class MemAuditEccAdapter:
     def append_syndrome(
         self,
         ledger: object,
-        syndrome: EccSyndrome,
+        syndrome: Contract,
     ) -> Mapping[str, object]:
         """Durably route an already decoded syndrome to its exclusive sink."""
         from cmd_audit.repair.incident_store import IncidentLedger
 
         if not isinstance(ledger, IncidentLedger):
             raise TypeError("ledger must be an IncidentLedger")
-        if not isinstance(syndrome, EccSyndrome):
-            raise TypeError("syndrome must be an EccSyndrome")
+        if not isinstance(syndrome, Contract):
+            raise TypeError("syndrome must be a Contract")
         decision = TriageDecision(
             mechanism=syndrome.mechanism,
             repair_family=syndrome.repair_family,
@@ -489,7 +489,7 @@ class MemAuditEccAdapter:
 
     def settle_repair(
         self,
-        syndrome: EccSyndrome,
+        syndrome: Contract,
         receipt: EccRepairReceipt,
         *,
         ledger: object,
@@ -503,7 +503,7 @@ class MemAuditEccAdapter:
         append is idempotent, so a crash before router observation can safely
         resume from the same syndrome and receipt.
         """
-        if not isinstance(syndrome, EccSyndrome) or not isinstance(
+        if not isinstance(syndrome, Contract) or not isinstance(
             receipt, EccRepairReceipt
         ):
             raise TypeError("settlement requires typed syndrome and repair receipt")
@@ -533,7 +533,7 @@ class MemAuditEccAdapter:
 
     def execute_shadow_repair(
         self,
-        syndrome: EccSyndrome,
+        syndrome: Contract,
         *,
         selection_id: str,
         selected_skill_revision_id: str,
@@ -547,8 +547,8 @@ class MemAuditEccAdapter:
         The evaluator seam intentionally exposes only ``evaluate_ecc``.  This
         path never calls an answer generator, answer verifier, or trace replay.
         """
-        if not isinstance(syndrome, EccSyndrome):
-            raise TypeError("syndrome must be an EccSyndrome")
+        if not isinstance(syndrome, Contract):
+            raise TypeError("syndrome must be a Contract")
         for name in (
             "snapshot_root", "apply_shadow", "commit_shadow", "rollback_shadow",
         ):
@@ -636,4 +636,4 @@ class MemAuditEccAdapter:
             raise
 
 
-__all__ = ["EccRepairReceipt", "EccSyndrome", "MemAuditEccAdapter"]
+__all__ = ["Contract", "EccRepairReceipt", "MemAuditEccAdapter"]

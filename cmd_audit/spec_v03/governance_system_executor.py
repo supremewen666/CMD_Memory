@@ -18,8 +18,8 @@ from .industry_adapters import (
     AdapterResponse,
     IndustryAdapter,
     ResourceUsage,
-    lightmem_adapter,
-    lycheemem_adapter,
+    erskill_adapter,
+    memskill_adapter,
     mem0_adapter,
 )
 from .repair_stream import MemoryState, OperatorSpec, execute_operator, operator_catalog
@@ -35,10 +35,10 @@ STAGE7_VARIANTS = frozenset({
 })
 STAGE9_SYSTEMS = frozenset({
     "full_context", "bm25_rag", "cmd_full", "cmd_no_mix_ghost", "cmd_no_ecology",
-    "cmd_no_ecc_cas", "lightmem", "lycheemem", "mem0", "no_repair", "oracle",
+    "cmd_no_ecc_cas", "memskill", "erskill", "mem0", "no_repair", "oracle",
 })
 _TRACK_NAMESPACE = {"controlled_a1": "controlled", "controlled_a2": "controlled", "native": "native"}
-_NATIVE_STAGE9_SYSTEMS = frozenset({"cmd_full", "lightmem", "lycheemem", "mem0"})
+_NATIVE_STAGE9_SYSTEMS = frozenset({"cmd_full"})
 
 
 def _text(value: object, name: str) -> str:
@@ -484,7 +484,7 @@ class GovernanceSystemExecutor:
                 )
                 response_status, reason, usage, revision = governance.status, governance.abstain_reason, governance.usage, response.adapter_revision
         else:
-            factory = {"lightmem": lightmem_adapter, "lycheemem": lycheemem_adapter, "mem0": mem0_adapter}[system_id]
+            factory = {"memskill": memskill_adapter, "erskill": erskill_adapter, "mem0": mem0_adapter}[system_id]
             adapter = adapters.get(system_id, factory())
             response = _call(adapter, request)
             if track != "native" and response.status == "OK" and response.selected_operator_id is not None:
