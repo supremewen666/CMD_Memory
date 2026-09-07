@@ -10,6 +10,10 @@ premature_extraction_error, injection_error.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
+import random
+from statistics import fmean
+from typing import Mapping, Sequence
 
 from cmd_audit.core.models import ProbeCase
 from cmd_audit.replays import AgentGenerate, EvidenceScorer
@@ -34,6 +38,8 @@ class SurrogateGapRow:
     surrogate_recovery_gain: float
     gap: float
     surrogate_found: bool
+    domain: str = "unknown"
+    failure_type: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -48,6 +54,88 @@ class SurrogateGapSummary:
     max_gap: float
     min_gap: float
     pct_surrogate_found: float
+
+
+@dataclass(frozen=True)
+class DomainFailureGap:
+    domain: str
+    failure_type: str
+    cases: int
+    mean_gap: float
+    lower_ci_95: float
+    rank_agreement: float
+    claim_status: str
+
+
+def _paired_rank(rows: Sequence[SurrogateGapRow]) -> float:
+    comparable = concordant = 0
+    for i, left in enumerate(rows):
+        for right in rows[:i]:
+            a = left.surrogate_recovery_gain - right.surrogate_recovery_gain
+            b = left.gold_recovery_gain - right.gold_recovery_gain
+            if a == 0 or b == 0:
+                continue
+            comparable += 1
+            concordant += int(a * b > 0)
+    return 0.0 if not comparable else concordant / comparable
+
+
+def _bootstrap_lower(values: Sequence[float], *, seed: int, samples: int) -> float:
+    if not values:
+        return float("nan")
+    rng = random.Random(seed)
+    draws = sorted(fmean(values[rng.randrange(len(values))] for _ in values) for _ in range(max(100, samples)))
+    return draws[max(0, int(0.05 * len(draws)) - 1)]
+
+
+def measure_domain_failure_gaps(
+    rows: Sequence[SurrogateGapRow], *, thresholds: Mapping[tuple[str, str], float],
+    bootstrap_samples: int = 2000, bootstrap_seed: int = 0,
+) -> tuple[DomainFailureGap, ...]:
+    """Report gap/rank/CI per domain × failure type; never pool domains."""
+    grouped: dict[tuple[str, str], list[SurrogateGapRow]] = {}
+    for row in rows:
+        grouped.setdefault((row.domain, row.failure_type), []).append(row)
+    result = []
+    for index, ((domain, failure_type), group) in enumerate(sorted(grouped.items())):
+        values = [float(row.gap) for row in group]
+        mean_gap = fmean(values)
+        tau_value = thresholds.get((domain, failure_type))
+        tau = float(tau_value) if tau_value is not None else float("nan")
+        lower = _bootstrap_lower(values, seed=bootstrap_seed + index, samples=bootstrap_samples)
+        status = (
+            "pass"
+            if math.isfinite(tau) and mean_gap <= tau and lower <= tau and _paired_rank(group) > 0.5
+            else "UNVERIFIED" if not math.isfinite(tau) else "conditional"
+        )
+        result.append(DomainFailureGap(domain, failure_type, len(group), mean_gap, lower, _paired_rank(group), status))
+    return tuple(result)
+
+
+def build_claim_registry(
+    gaps: Sequence[DomainFailureGap], *, thresholds: Mapping[tuple[str, str], float],
+) -> dict[str, object]:
+    """Create a conservative registry for every pre-registered domain/type pair."""
+    pairs = sorted(set(thresholds) | {(row.domain, row.failure_type) for row in gaps})
+    claims = {}
+    for domain, failure_type in pairs:
+        rows = [row for row in gaps if (row.domain, row.failure_type) == (domain, failure_type)]
+        tau_value = thresholds.get((domain, failure_type))
+        tau = float(tau_value) if tau_value is not None else float("nan")
+        if not rows or not math.isfinite(tau):
+            status = "UNVERIFIED"
+        elif all(row.claim_status == "pass" for row in rows) and all(row.lower_ci_95 <= tau for row in rows):
+            status = "pass"
+        else:
+            status = "conditional"
+        claims[f"{domain}::{failure_type}"] = {
+            "domain": domain,
+            "failure_type": failure_type,
+            "status": status,
+            "tau_gap": tau,
+        }
+    return {"schema_version": "cmd-surrogate-claim-registry-v1", "claims": claims,
+            "router_claim_requires_registered_tau": True}
 
 
 def _find_surrogate_evidence(case: ProbeCase) -> tuple[str, ...]:
@@ -166,6 +254,8 @@ def measure_surrogate_gap(
         surrogate_recovery_gain=surrogate_gain,
         gap=gold_gain - surrogate_gain,
         surrogate_found=len(surrogate_texts) > 0,
+        domain=str(getattr(case, "domain", getattr(case, "source_domain", "unknown"))),
+        failure_type=str(getattr(case, "failure_type", label)),
     )
 
 

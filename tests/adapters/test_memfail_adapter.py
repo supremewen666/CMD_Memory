@@ -60,6 +60,24 @@ COEXISTING_ROW = {
     "ground_truth_answer": "fedora, beanie, bucket hat",
 }
 
+# Real MemFail row (preference_category "tv show genres") where the topic label
+# is a paraphrase its own fact sentence never spells out: the fact says
+# "Documentaries", the label says "documentary". 12 of the CSV's 340 preference
+# statements have this shape.
+COEXISTING_PARAPHRASED_LABEL_ROW = {
+    "preference_category": "tv show genres",
+    "preferences": '["sitcom", "documentary"]',
+    "preference_facts": json.dumps(
+        [
+            "Sitcoms are what I put on when I want something light and funny.",
+            "Documentaries are my choice when I want to learn about real-world "
+            "topics in depth.",
+        ]
+    ),
+    "question": "What should I queue up for a mixed evening of viewing?",
+    "ground_truth_answer": "sitcom, documentary",
+}
+
 CONDITIONAL_ROW = {
     "entity": "Selene",
     "entity_category": "character",
@@ -458,6 +476,28 @@ def test_direct_persona_required_phrases_are_grounded_in_stored_memory() -> None
     # The gold item must be the profile group the answer actually draws on.
     gold_id = direct.gold_evidence[0].source_memory_id
     assert gold_id not in direct.primary_baseline.retrieved_memory_ids
+
+
+@pytest.mark.parametrize(
+    "row", [COEXISTING_ROW, COEXISTING_PARAPHRASED_LABEL_ROW]
+)
+def test_coexisting_required_phrases_are_grounded_in_their_own_item(row) -> None:
+    """A phrase must be findable in the item the evidence points at.
+
+    MemFail's ``preferences`` column is a topic label, not a span of the fact
+    sentence: the label "documentary" annotates a fact that says
+    "Documentaries". Slicing phrases from the label leaves a requirement no
+    stored item satisfies, so any state evaluator scoring gold preservation
+    fails the case on wording alone.
+    """
+    case = memfail_record_to_probe_cases(row, task="coexisting")[0]
+    by_id = {item.memory_id: item for item in case.extracted_memory}
+
+    for evidence in case.gold_evidence:
+        item_text = by_id[evidence.source_memory_id].text.casefold()
+        assert evidence.required_phrases
+        for phrase in evidence.required_phrases:
+            assert phrase.casefold() in item_text
 
 
 def _labeled_action_recovers(case, action_name: str) -> bool:

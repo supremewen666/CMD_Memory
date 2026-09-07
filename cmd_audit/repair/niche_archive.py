@@ -39,6 +39,57 @@ _LABEL_LIKE_TOKENS = frozenset(
 )
 
 
+class SemanticClusterVocabulary:
+    """Frozen, dev-prefix-only vocabulary for descriptor construction.
+
+    The vocabulary is a protocol artifact, not an online learner.  Once
+    :meth:`freeze` is called, both new tokens and outcome-like tokens are
+    rejected.  Keeping this object small and serialisable makes its hash easy
+    to place in an experiment manifest.
+    """
+
+    SCHEMA_VERSION = "cmd-semantic-cluster-vocabulary-v1"
+
+    def __init__(self, tokens: Sequence[str], *, source: str = "dev-prefix") -> None:
+        if source != "dev-prefix":
+            raise ValueError("semantic-cluster vocabulary must come from dev-prefix")
+        cleaned = tuple(sorted({str(token).strip() for token in tokens if str(token).strip()}))
+        if any(any(marker in token.casefold() for marker in _LABEL_LIKE_TOKENS) for token in cleaned):
+            raise ValueError("semantic-cluster vocabulary contains outcome/label metadata")
+        self._tokens = cleaned
+        self.source = source
+        self.frozen = False
+
+    @property
+    def tokens(self) -> tuple[str, ...]:
+        return self._tokens
+
+    @property
+    def vocabulary_sha256(self) -> str:
+        payload = {"schema_version": self.SCHEMA_VERSION, "source": self.source, "tokens": self._tokens}
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    @property
+    def schema_hash(self) -> str:
+        return self.vocabulary_sha256
+
+    def freeze(self) -> "SemanticClusterVocabulary":
+        self.frozen = True
+        return self
+
+    def validate(self, token: str, *, post_outcome: bool = False) -> str:
+        value = str(token).strip()
+        if post_outcome:
+            raise ValueError("post-outcome semantic-cluster labels are forbidden")
+        if value not in self._tokens:
+            raise ValueError("semantic-cluster vocabulary is frozen; token is not registered")
+        return value
+
+    def to_manifest(self) -> dict[str, object]:
+        return {"schema_version": self.SCHEMA_VERSION, "source": self.source,
+                "tokens": list(self._tokens), "vocabulary_sha256": self.vocabulary_sha256}
+
+
 @dataclass(frozen=True)
 class BehaviorDescriptor:
     memory_fingerprint_cluster: str
@@ -92,6 +143,20 @@ class BehaviorDescriptor:
         version: str = "sigil-descriptor-v1",
     ) -> "BehaviorDescriptor":
         return cls("unknown", (), runtime_surface, version)
+
+    @classmethod
+    def from_semantic_cluster(
+        cls,
+        cluster: str,
+        *,
+        vocabulary: SemanticClusterVocabulary,
+        signal_signature: Sequence[str] = (),
+        runtime_surface: str,
+        version: str = "sigil-descriptor-v1",
+        post_outcome: bool = False,
+    ) -> "BehaviorDescriptor":
+        """Construct a descriptor only from the frozen dev-prefix vocabulary."""
+        return cls(vocabulary.validate(cluster, post_outcome=post_outcome), tuple(signal_signature), runtime_surface, version)
 
 
 @dataclass(frozen=True)

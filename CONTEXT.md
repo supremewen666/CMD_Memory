@@ -2,6 +2,92 @@
 
 Domain language for Counterfactual Memory Debugger research. Defines terminology, boundaries, and rules.
 
+## Runtime ECC Contract (authoritative, 2026-08-23)
+
+The live CMD runtime is a gold-free memory-state correction and evolution loop.
+Its authoritative dataflow is:
+
+```text
+immutable event stream + real memory state
+  -> MemAudit signals + structural telemetry
+     (CAS / provenance / safety / locality)
+  -> MemAuditEccAdapter decodes exactly one EccSyndrome
+     -> process_fault      -> pipeline patch proposal
+     -> state_drift        -> supersede proposal with lineage
+     -> adversarial_poison -> quarantine proposal with audit evidence
+  -> execute the selected typed repair on shadow/copy-on-write state
+  -> ECC acceptance gate
+     (syndrome resolution + parity/invariants + root binding + safety + locality)
+     -> pass: commit shadow root
+     -> fail: rollback to the exact before root
+  -> emit a root-bound EccRepairReceipt
+  -> update FailureMemory / lineage / quarantine+audit as typed by the branch
+  -> evolve receipt-only router state
+```
+
+Immutable events and the real memory state are the source of truth. MemAudit
+and structural telemetry are observations of that state, not substitute truth
+and not evaluator annotations. `MemAuditEccAdapter` must decode the observation
+into exactly one mutually exclusive syndrome: `process_fault`, `state_drift`,
+or `adversarial_poison`. Each syndrome admits exactly one repair family and one
+durable incident sink:
+
+| Syndrome | Legal repair family | Durable sink | Forbidden cross-type effect |
+|---|---|---|---|
+| `process_fault` | pipeline patch | `FailureMemory` | no supersession or poison quarantine |
+| `state_drift` | supersede while retaining history | lineage log | never record the old, once-correct state as a failure |
+| `adversarial_poison` | quarantine suspects | quarantine + audit | never distill quarantined content into `FailureMemory` |
+
+GHOST may select only a stable, registered operator compatible with the decoded
+syndrome. The selected operator runs on shadow state; it never mutates the live
+state before acceptance. Commit is conjunctive: the syndrome must resolve,
+parity and invariants must pass, roots and provenance must bind, safety must
+hold, and locality cost must remain within budget. Failure of any check rolls
+back to the exact pre-repair root. Every attempt, including rollback, emits an
+`EccRepairReceipt`.
+
+The receipt is the only online learning signal. A valid non-evaluation receipt
+may update GHOST's posterior/register statistics and the matching branch sink.
+It must not directly promote, rewrite, or add members to the frozen serving
+registry; pattern/skill creation and registry promotion remain governed,
+versioned transitions. Thus the loop evolves selection state online while
+preserving an auditable operator lineage.
+
+Dataset gold answers, labels, reference answers, split metadata, and answer
+replay results are sealed evaluator inputs. They may score completed artifacts
+after the runtime has finished, but may not enter incident detection, operator
+selection, memory mutation, commit acceptance, receipt construction, or router
+updates. Runtime provenance is a closed gold-free structure and fails closed
+when sealed concepts appear at any nesting depth.
+
+For the live loop, *counterfactual* means applying a candidate repair to shadow
+state and checking whether the syndrome disappears without violating ECC
+invariants. Same-trace answer replay is forbidden as causal evidence. The
+counterfactual-replay, recovery-gain, Post-Repair Context Replay, gold verifier,
+and label-action material below is retained only as legacy/offline baseline and
+external-evaluation vocabulary; it does not define the live loop.
+
+The detailed boundary is frozen in
+`docs/RUNTIME_EVIDENCE_BOUNDARY_CONTRACT.md`.
+
+### Prior and cold-start terminology
+
+An operator library or frozen registry is **capability initialization**: it
+makes legal repairs executable. A router prior is **selection initialization**:
+it ranks two or more legal candidates before any receipt from the evaluated
+stream. They are different from **online learning**, which is the chronological
+change in selection state caused only by earlier valid `EccRepairReceipt`s.
+
+A runtime prior is optional, not part of the ECC correctness contract. When an
+experiment uses one, it must be frozen before the evaluated stream, cover the
+candidate set without reading the current case's sealed answer/label, carry its
+own provenance, and be reported as a warm-start condition. A zero-valued prior
+is the canonical cold-start condition. An experiment cannot claim a learning
+effect merely because it starts with a seeded operator library, a non-zero
+prior, or a single candidate whose selection is forced; it must expose genuine
+candidate competition and measure chronological change against a frozen-router
+control on a later, non-updating evaluation segment.
+
 ## Core Concepts
 
 **CMD** — Counterfactual Memory Debugger: diagnoses memory-augmented agent failures by replaying controlled memory-operation interventions and measuring recovery gain.

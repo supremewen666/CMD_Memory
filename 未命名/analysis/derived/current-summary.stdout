@@ -1,0 +1,587 @@
+[RESULT] output=/XYFS01/hitsz_bthu_ldf_1/wsy/CMD_Memory/runs/strategy_transfer_20260828_032855/analysis/current-summary.json
+{
+  "aba": {
+    "mix_minus_ghost_by_phase": [
+      {
+        "mean_delta": 0.0,
+        "paired_events": 40,
+        "phase": "recurring_a_stationary"
+      },
+      {
+        "mean_delta": 0.000139,
+        "paired_events": 54,
+        "phase": "recurring_b_abrupt"
+      },
+      {
+        "mean_delta": 0.008456,
+        "paired_events": 34,
+        "phase": "recurring_a_return_stationary"
+      }
+    ],
+    "phase_metrics": [
+      {
+        "arm": "ghost_hierarchy",
+        "mean_utility": 0.765875,
+        "phase": "recurring_a_stationary",
+        "receipt_count": 40,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "rebuild": 22,
+          "targeted": 18
+        }
+      },
+      {
+        "arm": "mix_ghost",
+        "mean_utility": 0.765875,
+        "phase": "recurring_a_stationary",
+        "receipt_count": 40,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "rebuild": 22,
+          "targeted": 18
+        }
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "mean_utility": 0.571806,
+        "phase": "recurring_b_abrupt",
+        "receipt_count": 54,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "cascade": 13,
+          "quarantine_and_rebuild": 31,
+          "quarantine_only": 5,
+          "targeted": 5
+        }
+      },
+      {
+        "arm": "mix_ghost",
+        "mean_utility": 0.571944,
+        "phase": "recurring_b_abrupt",
+        "receipt_count": 54,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "cascade": 12,
+          "quarantine_and_rebuild": 32,
+          "quarantine_only": 4,
+          "targeted": 6
+        }
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "mean_utility": 0.749338,
+        "phase": "recurring_a_return_stationary",
+        "receipt_count": 34,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "rebuild": 22,
+          "targeted": 12
+        }
+      },
+      {
+        "arm": "mix_ghost",
+        "mean_utility": 0.757794,
+        "phase": "recurring_a_return_stationary",
+        "receipt_count": 34,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "rebuild": 20,
+          "targeted": 14
+        }
+      }
+    ],
+    "reports_expected": 4,
+    "reports_observed": 4,
+    "return_to_a": [
+      {
+        "a1_mean": 0.765875,
+        "a2_minus_a1": -0.016537,
+        "a2_return_mean": 0.749338,
+        "arm": "ghost_hierarchy"
+      },
+      {
+        "a1_mean": 0.765875,
+        "a2_minus_a1": -0.008081,
+        "a2_return_mean": 0.757794,
+        "arm": "mix_ghost"
+      }
+    ]
+  },
+  "allarms": {
+    "models": [
+      {
+        "mix_minus_ghost": {
+          "negative": 2,
+          "positive": 8,
+          "stream_count": 12,
+          "stream_macro_delta": 0.087023,
+          "ties": 2
+        },
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "ranking": [
+          {
+            "arm": "mix_ghost",
+            "event_weighted_utility": 0.714136,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.767442,
+            "mean_pseudo_regret": 0.036279,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.722197,
+            "stream_wins_including_ties": 10
+          },
+          {
+            "arm": "best_global",
+            "event_weighted_utility": 0.655075,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 3.41196,
+            "mean_pseudo_regret": 0.095341,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.669493,
+            "stream_wins_including_ties": 4
+          },
+          {
+            "arm": "ghost_hierarchy",
+            "event_weighted_utility": 0.613563,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.299003,
+            "mean_pseudo_regret": 0.136852,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.635174,
+            "stream_wins_including_ties": 3
+          },
+          {
+            "arm": "global_thompson",
+            "event_weighted_utility": 0.59936,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.481728,
+            "mean_pseudo_regret": 0.151055,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.605589,
+            "stream_wins_including_ties": 0
+          },
+          {
+            "arm": "contextual_bandit",
+            "event_weighted_utility": 0.570424,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.112957,
+            "mean_pseudo_regret": 0.179992,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.596168,
+            "stream_wins_including_ties": 1
+          },
+          {
+            "arm": "niche_thompson",
+            "event_weighted_utility": 0.590091,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.41196,
+            "mean_pseudo_regret": 0.160324,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.566234,
+            "stream_wins_including_ties": 0
+          },
+          {
+            "arm": "random_legal",
+            "event_weighted_utility": 0.54799,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.152824,
+            "mean_pseudo_regret": 0.202425,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.543564,
+            "stream_wins_including_ties": 0
+          }
+        ],
+        "reports_observed": 12,
+        "reports_with_all_7_arms": 12
+      },
+      {
+        "mix_minus_ghost": {
+          "negative": 0,
+          "positive": 11,
+          "stream_count": 12,
+          "stream_macro_delta": 0.077967,
+          "ties": 1
+        },
+        "model_id": "Qwen3-14B",
+        "ranking": [
+          {
+            "arm": "mix_ghost",
+            "event_weighted_utility": 0.718505,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.956811,
+            "mean_pseudo_regret": 0.031462,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.722028,
+            "stream_wins_including_ties": 10
+          },
+          {
+            "arm": "best_global",
+            "event_weighted_utility": 0.655075,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 3.41196,
+            "mean_pseudo_regret": 0.094892,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.669493,
+            "stream_wins_including_ties": 4
+          },
+          {
+            "arm": "ghost_hierarchy",
+            "event_weighted_utility": 0.650839,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.820598,
+            "mean_pseudo_regret": 0.099128,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.644061,
+            "stream_wins_including_ties": 1
+          },
+          {
+            "arm": "global_thompson",
+            "event_weighted_utility": 0.59936,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.481728,
+            "mean_pseudo_regret": 0.150606,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.605589,
+            "stream_wins_including_ties": 0
+          },
+          {
+            "arm": "contextual_bandit",
+            "event_weighted_utility": 0.570424,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.112957,
+            "mean_pseudo_regret": 0.179543,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.596168,
+            "stream_wins_including_ties": 2
+          },
+          {
+            "arm": "niche_thompson",
+            "event_weighted_utility": 0.590091,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.41196,
+            "mean_pseudo_regret": 0.159875,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.566234,
+            "stream_wins_including_ties": 1
+          },
+          {
+            "arm": "random_legal",
+            "event_weighted_utility": 0.54799,
+            "mean_collateral_cost": 0.0,
+            "mean_locality_cost": 2.152824,
+            "mean_pseudo_regret": 0.201977,
+            "receipt_count": 301,
+            "safe_repair_success_proxy": 1.0,
+            "stream_macro_utility": 0.543564,
+            "stream_wins_including_ties": 0
+          }
+        ],
+        "reports_observed": 12,
+        "reports_with_all_7_arms": 12
+      }
+    ]
+  },
+  "claim_boundary": "DEVELOPMENT_STRUCTURAL_ONLY",
+  "completion": {
+    "aba_reports": {
+      "expected": 4,
+      "observed": 4
+    },
+    "cross_reports": {
+      "expected": 8,
+      "observed": 8
+    },
+    "family_bootstrap": "COMPLETE",
+    "matched_allarms_llama31": {
+      "expected": 12,
+      "observed": 12
+    },
+    "matched_allarms_qwen3": {
+      "expected": 12,
+      "observed": 12
+    },
+    "mix_only_reports": {
+      "expected": 144,
+      "observed": 144
+    }
+  },
+  "conclusions": [
+    "The 144-report Mix-only transfer matrix is complete.",
+    "Meta-Llama-3.1-8B-Instruct: matched>reset family-blocked effect is 0.063923 with 95% CI [0.050398, 0.07785] (POSITIVE).",
+    "Qwen3-14B: matched>reset family-blocked effect is 0.066286 with 95% CI [0.050573, 0.082356] (POSITIVE).",
+    "Meta-Llama-3.1-8B-Instruct: top matched all-arms router by stream-macro utility is mix_ghost (0.722197).",
+    "Qwen3-14B: top matched all-arms router by stream-macro utility is mix_ghost (0.722028).",
+    "All current safety rates use development-structural feedback and are structural proxies, not sealed confirmatory safety truth."
+  ],
+  "run_root": "/XYFS01/hitsz_bthu_ldf_1/wsy/CMD_Memory/runs/strategy_transfer_20260828_032855",
+  "schema_version": "cmd-spec-v03-current-analysis-v1",
+  "transfer": {
+    "event_weighted": [
+      {
+        "comparison": "global>reset",
+        "event_weighted_mean": 0.00092,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "negative": 6,
+        "positive": 9,
+        "stream_macro_mean": -0.07677,
+        "streams": 18,
+        "ties": 3
+      },
+      {
+        "comparison": "global_prefix>global",
+        "event_weighted_mean": -0.000203,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "negative": 1,
+        "positive": 0,
+        "stream_macro_mean": -0.000125,
+        "streams": 18,
+        "ties": 17
+      },
+      {
+        "comparison": "global_prefix>matched",
+        "event_weighted_mean": -0.059179,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "negative": 12,
+        "positive": 0,
+        "stream_macro_mean": -0.139005,
+        "streams": 18,
+        "ties": 6
+      },
+      {
+        "comparison": "matched>reset",
+        "event_weighted_mean": 0.066574,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "negative": 0,
+        "positive": 13,
+        "stream_macro_mean": 0.057623,
+        "streams": 18,
+        "ties": 5
+      },
+      {
+        "comparison": "global>reset",
+        "event_weighted_mean": 0.04056,
+        "model_id": "Qwen3-14B",
+        "negative": 6,
+        "positive": 7,
+        "stream_macro_mean": 0.026632,
+        "streams": 18,
+        "ties": 5
+      },
+      {
+        "comparison": "global_prefix>global",
+        "event_weighted_mean": 0.004111,
+        "model_id": "Qwen3-14B",
+        "negative": 0,
+        "positive": 2,
+        "stream_macro_mean": 0.018958,
+        "streams": 18,
+        "ties": 16
+      },
+      {
+        "comparison": "global_prefix>matched",
+        "event_weighted_mean": -0.024089,
+        "model_id": "Qwen3-14B",
+        "negative": 10,
+        "positive": 1,
+        "stream_macro_mean": -0.022702,
+        "streams": 18,
+        "ties": 7
+      },
+      {
+        "comparison": "matched>reset",
+        "event_weighted_mean": 0.068603,
+        "model_id": "Qwen3-14B",
+        "negative": 0,
+        "positive": 16,
+        "stream_macro_mean": 0.060928,
+        "streams": 18,
+        "ties": 2
+      }
+    ],
+    "family_blocked": [
+      {
+        "ci95": [
+          -0.072429,
+          0.012287
+        ],
+        "comparison": "global>reset",
+        "family_count": 49,
+        "family_macro_mean": -0.028571,
+        "inference": "MIXED_OR_NULL",
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_event_count": 451,
+        "positive_family_rate": 0.5306122448979592,
+        "tie_family_rate": 0.2653061224489796
+      },
+      {
+        "ci95": [
+          -0.000413,
+          0.0
+        ],
+        "comparison": "global_prefix>global",
+        "family_count": 49,
+        "family_macro_mean": -0.000138,
+        "inference": "MIXED_OR_NULL",
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_event_count": 332,
+        "positive_family_rate": 0.0,
+        "tie_family_rate": 0.9795918367346939
+      },
+      {
+        "ci95": [
+          -0.108768,
+          -0.051682
+        ],
+        "comparison": "global_prefix>matched",
+        "family_count": 49,
+        "family_macro_mean": -0.078866,
+        "inference": "NEGATIVE",
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_event_count": 332,
+        "positive_family_rate": 0.02040816326530612,
+        "tie_family_rate": 0.14285714285714285
+      },
+      {
+        "ci95": [
+          0.050398,
+          0.07785
+        ],
+        "comparison": "matched>reset",
+        "family_count": 49,
+        "family_macro_mean": 0.063923,
+        "inference": "POSITIVE",
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_event_count": 451,
+        "positive_family_rate": 0.9387755102040817,
+        "tie_family_rate": 0.04081632653061224
+      },
+      {
+        "ci95": [
+          0.012985,
+          0.047845
+        ],
+        "comparison": "global>reset",
+        "family_count": 49,
+        "family_macro_mean": 0.030666,
+        "inference": "POSITIVE",
+        "model_id": "Qwen3-14B",
+        "paired_event_count": 451,
+        "positive_family_rate": 0.46938775510204084,
+        "tie_family_rate": 0.40816326530612246
+      },
+      {
+        "ci95": [
+          0.0,
+          0.0195
+        ],
+        "comparison": "global_prefix>global",
+        "family_count": 49,
+        "family_macro_mean": 0.007429,
+        "inference": "MIXED_OR_NULL",
+        "model_id": "Qwen3-14B",
+        "paired_event_count": 332,
+        "positive_family_rate": 0.04081632653061224,
+        "tie_family_rate": 0.9591836734693877
+      },
+      {
+        "ci95": [
+          -0.043104,
+          -0.019998
+        ],
+        "comparison": "global_prefix>matched",
+        "family_count": 49,
+        "family_macro_mean": -0.031019,
+        "inference": "NEGATIVE",
+        "model_id": "Qwen3-14B",
+        "paired_event_count": 332,
+        "positive_family_rate": 0.08163265306122448,
+        "tie_family_rate": 0.24489795918367346
+      },
+      {
+        "ci95": [
+          0.050573,
+          0.082356
+        ],
+        "comparison": "matched>reset",
+        "family_count": 49,
+        "family_macro_mean": 0.066286,
+        "inference": "POSITIVE",
+        "model_id": "Qwen3-14B",
+        "paired_event_count": 451,
+        "positive_family_rate": 0.8163265306122449,
+        "tie_family_rate": 0.1836734693877551
+      }
+    ],
+    "model_contrasts": [
+      {
+        "ci95": [
+          0.024557,
+          0.096922
+        ],
+        "comparison": "global>reset",
+        "contrast": "Qwen3-14B-Meta-Llama-3.1-8B-Instruct",
+        "family_count": 49,
+        "family_macro_mean": 0.059238,
+        "inference": "POSITIVE",
+        "paired_event_count": 49,
+        "positive_family_rate": 0.3673469387755102,
+        "tie_family_rate": 0.30612244897959184
+      },
+      {
+        "ci95": [
+          0.0,
+          0.019638
+        ],
+        "comparison": "global_prefix>global",
+        "contrast": "Qwen3-14B-Meta-Llama-3.1-8B-Instruct",
+        "family_count": 49,
+        "family_macro_mean": 0.007566,
+        "inference": "MIXED_OR_NULL",
+        "paired_event_count": 49,
+        "positive_family_rate": 0.061224489795918366,
+        "tie_family_rate": 0.9387755102040817
+      },
+      {
+        "ci95": [
+          0.020435,
+          0.079709
+        ],
+        "comparison": "global_prefix>matched",
+        "contrast": "Qwen3-14B-Meta-Llama-3.1-8B-Instruct",
+        "family_count": 49,
+        "family_macro_mean": 0.047847,
+        "inference": "POSITIVE",
+        "paired_event_count": 49,
+        "positive_family_rate": 0.5510204081632653,
+        "tie_family_rate": 0.3469387755102041
+      },
+      {
+        "ci95": [
+          -0.011493,
+          0.017403
+        ],
+        "comparison": "matched>reset",
+        "contrast": "Qwen3-14B-Meta-Llama-3.1-8B-Instruct",
+        "family_count": 49,
+        "family_macro_mean": 0.002364,
+        "inference": "MIXED_OR_NULL",
+        "paired_event_count": 49,
+        "positive_family_rate": 0.20408163265306123,
+        "tie_family_rate": 0.3877551020408163
+      }
+    ]
+  }
+}
+

@@ -1,0 +1,122 @@
+{
+  "block_unit": "family_id; schedules remain inside each family block",
+  "family_bootstrap_effects": [
+    {
+      "ci95": [
+        0.0,
+        0.019090909090909092
+      ],
+      "comparison": "skills_reset>base_reset",
+      "direction": "INCONCLUSIVE",
+      "family_count": 22,
+      "family_macro_mean": 0.006363636363636364,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 62,
+      "positive_family_rate": 0.045454545454545456,
+      "tie_family_rate": 0.9545454545454546
+    },
+    {
+      "ci95": [
+        0.0,
+        0.0
+      ],
+      "comparison": "skills_reset>base_reset",
+      "direction": "INCONCLUSIVE",
+      "family_count": 22,
+      "family_macro_mean": 0.0,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 62,
+      "positive_family_rate": 0.0,
+      "tie_family_rate": 1.0
+    }
+  ],
+  "paired_stream_count": 12,
+  "reports_observed": 24,
+  "schema_version": "cmd-spec-v03-family-disjoint-analysis-v1",
+  "stream_effects": [
+    {
+      "different_choice_rate": 0.07142857142857142,
+      "mean_delta_skills_over_base": 0.04,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 14,
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 12,
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 6,
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 4,
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 14,
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 12,
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 14,
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 12,
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 6,
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 4,
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 14,
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "different_choice_rate": 0.0,
+      "mean_delta_skills_over_base": 0.0,
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 12,
+      "stream_id": "memtracebench_stationary"
+    }
+  ]
+}

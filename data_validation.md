@@ -1,121 +1,123 @@
-# Data Validation
+# CMD-RepairStream Data Validation
 
-## Dataset Identity
-
-- dataset:
-  - MemTrace-B protocol-reproduction arena:
-    `data/probe_cases/memtrace_kp_cases.json`
-  - MemFail external-validity arena:
-    `data/probe_cases/memfail_cases.json`
-  - STALE item-layer arena:
-    `data/probe_cases/stale_item_cases.json`
-- source:
-  - MemTrace-B contains 2,047 cases derived from public HaluMem data. It is a
-    protocol reimplementation because the MemTrace-B authors did not release
-    their artifact; it must not be described as the authors' dataset.
-  - MemFail contains 692 cases converted from the upstream MemFail repository
-    at revision `61ab3028a6dc4a67b222f0d3a37a62e1d479ade9`.
-  - STALE contains 1,200 deliberately constructed item-stale/item-conflict
-    perturbations over queries from the repository's approved raw sources.
-- expected split:
-  - These are immutable observational streams, not gradient-training datasets.
-    There is no train/validation/test split.
-  - `--seed` freezes stream order and `--limit` freezes the selected prefix.
-    Arena manifests now bind both source bytes and the ordered selected stream.
-
-## Reality Check
-
-- files present: yes; all three default arena inputs load successfully.
-- real or mock:
-  - MemFail is an external released benchmark conversion.
-  - MemTrace-B is benchmark-derived real source data under a reproduced
-    protocol, not an author-artifact replication.
-  - STALE uses real source queries with synthetic, balanced defect injection.
-    The injected labels are constructed and must be disclosed; they are not
-    naturally observed production failures.
-- evidence:
-  - JSON row counts are 2,047 (MemTrace-B), 692 (MemFail), and 1,200 (STALE).
-  - Every file has one consistent top-level case schema, unique `case_id`
-    values, non-empty queries and gold answers, at least one baseline, at least
-    one memory item, and object-valued scoring metadata.
-  - Exact source SHA-256:
-    - MemTrace-B:
-      `df655c77b3626f9a2cb5b6c4783e2db06c1bba6d12e9ee2192206cd1b2b44eda`
-    - MemFail:
-      `65f0d873be65ebaac796d4b1a62669d2db88a31e1d5b69666858e6e5dd62ab50`
-    - STALE:
-      `1068e8185530aabd0e799eb633b81cf3bc197543d6c1e2e01ddf12613f914612`
-  - The checked-in `CHECKSUMS.sha256` agrees for MemTrace-B and STALE.
-    The combined MemFail probe file is not listed there, so each arena artifact
-    records its exact source hash directly rather than relying on that registry.
-
-## Split Integrity
-
-- train split: not applicable; the arena performs no parameter training.
-- val split: not applicable; `--limit 50` is a deterministic execution smoke,
-  not a validation set for choosing a model or threshold.
-- test split: the full immutable arena stream is the reporting population.
-- leakage risk:
-  - Family/case order is deterministic, and selected case IDs are serialized
-    in order through `selected_case_ids_sha256`.
-  - Gold answers and evidence exist for shadow evaluation, but runtime
-    construction and selection declare `runtime_uses_gold = false`; analysis
-    rejects any manifest that does not.
-  - The main remaining leakage risk is procedural: tuning prompts, thresholds,
-    or result wording after reading full shadow outcomes. Freeze those choices
-    before the full run.
-
-## Label / Target Health
-
-- label format: nullable `perturbation_label` strings mapped to the zero-call
-  hook's explicit `Fill` or `Fix` runtime branch.
-- distribution or range:
-  - MemTrace-B 50-case seed-24 smoke: 37 null, 8 safety, 2 item-conflict,
-    1 item-stale, 1 retrieval, 1 granularity; 8 Fill / 42 Fix.
-  - MemFail full stream: 235 retrieval, 200 granularity, 157 safety,
-    100 item-conflict; 114 Fill / 578 Fix.
-  - STALE full stream: 600 item-stale and 600 item-conflict;
-    103 Fill / 1,097 Fix.
-- obvious anomalies:
-  - No duplicate case IDs, empty required text fields, missing baselines,
-    missing memory arrays, or schema variants were observed.
-  - Fill is non-trivial in every arena and must remain an explicit routed
-    abstention rather than enter Fix-arm denominators.
-
-## Preprocessing Check
-
-- expected preprocessing:
-  - Load immutable probe cases, apply deterministic seed/limit selection,
-    derive `ArenaCase`, route Fill/Fix without model calls, and keep shadow gold
-    out of runtime candidate construction and selection.
-- observed preprocessing:
-  - The three `--validate-only` entry points load successfully and emit source,
-    ordered-case-ID, and full-selected-stream hashes.
-  - `arena_manifest` now stores fingerprint schema version, resolved source
-    path, source byte size and SHA-256, ordered case-ID SHA-256, and derived
-    selected-case SHA-256.
-  - Analysis rejects missing/unsupported fingerprints, non-file sources,
-    malformed hashes, case-count/case-ID mismatches, and changed source bytes
-    when the recorded source path remains mounted.
-- mismatch:
-  - Static dataset/provenance checks found no blocking mismatch.
-  - Live `budget_aligned` behavior cannot be established by `--validate-only`;
-    it requires the real answerer and selection-judge endpoints. Unit coverage
-    now exercises the production backend-counter branch rather than only the
-    fixture's logical-budget fallback.
+- Validation date: 2026-08-27
+- Protocol: `docs/MIX_GHOST_ECOLOGY_REPAIR_EXPERIMENT_SPEC.md` v0.3
+- Scope: public semantic substrate and readiness for the CMD-RepairStream compiler
+- Evidence exclusion: no `artifacts/`, cached result summaries, or prior experiment scores
 
 ## Verdict
 
-- PASS
+**READY_FOR_DEVELOPMENT PILOTS, not yet F-DATA frozen.**
 
-## Next Step
+The downloaded public data is real and sufficiently structured to ground CMD-RepairStream. The development compiler now materializes reproducible interventions, paired lineages, sealed repair labels, typed operator outcomes, event-order schedules, and shadow outcome matrices.
 
-- recommended command:
-  `./run_remaining_experiments.sh --role gpu0 --smoke`
-- reason:
-  Run the 50-case real-endpoint preflight, then require the log to report
-  `cmd_budget_source_distribution=backend_call_counters:<n>` and inspect
-  `arm_comparison_coverage_rate`, `fix_cases_without_arm_comparison`,
-  `budget_aligned_rate`, `budget_aligned_pairs`, failures, and abstentions
-  before authorizing the full arena. This is an execution-budget gate, not a
-  substitute for the dataset-quality PASS above.
+This is not a replacement QA world: public episodes retain source semantics, while synthetic data is restricted to versioned process/state/poison interventions. The remaining data gap is benchmark-scale compilation, human review, and an explicitly authorized F-DATA freeze.
+
+## Data Reality
+
+| Dataset | Reality and integrity | RepairStream role |
+|---|---|---|
+| MemTraceBench | 103 JSON graphs across four system splits; checksum manifest present; sampled graph exposes `nodes`, `edges`, `operations`, and `sessions` | process-fault substrate and execution-graph provenance |
+| MemFail | Five readable CSV files: 492 physical rows; facts, conditions, persona questions, multi-hop chains, and evaluator labels | semantic facts, conditional behavior, distractors, and process/state probes |
+| HaluMem | Medium and Long JSONL parse; 40 episodes, 3,804 sessions, 6,934 questions; all sampled session timestamps present | long event streams, extraction/update propagation, and delayed effects |
+| LoCoMo | `locomo10.json` parses; 10 multi-session conversations with session timestamps, summaries, observations, and QA | conversation-grounded semantic episodes and state evolution |
+| Evo-Memory | Six payloads exist and match manifest SHA-256 | auxiliary evolution protocol, not primary repair truth |
+| Evo-Bench | Validation/evaluation payloads exist and match manifest SHA-256 | harness/protocol reference, not CMD repair labels |
+| STALE | Official final instances unavailable | blocked; no substitute permitted |
+| MemSecBench | No official non-PDF payload located | blocked; no substitute permitted |
+| MemEvoBench | Official payload retrieval unavailable | blocked; no substitute permitted |
+| LongMemEval | Official payload retrieval unavailable in the current acquisition | blocked as a standalone source; MemTrace-derived material is not relabeled as official LongMemEval |
+
+## Manifest Issues
+
+1. `data/external/group_a/download_manifest.json` records MemTraceBench, MemFail, and HaluMem but omits the downloaded LoCoMo payload.
+2. Group B uses `DATASET_INVENTORY.json` plus per-dataset manifests; the `spec_v03` source auditor now reads and verifies that structure directly.
+3. Evo-Memory and Evo-Bench remain auxiliary/protocol inputs rather than executable repair truth, even when their checksums pass.
+4. Blocked datasets must remain explicit and absent from executable denominators.
+
+## Semantic Adequacy
+
+The public sources can supply immutable clean episodes, entities, facts, dialogue turns, timestamps, questions, evidence relations, memory operations, and graph structure. Synthetic content is allowed only in the intervention layer:
+
+- process interventions mutate event/pipeline operations while retaining source semantics;
+- state interventions append or project explicit superseding evidence with lineage;
+- poison interventions add typed untrusted events, authority metadata, and triggers while preserving benign source events;
+- questions and source answers remain evaluator material from the public dataset and are not regenerated to fit an intervention.
+
+## Implemented Compiler Products
+
+The development compiler now provides:
+
+1. canonical `PublicEpisode` records with source hashes and sealed public queries;
+2. versioned and seeded `InterventionSpec` constructors for process/state/poison/clean;
+3. `MemoryState` with immutable source log, audit log, active projection, index, scope, cache, supersession, and quarantine;
+4. paired `RepairCase` lineage with runtime-only `DecisionView` and sealed `EvaluatorOnly` fields;
+5. typed runtime operators whose execution reads only `MemoryState` and `OperatorSpec`;
+6. copy-on-write execution, rollback outcomes, and complete `ShadowOutcomeMatrix` records;
+7. distinct candidate-set, frozen-library, and evaluator-mechanism oracle universes;
+8. stationary, abrupt, recurring, CAS-interleaving, and delayed-receipt order manifests;
+9. the seven-way source-episode and constructor-blocked split including `D_lifecycle`.
+
+## Runtime And Experiment Wiring
+
+The compiler products are now connected to an executable, gold-free serving path:
+
+```text
+DecisionView + MemoryState
+  -> structural MemAudit / mutually exclusive ECC syndrome
+  -> typed legal candidate mask
+  -> frozen operator-skill library
+  -> route-only Mix GHOST selection
+  -> selected-skill-only executor dispatch
+  -> copy-on-write shadow execution
+  -> root / invariant / safety / locality gates
+  -> compare-and-swap commit or rollback
+  -> pending outcome
+  -> later EccRepairReceipt settlement
+  -> FailureMemory, router posterior, skill evidence, lineage, and quarantine
+```
+
+The runtime does not import `InterventionSpec`, `RepairCase`, evaluator labels, or `ShadowOutcomeMatrix`. A selected action cannot train itself at selection time: only an externally matured observation can create a receipt, and settlement occurs before a later event is routed. Clean and structurally ambiguous states abstain.
+
+The repository also contains:
+
+- an F-DATA compiler with source/template quotas, family and constructor blocking, 3-5 seeded event orders, physical runtime/lockbox separation, checksums, compiler-closure hashes, and explicit freeze authorization;
+- executable Stage 5-9 runners covering all frozen matrix arms: shared-backbone router isolation, typed-skill ecology transitions, repair governance, cross-model residual/content transfer, and controlled competitor tracks;
+- a closed runtime-bundle codec and batch loader that reconstructs the complete serving `MemoryState`, verifies its root and `DecisionView` bindings, and rejects evaluator-side fields;
+- a unified `stage59_runner` plus `experiments/spec_v03_stage5_9.py` entry point that writes one content-addressed report and preserves missing model, feedback, oracle, discovery, or baseline capabilities as `UNSUPPORTED` denominator rows;
+- separate reporting strata for Qwen3, Llama 3.1, and GPT-4o so incompatible model scales or closed/open implementations cannot be averaged into one headline number.
+
+MemSkill, ERSkill, and Mem0 now have a closed pinned-subprocess adapter contract. Exact upstream checkouts and frozen competitor artifacts are not configured, and no model/API or competitor-comparison result is claimed here. In the controlled track, a configured adapter's legal proposal is replayed through the same CMD COW/ECC/CAS governance. MemSkill and ERSkill use frozen, split-audited evidence exports; native scoring is outside the current repair-action contract.
+
+## Independent Pilot Validation
+
+- Test suite: 185 passed across `tests/spec_v03` and `tests/repair/test_ghost_ecology.py`.
+- Stage 5-9 file-chain smoke: one public HaluMem episode -> 3 runtime cases -> all six stage namespaces; status `DEVELOPMENT_WIRING_NO_MODEL_RESULTS`, report SHA-256 `4edde65c796ba6e38991e3b545e6a63573bd934689183fb56f6f47fd82adff86`.
+- HaluMem: 20 public episodes -> 58 repair cases; split counts `9/9/9/9/9/9/4`; incidents `20 clean`, `20 process_fault`, `9 state_drift`, `9 poison`.
+- Oracle universes: all 38 corrupted HaluMem cases have cardinalities `candidate=1`, `library=2`, `mechanism=3`; clean cases are `1/1/2` by design.
+- MemFail smoke: 5 public episodes -> 7 cases; persona nested questions are flattened with source answer/evidence retained only in the sealed namespace.
+- Runtime leak scan: no `template_id`, `target_event_id`, `synthetic_intervention`, `expected_effect`, or intervention-template value appears in generated runtime cases.
+
+## Leakage Rules
+
+- Public answers, evidence IDs, intervention metadata, root truth, and operator oracle never enter runtime views.
+- Every corruption descendant stays in the source episode/family block of its clean parent.
+- Constructor template and attack-trigger families are blocked across splits.
+- Event order is generated from a frozen seed and never sorted using downstream outcomes.
+- Operator legality is derived inside the evaluator namespace from intervention semantics, not copied into the router candidate builder.
+
+## Required Next Step
+
+Scale and freeze:
+
+```text
+audited public sources and development runtime
+  -> benchmark-scale compiler run and sampled human review
+  -> family/constructor leakage audit
+  -> resolve exact model snapshots and baseline commits
+  -> explicitly authorize F-DATA and lockbox publication
+  -> execute frozen Mix GHOST/ecology/repair experiments
+  -> execute controlled-stack baselines and report native-task results only as external context
+```
+
+Before F-DATA freeze, add benchmark-scale distribution targets and confirmatory source-family holdouts. The compiler must continue to fail closed when a source adapter cannot preserve semantic evidence or when an intervention lacks deterministic root, invariant, safety, locality, and rollback oracles. `DEVELOPMENT_UNPINNED` experiment manifests and development bundles must never be presented as confirmatory results.

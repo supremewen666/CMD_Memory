@@ -6,6 +6,7 @@ OpenAI-compatible ``/v1/chat/completions`` endpoint (ollama, vllm, openai, etc).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import json
 import os
@@ -65,7 +66,9 @@ class LLMClientConfig:
     """
 
     base_url: str = field(
-        default_factory=lambda: os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
+        default_factory=lambda: os.environ.get(
+            "LLM_BASE_URL", "http://localhost:11434/v1"
+        )
     )
     model: str = field(
         default_factory=lambda: os.environ.get("LLM_MODEL", "qwen2.5:7b")
@@ -83,6 +86,9 @@ class LLMClientConfig:
     )
     max_retries: int = 1
     temperature: float = 0.0
+    max_tokens: int = field(
+        default_factory=lambda: int(os.environ.get("LLM_MAX_TOKENS", "512"))
+    )
 
     @property
     def chat_endpoint(self) -> str:
@@ -133,11 +139,15 @@ class LLMClientConfig:
             or os.environ.get("DEEPSEEK_API_KEY")
             or ""
         )
+        max_tokens_raw = os.environ.get("LLM_JUDGE_MAX_TOKENS") or os.environ.get(
+            "LLM_MAX_TOKENS", "512"
+        )
         return cls(
             base_url=base_url,
             model=model,
             timeout_seconds=float(timeout_raw),
             api_key=api_key,
+            max_tokens=int(max_tokens_raw),
         )
 
 
@@ -168,7 +178,39 @@ class LLMClient:
             LLMResponseError: Non-200 HTTP response.
             LLMEmptyResponseError: Response body contains no content.
         """
-        body = self._post_chat_completion(prompt, system=system, top_logprobs=None)
+        body = self._post_chat_completion(
+            prompt,
+            system=system,
+            top_logprobs=None,
+            response_format=None,
+        )
+        return _extract_content(body)
+
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: Mapping[str, object],
+        schema_name: str,
+        system: str | None = None,
+    ) -> str:
+        """Generate one response constrained by an OpenAI JSON Schema."""
+        if not schema_name or not isinstance(schema_name, str):
+            raise ValueError("schema_name must be a non-empty string")
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema_name,
+                "strict": True,
+                "schema": dict(schema),
+            },
+        }
+        body = self._post_chat_completion(
+            prompt,
+            system=system,
+            top_logprobs=None,
+            response_format=response_format,
+        )
         return _extract_content(body)
 
     def generate_with_logprobs(
@@ -186,7 +228,12 @@ class LLMClient:
         ``token_logprobs=None`` and the caller should fall back to discrete
         parsing.
         """
-        body = self._post_chat_completion(prompt, system=system, top_logprobs=top_logprobs)
+        body = self._post_chat_completion(
+            prompt,
+            system=system,
+            top_logprobs=top_logprobs,
+            response_format=None,
+        )
         text = _extract_content(body)
         token_logprobs = _extract_logprobs(body)
         return LLMResponse(text=text, token_logprobs=token_logprobs)
@@ -197,6 +244,7 @@ class LLMClient:
         *,
         system: str | None,
         top_logprobs: int | None,
+        response_format: Mapping[str, object] | None,
     ) -> dict:
         messages: list[dict[str, str]] = []
         if system is not None:
@@ -207,11 +255,14 @@ class LLMClient:
             "model": self._config.model,
             "messages": messages,
             "temperature": self._config.temperature,
+            "max_tokens": self._config.max_tokens,
             "stream": False,
         }
         if top_logprobs is not None:
             payload_obj["logprobs"] = True
             payload_obj["top_logprobs"] = int(top_logprobs)
+        if response_format is not None:
+            payload_obj["response_format"] = dict(response_format)
 
         payload = json.dumps(payload_obj).encode("utf-8")
 
@@ -232,7 +283,9 @@ class LLMClient:
         last_error: Exception | None = None
         for attempt in range(self._config.max_retries + 1):
             try:
-                with urllib.request.urlopen(req, timeout=self._config.timeout_seconds) as resp:
+                with urllib.request.urlopen(
+                    req, timeout=self._config.timeout_seconds
+                ) as resp:
                     if resp.status != 200:
                         raise LLMResponseError(
                             f"LLM endpoint returned HTTP {resp.status}"
@@ -240,6 +293,12 @@ class LLMClient:
                     return json.loads(resp.read().decode("utf-8"))
             except (LLMClientError, LLMEmptyResponseError):
                 raise
+            except urllib.error.HTTPError as exc:
+                detail = _http_error_detail(exc)
+                raise LLMResponseError(
+                    f"LLM request rejected by {self._config.chat_endpoint}: "
+                    f"HTTP {exc.code}{': ' + detail if detail else ''}"
+                ) from exc
             except urllib.error.URLError as exc:
                 last_error = exc
             except (OSError, ValueError) as exc:
@@ -253,9 +312,31 @@ class LLMClient:
             raise LLMUnavailableError(
                 f"LLM endpoint unreachable: {last_error}"
             ) from last_error
-        raise LLMUnavailableError(
-            f"LLM request failed: {last_error}"
-        ) from last_error
+        raise LLMUnavailableError(f"LLM request failed: {last_error}") from last_error
+
+
+def _http_error_detail(error: urllib.error.HTTPError) -> str:
+    """Return a bounded provider error message without misclassifying HTTP as I/O."""
+    try:
+        raw = error.read(8192)
+    except (OSError, ValueError):
+        raw = b""
+    if not raw:
+        return str(error.reason or "").strip()
+    text = raw.decode("utf-8", errors="replace").strip()
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if isinstance(payload, Mapping):
+        nested = payload.get("error")
+        if isinstance(nested, Mapping) and nested.get("message"):
+            return str(nested["message"])
+        if payload.get("message"):
+            return str(payload["message"])
+        if payload.get("detail"):
+            return str(payload["detail"])
+    return text
 
 
 def _extract_content(body: dict) -> str:

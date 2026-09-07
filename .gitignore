@@ -22,6 +22,8 @@ reference_notes/
 .ruff_cache/
 .traces/
 logs/
+data/
+data.zip
 AUDIT_DONE_UNDONE.md
 CONCLUSION.md
 IMPROVEMENT_SPEC_A_EVOLUTION.md
@@ -30,7 +32,12 @@ RESEARCH_SURVEY_RSI_2026-07.md
 SKILL_EVOLUTION_DESIGN.md
 SKILL_MODE_DEPLOYMENT.md
 data/raw_cases/
+data/external/group_a/MemTraceBench
 data/probe_cases.bak.*/
 data/probe_cases/T1_T2_400_FULL.json
 papers/
 repos/
+results/
+.claude/
+.codex/
+docs/

@@ -154,6 +154,20 @@ class MarkdownFailureMemoryStoreTest(unittest.TestCase):
         self.assertIn("Do not use patterns until", prompt)
         self.assertIn("prefer the case", prompt)
 
+    def test_strict_revision_is_immutable_and_index_rebuilds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = MarkdownFailureMemoryStore(tmpdir, strict_revisions=True)
+            store.write_case("case_a", "# A\n", summary="old summary")
+            # Same content is idempotent, but changed content must receive a
+            # new revision id instead of silently overwriting history.
+            store.write_case("case_a", "# A\n", summary="different summary")
+            with self.assertRaisesRegex(ValueError, "immutable revision"):
+                store.write_case("case_a", "# changed\n", summary="changed")
+            store.write_pattern("pattern_b", "# B\n", summary="summary")
+            rebuilt = store.rebuild_index()
+
+        self.assertEqual(rebuilt, "# Failure Memory\n\n## Cases\n- [case_a](cases/case_a.md)\n\n## Patterns\n- [pattern_b](patterns/pattern_b.md)\n")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,725 @@
+{
+  "schema_version": "cmd-spec-v03-stage5-aggregation-manifest-v1",
+  "inputs": [
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/halumem_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/halumem_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/halumem_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/halumem_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/halumem_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/halumem_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/halumem_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/halumem_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memfail_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memfail_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memfail_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memfail_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memfail_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memfail_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memfail_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memfail_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memtracebench_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memtracebench_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memtracebench_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memtracebench_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memtracebench_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memtracebench_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memtracebench_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260827/memtracebench_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/halumem_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/halumem_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/halumem_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/halumem_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/halumem_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/halumem_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/halumem_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/halumem_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memfail_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memfail_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memfail_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memfail_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memfail_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memfail_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memfail_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memfail_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memtracebench_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memtracebench_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memtracebench_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memtracebench_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memtracebench_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memtracebench_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memtracebench_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260829/memtracebench_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/halumem_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/halumem_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/halumem_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/halumem_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/halumem_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/halumem_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/halumem_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/halumem_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memfail_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memfail_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memfail_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memfail_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memfail_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memfail_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memfail_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memfail_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memtracebench_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memtracebench_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memtracebench_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memtracebench_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memtracebench_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memtracebench_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memtracebench_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/llama31/seed_20260831/memtracebench_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/halumem_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/halumem_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/halumem_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/halumem_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/halumem_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/halumem_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/halumem_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/halumem_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memfail_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memfail_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memfail_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memfail_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memfail_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memfail_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memfail_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memfail_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memtracebench_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memtracebench_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memtracebench_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memtracebench_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memtracebench_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memtracebench_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memtracebench_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260827/memtracebench_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/halumem_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/halumem_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/halumem_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/halumem_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/halumem_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/halumem_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/halumem_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/halumem_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memfail_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memfail_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memfail_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memfail_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memfail_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memfail_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memfail_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memfail_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memtracebench_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memtracebench_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memtracebench_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memtracebench_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memtracebench_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memtracebench_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memtracebench_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260829/memtracebench_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/halumem_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/halumem_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/halumem_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/halumem_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/halumem_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/halumem_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/halumem_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/halumem_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "halumem_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memfail_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memfail_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memfail_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memfail_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memfail_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memfail_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memfail_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memfail_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memfail_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memtracebench_abrupt_process_state_poison/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memtracebench_abrupt_process_state_poison/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memtracebench_abrupt_process_state_poison/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memtracebench_abrupt_process_state_poison/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_abrupt_process_state_poison"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memtracebench_stationary/global/report.json",
+      "condition": "global",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memtracebench_stationary/global_prefix/report.json",
+      "condition": "global_prefix",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memtracebench_stationary/matched/report.json",
+      "condition": "matched",
+      "stream_id": "memtracebench_stationary"
+    },
+    {
+      "path": "../v2_multiseed_mix_only/qwen3/seed_20260831/memtracebench_stationary/reset/report.json",
+      "condition": "reset",
+      "stream_id": "memtracebench_stationary"
+    }
+  ]
+}

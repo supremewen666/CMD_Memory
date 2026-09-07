@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from .harness import (
@@ -12,6 +13,7 @@ from .harness import (
     write_comparison_metrics_table,
 )
 from .data_io import load_probe_cases, load_probe_cases_v1
+from .data_io import validate_group_a_catalog, validate_group_b_catalog
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -126,6 +128,26 @@ def main(argv: list[str] | None = None) -> int:
     repair_parser.add_argument("--similarity-threshold", type=float, default=0.35)
     repair_parser.add_argument("--timestamp-tolerance-days", type=int, default=7)
 
+    group_b_parser = subparsers.add_parser(
+        "validate-group-b-data",
+        help="validate Group B external-data manifests and acquired payload hashes",
+    )
+    group_b_parser.add_argument(
+        "--root",
+        default="data/external/group_b",
+        help="Group B inventory root (default: data/external/group_b)",
+    )
+
+    group_a_parser = subparsers.add_parser(
+        "validate-group-a-data",
+        help="validate sealed Group A external-data sources, hashes, and schemas",
+    )
+    group_a_parser.add_argument(
+        "--root",
+        default="data/external/group_a",
+        help="Group A root (default: data/external/group_a)",
+    )
+
     # ── Parse and dispatch ──────────────────────────────────────────────
 
     args = parser.parse_args(argv)
@@ -197,6 +219,16 @@ def main(argv: list[str] | None = None) -> int:
             f"gate={result.gate} report={result.report_path}"
         )
         return 0
+
+    if args.command == "validate-group-b-data":
+        report = validate_group_b_catalog(args.root)
+        print(json.dumps(report.as_dict(), sort_keys=True))
+        return 0 if report.valid else 1
+
+    if args.command == "validate-group-a-data":
+        report = validate_group_a_catalog(args.root)
+        print(json.dumps(report.as_dict(), sort_keys=True))
+        return 0 if report.valid else 1
 
     parser.error(f"unknown command {args.command!r}")
     return 2

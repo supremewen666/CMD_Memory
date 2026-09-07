@@ -527,7 +527,17 @@ def detect_operator_conflicts(
 
 
 class EcologyTracker:
-    """Append-only tracker for winner/loser events and niche snapshots."""
+    """Append-only tracker for winner/loser events and niche snapshots.
+
+    ``failure_type`` here is a *diagnostic grouping key for offline analysis*, not
+    a niche identity.  It is deliberately not the same key as
+    :attr:`BehaviorDescriptor.niche_id`, which is label-free by construction
+    (``niche_archive._LABEL_LIKE_TOKENS`` rejects step/item label names outright).
+    Callers pass step-action names into this tracker, so its groupings must never
+    be read as descriptor niches nor fed back into candidate retrieval: doing so
+    would route repair by label and break the label-free doctrine the descriptor
+    enforces.  This tracker is confined to the appendix system description.
+    """
 
     def __init__(self, *, overlap_threshold: float = 0.7) -> None:
         if not 0 <= overlap_threshold <= 1:

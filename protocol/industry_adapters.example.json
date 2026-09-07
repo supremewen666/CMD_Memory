@@ -1,0 +1,47 @@
+{
+  "memskill": {
+    "command": [
+      "/ABS/PATH/CMD_Memory/.venv/bin/python",
+      "/ABS/PATH/CMD_Memory/wrappers/memskill_adapter.py",
+      "--protocol-config",
+      "/ABS/PATH/CMD_Memory/protocol/controlled_memory_protocol.json"
+    ],
+    "repository": "/ABS/PATH/CMD_Memory",
+    "pinned_commit": "0000000000000000000000000000000000000000",
+    "supported_tracks": [
+      "controlled_a1",
+      "controlled_a2"
+    ],
+    "timeout_seconds": 300
+  },
+  "erskill": {
+    "command": [
+      "/ABS/PATH/CMD_Memory/.venv/bin/python",
+      "/ABS/PATH/CMD_Memory/wrappers/erskill_adapter.py",
+      "--protocol-config",
+      "/ABS/PATH/CMD_Memory/protocol/controlled_memory_protocol.json"
+    ],
+    "repository": "/ABS/PATH/CMD_Memory",
+    "pinned_commit": "0000000000000000000000000000000000000000",
+    "supported_tracks": [
+      "controlled_a1",
+      "controlled_a2"
+    ],
+    "timeout_seconds": 300
+  },
+  "mem0": {
+    "command": [
+      "/ABS/PATH/mem0/.venv/bin/python",
+      "/ABS/PATH/CMD_Memory/wrappers/mem0_adapter.py",
+      "--protocol-config",
+      "/ABS/PATH/CMD_Memory/protocol/controlled_memory_protocol.json"
+    ],
+    "repository": "/ABS/PATH/mem0",
+    "pinned_commit": "0000000000000000000000000000000000000000",
+    "supported_tracks": [
+      "controlled_a1",
+      "controlled_a2"
+    ],
+    "timeout_seconds": 300
+  }
+}

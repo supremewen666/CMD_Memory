@@ -199,6 +199,127 @@ def test_best_of_n_control_matches_cmd_selection_budget_without_action_structure
     assert all("pipeline action" in prompt for prompt in control_prompts)
 
 
+def test_context_stuffing_spends_one_answer_call_and_no_selection():
+    """Stuffing is the no-search baseline: put everything in, answer once.
+
+    Best-of-N already sees a flat pool, but it spends its budget searching over
+    N answers. Stuffing isolates the other question -- whether the pool alone,
+    with no routing and no selection, already recovers the answer.
+    """
+    answer_client = AnswerClient()
+    selection_judge = JudgeClient()
+    backend = VLLMDualScoreArenaBackend(
+        answer_client=answer_client,
+        selection_judge_client=selection_judge,
+        judge_client=JudgeClient(),
+        shadow_verifier=ShadowVerifier(),
+        validate_endpoints=False,
+    )
+
+    result = backend.evaluate_context_stuffing(
+        _case(),
+        origin_context=_case().base_context,
+    )
+
+    assert result.answer_calls == 1
+    assert result.selection_judge_calls == 0
+    assert result.shadow_gold_gain == 1.0
+    stuffed = [
+        prompt
+        for prompt, _system in answer_client.prompts
+        if "CONTEXT STUFFING BASELINE" in prompt
+    ]
+    assert len(stuffed) == 1
+    # No routing vocabulary may leak in, or it stops being the naive baseline.
+    assert "pipeline action" in stuffed[0]
+
+
+def test_context_stuffing_token_policy_is_frozen_and_recorded():
+    """A named baseline needs a stated budget, not whatever happened to fit.
+
+    The spec requires a frozen token policy, so the arm reports the policy it
+    applied and how much it dropped -- otherwise a truncated pool silently
+    becomes a different baseline per case.
+    """
+    backend = VLLMDualScoreArenaBackend(
+        answer_client=AnswerClient(),
+        selection_judge_client=JudgeClient(),
+        judge_client=JudgeClient(),
+        shadow_verifier=ShadowVerifier(),
+        validate_endpoints=False,
+    )
+
+    generous = backend.evaluate_context_stuffing(
+        _case(), origin_context=_case().base_context
+    )
+    assert generous.token_policy == "whitespace_token_cap"
+    assert generous.token_budget > 0
+    assert generous.items_offered == 2
+    assert generous.items_included == 2
+    assert generous.truncated is False
+
+    tight = backend.evaluate_context_stuffing(
+        _case(), origin_context=_case().base_context, token_budget=1
+    )
+    assert tight.truncated is True
+    assert tight.items_included < tight.items_offered
+
+
+def test_runner_records_context_stuffing_arm_per_case() -> None:
+    """The arm has to reach the artifact, or the analyzer cannot test it.
+
+    P0-1's paired tests read arena_arm_comparison_event rows, so a stuffing
+    baseline that only exists inside the backend is not comparable to anything.
+    """
+    backend = VLLMDualScoreArenaBackend(
+        answer_client=AnswerClient(),
+        selection_judge_client=JudgeClient(),
+        judge_client=JudgeClient(),
+        shadow_verifier=ShadowVerifier(),
+        validate_endpoints=False,
+    )
+
+    result = ObservationalArenaRunner(
+        (_case(),),
+        backend=backend,
+        enable_chains=False,
+        enable_best_of_n_control=True,
+        enable_context_stuffing_control=True,
+    ).run()
+
+    assert result.manifest.context_stuffing_control_enabled is True
+    assert result.manifest.context_stuffing_token_policy == "whitespace_token_cap"
+    event = result.arm_comparison_events[0]
+    assert event.context_stuffing_answer_calls == 1
+    assert event.context_stuffing_selection_judge_calls == 0
+    assert event.context_stuffing_shadow_gold_gain == 1.0
+    assert event.context_stuffing_truncated is False
+    assert event.to_dict()["context_stuffing_items_included"] == 2
+
+
+def test_context_stuffing_arm_is_off_by_default() -> None:
+    """Existing arms must be unaffected, and old artifacts stay readable."""
+    backend = VLLMDualScoreArenaBackend(
+        answer_client=AnswerClient(),
+        selection_judge_client=JudgeClient(),
+        judge_client=JudgeClient(),
+        shadow_verifier=ShadowVerifier(),
+        validate_endpoints=False,
+    )
+
+    result = ObservationalArenaRunner(
+        (_case(),),
+        backend=backend,
+        enable_chains=False,
+        enable_best_of_n_control=True,
+    ).run()
+
+    assert result.manifest.context_stuffing_control_enabled is False
+    event = result.arm_comparison_events[0]
+    assert event.context_stuffing_shadow_gold_gain is None
+    assert event.context_stuffing_answer_calls == 0
+
+
 def test_runner_uses_production_backend_counters_for_budget_alignment() -> None:
     backend = VLLMDualScoreArenaBackend(
         answer_client=AnswerClient(),

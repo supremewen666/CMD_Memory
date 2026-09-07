@@ -23,6 +23,16 @@ from .actions import (
 from .context import generate_conditioned_context
 from .rollout import rollout_to_terminal
 
+#: §12.3. `item_signal_hints` is keyed by literal memory IDs, which is exactly
+#: what §6.1 excludes from the sealed grammar and §8.2 forbids the typed IR from
+#: carrying. It stays available to the legacy live path -- `harness.py` feeds
+#: item-gate findings through it -- and is refused at the Route A boundary.
+LITERAL_ITEM_HINTS_PERMITTED_IN_ROUTE_A = False
+
+
+class LegacyOnlyChannelError(ValueError):
+    """A legacy-only channel reached a Route A conversion (§12.3)."""
+
 
 @dataclass(frozen=True)
 class OperatorStep:
@@ -78,6 +88,11 @@ class OperatorSpec:
     ``steps`` names the structural repair actions. ``item_signal_hints`` is the
     parameter channel consumed by ``apply_pipeline_action`` to promote or demote
     memory items without reading gold evidence.
+
+    ``item_signal_hints`` is **legacy-only** (§12.3). Its keys are literal memory
+    IDs, so it cannot cross into Route A: §6.1 excludes the item actions for that
+    reason and §8.2 forbids the typed IR from holding a case literal at all. Pass
+    a spec through :func:`assert_route_a_convertible` before converting it.
     """
 
     steps: tuple[OperatorStep, ...] = ()
@@ -242,6 +257,31 @@ class OperatorSpec:
             lines.append(f" - params.item_signal_hints={hints}")
         lines.append("```")
         return "\n".join(lines)
+
+
+def assert_route_a_convertible(operator: OperatorSpec) -> None:
+    """Raise unless this legacy spec can cross into Route A (§12.3).
+
+    The action channel is already sealed on the far side: `translate_action`
+    rejects every action §6.1 excludes. This guards the *parameter* channel,
+    which is not otherwise checked -- a spec whose steps are all legal converts
+    cleanly while its `item_signal_hints` are silently dropped, so the resulting
+    typed-IR program is not behaviorally equivalent to the operator it came from
+    and nothing in the artifact says so. Refusing is the honest outcome: the
+    hints have no representation in the typed IR to be translated into.
+
+    Emptiness is the test, not truthiness of the weights: a recorded `0.0` is
+    still a parameter, and dropping it changes the operator.
+    """
+    if operator.item_signal_hints and not LITERAL_ITEM_HINTS_PERMITTED_IN_ROUTE_A:
+        keys = ", ".join(sorted(memory_id for memory_id, _ in operator.item_signal_hints))
+        raise LegacyOnlyChannelError(
+            "item_signal_hints is legacy-only and cannot enter a Route A "
+            f"conversion (§12.3): keys [{keys}] are literal memory IDs, which "
+            "§6.1 excludes from the sealed grammar and §8.2 forbids the typed "
+            "IR from carrying. Converting would drop them silently and the "
+            "converted program would not match the legacy operator."
+        )
 
 
 def apply_operator_static(

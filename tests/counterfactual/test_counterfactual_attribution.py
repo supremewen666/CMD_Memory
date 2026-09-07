@@ -84,6 +84,31 @@ class TestPipelineActions(unittest.TestCase):
         self.assertIn(PipelineAction.ITEM_WRONG, actions)
         self.assertIn(PipelineAction.ITEM_COMPRESSION_DISTORTED, actions)
 
+    def test_item_stale_is_withheld_when_store_times_are_constructed(self) -> None:
+        """A constructed substrate must be able to withhold ITEM_STALE.
+
+        ``ITEM_STALE`` orders items by a timestamp parsed out of ``store``.  When
+        that field is a fixture-authoring marker rather than an observed write
+        time, the action measures the fixture, so the caller declares it
+        unobserved and only that one action drops out.
+        """
+        recall_set = (
+            MemoryItem("old", "Kai used the Berlin venue", store="2026-01-01T00:00:00Z"),
+            MemoryItem("new", "Kai used the Madrid venue", store="2026-02-01T00:00:00Z"),
+        )
+
+        actions = get_legal_actions(
+            recall_set,
+            0,
+            include_item_actions=True,
+            intervention_config={"store_timestamps_are_observed": False},
+        )
+
+        self.assertNotIn(PipelineAction.ITEM_STALE, actions)
+        # The other preconditions are independent of the store field and must
+        # survive, or the guard would silently disable the whole item layer.
+        self.assertIn(PipelineAction.ITEM_CONFLICT, actions)
+
     def test_apply_pipeline_action_retrieval_adds_missed_candidate(self) -> None:
         recall_set = (
             MemoryItem("recall", "France is in Europe", source_event_ids=("e1",)),

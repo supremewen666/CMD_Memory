@@ -13,10 +13,17 @@ environment into these assertions.
 """
 
 import os
+from io import BytesIO
+import json
 import unittest
 from unittest.mock import patch
+import urllib.error
 
-from cmd_audit.core.llm_client import LLMClientConfig
+from cmd_audit.core.llm_client import (
+    LLMClient,
+    LLMClientConfig,
+    LLMResponseError,
+)
 
 
 class LLMClientConfigForRoleTest(unittest.TestCase):
@@ -98,6 +105,80 @@ class LLMClientConfigForRoleTest(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(ValueError):
                 LLMClientConfig.for_role("referee")
+
+
+class LLMClientStructuredOutputTest(unittest.TestCase):
+    def test_generate_json_sends_closed_json_schema_to_openai_compatible_endpoint(self):
+        response = unittest.mock.MagicMock()
+        response.status = 200
+        response.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": '{"relation":"unrelated"}'}}]}
+        ).encode("utf-8")
+        response.__enter__.return_value = response
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["relation"],
+            "properties": {
+                "relation": {"enum": ["unrelated"]},
+            },
+        }
+        client = LLMClient(
+            LLMClientConfig(
+                base_url="http://localhost:8000/v1",
+                model="relation-model",
+                api_key="test-key",
+            )
+        )
+
+        with patch("urllib.request.urlopen", return_value=response) as urlopen:
+            result = client.generate_json(
+                "classify",
+                schema=schema,
+                schema_name="slot_relation",
+            )
+
+        request = urlopen.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(result, '{"relation":"unrelated"}')
+        self.assertEqual(payload["max_tokens"], 512)
+        self.assertEqual(
+            payload["response_format"],
+            {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "slot_relation",
+                    "strict": True,
+                    "schema": schema,
+                },
+            },
+        )
+
+    def test_http_400_exposes_provider_body_and_is_not_unreachable(self):
+        client = LLMClient(
+            LLMClientConfig(
+                base_url="http://localhost:8000/v1",
+                model="qwen",
+            )
+        )
+        error = urllib.error.HTTPError(
+            "http://localhost:8000/v1/chat/completions",
+            400,
+            "Bad Request",
+            {},
+            BytesIO(json.dumps({
+                "error": {
+                    "message": "maximum context length is 32768 tokens"
+                }
+            }).encode("utf-8")),
+        )
+
+        with patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                LLMResponseError,
+                "HTTP 400: maximum context length is 32768 tokens",
+            ):
+                client.generate("too long")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,1341 @@
+{
+  "completion": {
+    "aba_reports": {
+      "expected": 4,
+      "observed": 4
+    },
+    "cross_reports": {
+      "expected": 8,
+      "observed": 8
+    },
+    "family_bootstrap": "COMPLETE",
+    "matched_allarms_llama31": {
+      "expected": 12,
+      "observed": 12
+    },
+    "matched_allarms_qwen3": {
+      "expected": 12,
+      "observed": 12
+    },
+    "mix_only_reports": {
+      "expected": 144,
+      "observed": 144
+    }
+  },
+  "transfer": [
+    {
+      "ci95": [
+        -0.072429,
+        0.012287
+      ],
+      "comparison": "global>reset",
+      "family_count": 49,
+      "family_macro_mean": -0.028571,
+      "inference": "MIXED_OR_NULL",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 451,
+      "positive_family_rate": 0.5306122448979592,
+      "tie_family_rate": 0.2653061224489796
+    },
+    {
+      "ci95": [
+        -0.000413,
+        0.0
+      ],
+      "comparison": "global_prefix>global",
+      "family_count": 49,
+      "family_macro_mean": -0.000138,
+      "inference": "MIXED_OR_NULL",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 332,
+      "positive_family_rate": 0.0,
+      "tie_family_rate": 0.9795918367346939
+    },
+    {
+      "ci95": [
+        -0.108768,
+        -0.051682
+      ],
+      "comparison": "global_prefix>matched",
+      "family_count": 49,
+      "family_macro_mean": -0.078866,
+      "inference": "NEGATIVE",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 332,
+      "positive_family_rate": 0.02040816326530612,
+      "tie_family_rate": 0.14285714285714285
+    },
+    {
+      "ci95": [
+        0.050398,
+        0.07785
+      ],
+      "comparison": "matched>reset",
+      "family_count": 49,
+      "family_macro_mean": 0.063923,
+      "inference": "POSITIVE",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 451,
+      "positive_family_rate": 0.9387755102040817,
+      "tie_family_rate": 0.04081632653061224
+    },
+    {
+      "ci95": [
+        0.012985,
+        0.047845
+      ],
+      "comparison": "global>reset",
+      "family_count": 49,
+      "family_macro_mean": 0.030666,
+      "inference": "POSITIVE",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 451,
+      "positive_family_rate": 0.46938775510204084,
+      "tie_family_rate": 0.40816326530612246
+    },
+    {
+      "ci95": [
+        0.0,
+        0.0195
+      ],
+      "comparison": "global_prefix>global",
+      "family_count": 49,
+      "family_macro_mean": 0.007429,
+      "inference": "MIXED_OR_NULL",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 332,
+      "positive_family_rate": 0.04081632653061224,
+      "tie_family_rate": 0.9591836734693877
+    },
+    {
+      "ci95": [
+        -0.043104,
+        -0.019998
+      ],
+      "comparison": "global_prefix>matched",
+      "family_count": 49,
+      "family_macro_mean": -0.031019,
+      "inference": "NEGATIVE",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 332,
+      "positive_family_rate": 0.08163265306122448,
+      "tie_family_rate": 0.24489795918367346
+    },
+    {
+      "ci95": [
+        0.050573,
+        0.082356
+      ],
+      "comparison": "matched>reset",
+      "family_count": 49,
+      "family_macro_mean": 0.066286,
+      "inference": "POSITIVE",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 451,
+      "positive_family_rate": 0.8163265306122449,
+      "tie_family_rate": 0.1836734693877551
+    }
+  ],
+  "allarms": [
+    {
+      "mix_minus_ghost": {
+        "negative": 2,
+        "positive": 8,
+        "stream_count": 12,
+        "stream_macro_delta": 0.087023,
+        "ties": 2
+      },
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "ranking": [
+        {
+          "arm": "mix_ghost",
+          "event_weighted_utility": 0.714136,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.767442,
+          "mean_pseudo_regret": 0.036279,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.722197,
+          "stream_wins_including_ties": 10
+        },
+        {
+          "arm": "best_global",
+          "event_weighted_utility": 0.655075,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 3.41196,
+          "mean_pseudo_regret": 0.095341,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.669493,
+          "stream_wins_including_ties": 4
+        },
+        {
+          "arm": "ghost_hierarchy",
+          "event_weighted_utility": 0.613563,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.299003,
+          "mean_pseudo_regret": 0.136852,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.635174,
+          "stream_wins_including_ties": 3
+        },
+        {
+          "arm": "global_thompson",
+          "event_weighted_utility": 0.59936,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.481728,
+          "mean_pseudo_regret": 0.151055,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.605589,
+          "stream_wins_including_ties": 0
+        },
+        {
+          "arm": "contextual_bandit",
+          "event_weighted_utility": 0.570424,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.112957,
+          "mean_pseudo_regret": 0.179992,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.596168,
+          "stream_wins_including_ties": 1
+        },
+        {
+          "arm": "niche_thompson",
+          "event_weighted_utility": 0.590091,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.41196,
+          "mean_pseudo_regret": 0.160324,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.566234,
+          "stream_wins_including_ties": 0
+        },
+        {
+          "arm": "random_legal",
+          "event_weighted_utility": 0.54799,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.152824,
+          "mean_pseudo_regret": 0.202425,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.543564,
+          "stream_wins_including_ties": 0
+        }
+      ],
+      "reports_observed": 12,
+      "reports_with_all_7_arms": 12
+    },
+    {
+      "mix_minus_ghost": {
+        "negative": 0,
+        "positive": 11,
+        "stream_count": 12,
+        "stream_macro_delta": 0.077967,
+        "ties": 1
+      },
+      "model_id": "Qwen3-14B",
+      "ranking": [
+        {
+          "arm": "mix_ghost",
+          "event_weighted_utility": 0.718505,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.956811,
+          "mean_pseudo_regret": 0.031462,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.722028,
+          "stream_wins_including_ties": 10
+        },
+        {
+          "arm": "best_global",
+          "event_weighted_utility": 0.655075,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 3.41196,
+          "mean_pseudo_regret": 0.094892,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.669493,
+          "stream_wins_including_ties": 4
+        },
+        {
+          "arm": "ghost_hierarchy",
+          "event_weighted_utility": 0.650839,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.820598,
+          "mean_pseudo_regret": 0.099128,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.644061,
+          "stream_wins_including_ties": 1
+        },
+        {
+          "arm": "global_thompson",
+          "event_weighted_utility": 0.59936,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.481728,
+          "mean_pseudo_regret": 0.150606,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.605589,
+          "stream_wins_including_ties": 0
+        },
+        {
+          "arm": "contextual_bandit",
+          "event_weighted_utility": 0.570424,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.112957,
+          "mean_pseudo_regret": 0.179543,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.596168,
+          "stream_wins_including_ties": 2
+        },
+        {
+          "arm": "niche_thompson",
+          "event_weighted_utility": 0.590091,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.41196,
+          "mean_pseudo_regret": 0.159875,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.566234,
+          "stream_wins_including_ties": 1
+        },
+        {
+          "arm": "random_legal",
+          "event_weighted_utility": 0.54799,
+          "mean_collateral_cost": 0.0,
+          "mean_locality_cost": 2.152824,
+          "mean_pseudo_regret": 0.201977,
+          "receipt_count": 301,
+          "safe_repair_success_proxy": 1.0,
+          "stream_macro_utility": 0.543564,
+          "stream_wins_including_ties": 0
+        }
+      ],
+      "reports_observed": 12,
+      "reports_with_all_7_arms": 12
+    }
+  ],
+  "allarms_family_bootstrap": [
+    {
+      "ci95": [
+        0.043681,
+        0.073342
+      ],
+      "comparison": "mix_ghost>best_global",
+      "family_count": 49,
+      "family_macro_mean": 0.058434,
+      "inference": "POSITIVE",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.9183673469387755,
+      "tie_family_rate": 0.04081632653061224,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.110702,
+        0.17028
+      ],
+      "comparison": "mix_ghost>contextual_bandit",
+      "family_count": 49,
+      "family_macro_mean": 0.140376,
+      "inference": "POSITIVE",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.8775510204081632,
+      "tie_family_rate": 0.08163265306122448,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.08567,
+        0.132101
+      ],
+      "comparison": "mix_ghost>ghost_hierarchy",
+      "family_count": 49,
+      "family_macro_mean": 0.107573,
+      "inference": "POSITIVE",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.9591836734693877,
+      "tie_family_rate": 0.04081632653061224,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.092902,
+        0.147159
+      ],
+      "comparison": "mix_ghost>global_thompson",
+      "family_count": 49,
+      "family_macro_mean": 0.119168,
+      "inference": "POSITIVE",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.9591836734693877,
+      "tie_family_rate": 0.04081632653061224,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.107025,
+        0.171858
+      ],
+      "comparison": "mix_ghost>niche_thompson",
+      "family_count": 49,
+      "family_macro_mean": 0.139027,
+      "inference": "POSITIVE",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.8367346938775511,
+      "tie_family_rate": 0.04081632653061224,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.149006,
+        0.197996
+      ],
+      "comparison": "mix_ghost>random_legal",
+      "family_count": 49,
+      "family_macro_mean": 0.172867,
+      "inference": "POSITIVE",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.9591836734693877,
+      "tie_family_rate": 0.02040816326530612,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.043652,
+        0.07854
+      ],
+      "comparison": "mix_ghost>best_global",
+      "family_count": 49,
+      "family_macro_mean": 0.06096,
+      "inference": "POSITIVE",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.8367346938775511,
+      "tie_family_rate": 0.14285714285714285,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.113904,
+        0.17336
+      ],
+      "comparison": "mix_ghost>contextual_bandit",
+      "family_count": 49,
+      "family_macro_mean": 0.142902,
+      "inference": "POSITIVE",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.9183673469387755,
+      "tie_family_rate": 0.061224489795918366,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.055414,
+        0.117949
+      ],
+      "comparison": "mix_ghost>ghost_hierarchy",
+      "family_count": 49,
+      "family_macro_mean": 0.085952,
+      "inference": "POSITIVE",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.6530612244897959,
+      "tie_family_rate": 0.30612244897959184,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.093788,
+        0.151139
+      ],
+      "comparison": "mix_ghost>global_thompson",
+      "family_count": 49,
+      "family_macro_mean": 0.121694,
+      "inference": "POSITIVE",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.8979591836734694,
+      "tie_family_rate": 0.08163265306122448,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.109094,
+        0.173269
+      ],
+      "comparison": "mix_ghost>niche_thompson",
+      "family_count": 49,
+      "family_macro_mean": 0.141552,
+      "inference": "POSITIVE",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.8571428571428571,
+      "tie_family_rate": 0.04081632653061224,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        0.149717,
+        0.201764
+      ],
+      "comparison": "mix_ghost>random_legal",
+      "family_count": 49,
+      "family_macro_mean": 0.175392,
+      "inference": "POSITIVE",
+      "model_id": "Qwen3-14B",
+      "paired_event_count": 301,
+      "positive_family_rate": 0.9591836734693877,
+      "tie_family_rate": 0.02040816326530612,
+      "unmapped_case_count": 0
+    }
+  ],
+  "aba": {
+    "mix_minus_ghost_by_phase": [
+      {
+        "mean_delta": 0.0,
+        "paired_events": 40,
+        "phase": "recurring_a_stationary"
+      },
+      {
+        "mean_delta": 0.000139,
+        "paired_events": 54,
+        "phase": "recurring_b_abrupt"
+      },
+      {
+        "mean_delta": 0.008456,
+        "paired_events": 34,
+        "phase": "recurring_a_return_stationary"
+      }
+    ],
+    "phase_metrics": [
+      {
+        "arm": "ghost_hierarchy",
+        "mean_utility": 0.765875,
+        "phase": "recurring_a_stationary",
+        "receipt_count": 40,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "rebuild": 22,
+          "targeted": 18
+        }
+      },
+      {
+        "arm": "mix_ghost",
+        "mean_utility": 0.765875,
+        "phase": "recurring_a_stationary",
+        "receipt_count": 40,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "rebuild": 22,
+          "targeted": 18
+        }
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "mean_utility": 0.571806,
+        "phase": "recurring_b_abrupt",
+        "receipt_count": 54,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "cascade": 13,
+          "quarantine_and_rebuild": 31,
+          "quarantine_only": 5,
+          "targeted": 5
+        }
+      },
+      {
+        "arm": "mix_ghost",
+        "mean_utility": 0.571944,
+        "phase": "recurring_b_abrupt",
+        "receipt_count": 54,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "cascade": 12,
+          "quarantine_and_rebuild": 32,
+          "quarantine_only": 4,
+          "targeted": 6
+        }
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "mean_utility": 0.749338,
+        "phase": "recurring_a_return_stationary",
+        "receipt_count": 34,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "rebuild": 22,
+          "targeted": 12
+        }
+      },
+      {
+        "arm": "mix_ghost",
+        "mean_utility": 0.757794,
+        "phase": "recurring_a_return_stationary",
+        "receipt_count": 34,
+        "safe_repair_success_proxy": 1.0,
+        "strategy_counts": {
+          "rebuild": 20,
+          "targeted": 14
+        }
+      }
+    ],
+    "reports_expected": 4,
+    "reports_observed": 4,
+    "return_to_a": [
+      {
+        "a1_mean": 0.765875,
+        "a2_minus_a1": -0.016537,
+        "a2_return_mean": 0.749338,
+        "arm": "ghost_hierarchy"
+      },
+      {
+        "a1_mean": 0.765875,
+        "a2_minus_a1": -0.008081,
+        "a2_return_mean": 0.757794,
+        "arm": "mix_ghost"
+      }
+    ]
+  },
+  "aba_family_bootstrap": [
+    {
+      "ci95": [
+        -0.010086,
+        0.010086
+      ],
+      "comparison": "mix_ghost>ghost_hierarchy",
+      "family_count": 29,
+      "family_macro_mean": 0.0,
+      "inference": "MIXED_OR_NULL",
+      "paired_event_count": 40,
+      "phase": "recurring_a_stationary",
+      "positive_family_rate": 0.034482758620689655,
+      "tie_family_rate": 0.9310344827586207,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        -0.075556,
+        0.063333
+      ],
+      "comparison": "mix_ghost>ghost_hierarchy",
+      "family_count": 27,
+      "family_macro_mean": 0.000139,
+      "inference": "MIXED_OR_NULL",
+      "paired_event_count": 54,
+      "phase": "recurring_b_abrupt",
+      "positive_family_rate": 0.1111111111111111,
+      "tie_family_rate": 0.8148148148148148,
+      "unmapped_case_count": 0
+    },
+    {
+      "ci95": [
+        -0.001875,
+        0.0225
+      ],
+      "comparison": "mix_ghost>ghost_hierarchy",
+      "family_count": 26,
+      "family_macro_mean": 0.009279,
+      "inference": "MIXED_OR_NULL",
+      "paired_event_count": 34,
+      "phase": "recurring_a_return_stationary",
+      "positive_family_rate": 0.11538461538461539,
+      "tie_family_rate": 0.8461538461538461,
+      "unmapped_case_count": 0
+    }
+  ],
+  "aba_operator_strategy": [
+    {
+      "arm": "ghost_hierarchy",
+      "count": 22,
+      "mean_locality_cost": 4.0,
+      "mean_utility": 0.685,
+      "operator_family": "process_restore",
+      "phase": "recurring_a_return_stationary",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "rebuild"
+    },
+    {
+      "arm": "ghost_hierarchy",
+      "count": 12,
+      "mean_locality_cost": 1.0,
+      "mean_utility": 0.867292,
+      "operator_family": "process_restore",
+      "phase": "recurring_a_return_stationary",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "targeted"
+    },
+    {
+      "arm": "ghost_hierarchy",
+      "count": 22,
+      "mean_locality_cost": 4.0,
+      "mean_utility": 0.685,
+      "operator_family": "process_restore",
+      "phase": "recurring_a_stationary",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "rebuild"
+    },
+    {
+      "arm": "ghost_hierarchy",
+      "count": 18,
+      "mean_locality_cost": 1.0,
+      "mean_utility": 0.864722,
+      "operator_family": "process_restore",
+      "phase": "recurring_a_stationary",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "targeted"
+    },
+    {
+      "arm": "ghost_hierarchy",
+      "count": 31,
+      "mean_locality_cost": 3.0,
+      "mean_utility": 0.7,
+      "operator_family": "poison_quarantine",
+      "phase": "recurring_b_abrupt",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "quarantine_and_rebuild"
+    },
+    {
+      "arm": "ghost_hierarchy",
+      "count": 5,
+      "mean_locality_cost": 1.0,
+      "mean_utility": 0.0175,
+      "operator_family": "poison_quarantine",
+      "phase": "recurring_b_abrupt",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "quarantine_only"
+    },
+    {
+      "arm": "ghost_hierarchy",
+      "count": 13,
+      "mean_locality_cost": 3.0,
+      "mean_utility": 0.6925,
+      "operator_family": "state_supersede",
+      "phase": "recurring_b_abrupt",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "cascade"
+    },
+    {
+      "arm": "ghost_hierarchy",
+      "count": 5,
+      "mean_locality_cost": 2.0,
+      "mean_utility": 0.0175,
+      "operator_family": "state_supersede",
+      "phase": "recurring_b_abrupt",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "targeted"
+    },
+    {
+      "arm": "mix_ghost",
+      "count": 20,
+      "mean_locality_cost": 4.0,
+      "mean_utility": 0.685,
+      "operator_family": "process_restore",
+      "phase": "recurring_a_return_stationary",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "rebuild"
+    },
+    {
+      "arm": "mix_ghost",
+      "count": 14,
+      "mean_locality_cost": 1.0,
+      "mean_utility": 0.861786,
+      "operator_family": "process_restore",
+      "phase": "recurring_a_return_stationary",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "targeted"
+    },
+    {
+      "arm": "mix_ghost",
+      "count": 22,
+      "mean_locality_cost": 4.0,
+      "mean_utility": 0.685,
+      "operator_family": "process_restore",
+      "phase": "recurring_a_stationary",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "rebuild"
+    },
+    {
+      "arm": "mix_ghost",
+      "count": 18,
+      "mean_locality_cost": 1.0,
+      "mean_utility": 0.864722,
+      "operator_family": "process_restore",
+      "phase": "recurring_a_stationary",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "targeted"
+    },
+    {
+      "arm": "mix_ghost",
+      "count": 32,
+      "mean_locality_cost": 3.0,
+      "mean_utility": 0.7,
+      "operator_family": "poison_quarantine",
+      "phase": "recurring_b_abrupt",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "quarantine_and_rebuild"
+    },
+    {
+      "arm": "mix_ghost",
+      "count": 4,
+      "mean_locality_cost": 1.0,
+      "mean_utility": 0.0175,
+      "operator_family": "poison_quarantine",
+      "phase": "recurring_b_abrupt",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "quarantine_only"
+    },
+    {
+      "arm": "mix_ghost",
+      "count": 12,
+      "mean_locality_cost": 3.0,
+      "mean_utility": 0.6925,
+      "operator_family": "state_supersede",
+      "phase": "recurring_b_abrupt",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "cascade"
+    },
+    {
+      "arm": "mix_ghost",
+      "count": 6,
+      "mean_locality_cost": 2.0,
+      "mean_utility": 0.0175,
+      "operator_family": "state_supersede",
+      "phase": "recurring_b_abrupt",
+      "safe_repair_success_proxy": 1.0,
+      "strategy_id": "targeted"
+    }
+  ],
+  "incident_metrics": [
+    {
+      "delayed_regression_rate": 0.0,
+      "incident_type": "poison",
+      "mean_collateral_cost": 0.0,
+      "mean_locality_cost": 2.308411,
+      "mean_utility": 0.716332,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "receipt_count": 107,
+      "rollback_rate": 0.0,
+      "safe_repair_success_proxy": 1.0
+    },
+    {
+      "delayed_regression_rate": 0.0,
+      "incident_type": "process_fault",
+      "mean_collateral_cost": 0.0,
+      "mean_locality_cost": 3.132075,
+      "mean_utility": 0.709403,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "receipt_count": 159,
+      "rollback_rate": 0.0,
+      "safe_repair_success_proxy": 1.0
+    },
+    {
+      "delayed_regression_rate": 0.0,
+      "incident_type": "state_drift",
+      "mean_collateral_cost": 0.0,
+      "mean_locality_cost": 2.514286,
+      "mean_utility": 0.728929,
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "receipt_count": 35,
+      "rollback_rate": 0.0,
+      "safe_repair_success_proxy": 1.0
+    },
+    {
+      "delayed_regression_rate": 0.0,
+      "incident_type": "poison",
+      "mean_collateral_cost": 0.0,
+      "mean_locality_cost": 2.570093,
+      "mean_utility": 0.7075,
+      "model_id": "Qwen3-14B",
+      "receipt_count": 107,
+      "rollback_rate": 0.0,
+      "safe_repair_success_proxy": 1.0
+    },
+    {
+      "delayed_regression_rate": 0.0,
+      "incident_type": "process_fault",
+      "mean_collateral_cost": 0.0,
+      "mean_locality_cost": 3.301887,
+      "mean_utility": 0.72456,
+      "model_id": "Qwen3-14B",
+      "receipt_count": 159,
+      "rollback_rate": 0.0,
+      "safe_repair_success_proxy": 1.0
+    },
+    {
+      "delayed_regression_rate": 0.0,
+      "incident_type": "state_drift",
+      "mean_collateral_cost": 0.0,
+      "mean_locality_cost": 2.571429,
+      "mean_utility": 0.724643,
+      "model_id": "Qwen3-14B",
+      "receipt_count": 35,
+      "rollback_rate": 0.0,
+      "safe_repair_success_proxy": 1.0
+    }
+  ],
+  "source_target_overlap": [
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 58,
+      "seed": 20260827,
+      "source_case_count": 58,
+      "stream": "halumem_abrupt_process_state_poison",
+      "target_case_count": 58,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 58,
+      "seed": 20260827,
+      "source_case_count": 58,
+      "stream": "halumem_stationary",
+      "target_case_count": 58,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 29,
+      "seed": 20260827,
+      "source_case_count": 29,
+      "stream": "memfail_abrupt_process_state_poison",
+      "target_case_count": 29,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 29,
+      "seed": 20260827,
+      "source_case_count": 29,
+      "stream": "memfail_stationary",
+      "target_case_count": 29,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 49,
+      "seed": 20260827,
+      "source_case_count": 49,
+      "stream": "memtracebench_abrupt_process_state_poison",
+      "target_case_count": 49,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 49,
+      "seed": 20260827,
+      "source_case_count": 49,
+      "stream": "memtracebench_stationary",
+      "target_case_count": 49,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 58,
+      "seed": 20260829,
+      "source_case_count": 58,
+      "stream": "halumem_abrupt_process_state_poison",
+      "target_case_count": 58,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 58,
+      "seed": 20260829,
+      "source_case_count": 58,
+      "stream": "halumem_stationary",
+      "target_case_count": 58,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 29,
+      "seed": 20260829,
+      "source_case_count": 29,
+      "stream": "memfail_abrupt_process_state_poison",
+      "target_case_count": 29,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 29,
+      "seed": 20260829,
+      "source_case_count": 29,
+      "stream": "memfail_stationary",
+      "target_case_count": 29,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 49,
+      "seed": 20260829,
+      "source_case_count": 49,
+      "stream": "memtracebench_abrupt_process_state_poison",
+      "target_case_count": 49,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "overlap_case_count": 49,
+      "seed": 20260829,
+      "source_case_count": 49,
+      "stream": "memtracebench_stationary",
+      "target_case_count": 49,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 58,
+      "seed": 20260827,
+      "source_case_count": 58,
+      "stream": "halumem_abrupt_process_state_poison",
+      "target_case_count": 58,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 58,
+      "seed": 20260827,
+      "source_case_count": 58,
+      "stream": "halumem_stationary",
+      "target_case_count": 58,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 29,
+      "seed": 20260827,
+      "source_case_count": 29,
+      "stream": "memfail_abrupt_process_state_poison",
+      "target_case_count": 29,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 29,
+      "seed": 20260827,
+      "source_case_count": 29,
+      "stream": "memfail_stationary",
+      "target_case_count": 29,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 49,
+      "seed": 20260827,
+      "source_case_count": 49,
+      "stream": "memtracebench_abrupt_process_state_poison",
+      "target_case_count": 49,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 49,
+      "seed": 20260827,
+      "source_case_count": 49,
+      "stream": "memtracebench_stationary",
+      "target_case_count": 49,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 58,
+      "seed": 20260829,
+      "source_case_count": 58,
+      "stream": "halumem_abrupt_process_state_poison",
+      "target_case_count": 58,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 58,
+      "seed": 20260829,
+      "source_case_count": 58,
+      "stream": "halumem_stationary",
+      "target_case_count": 58,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 29,
+      "seed": 20260829,
+      "source_case_count": 29,
+      "stream": "memfail_abrupt_process_state_poison",
+      "target_case_count": 29,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 29,
+      "seed": 20260829,
+      "source_case_count": 29,
+      "stream": "memfail_stationary",
+      "target_case_count": 29,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 49,
+      "seed": 20260829,
+      "source_case_count": 49,
+      "stream": "memtracebench_abrupt_process_state_poison",
+      "target_case_count": 49,
+      "target_overlap_rate": 1.0
+    },
+    {
+      "held_out_status": "OVERLAP_PRESENT",
+      "model_id": "Qwen3-14B",
+      "overlap_case_count": 49,
+      "seed": 20260829,
+      "source_case_count": 49,
+      "stream": "memtracebench_stationary",
+      "target_case_count": 49,
+      "target_overlap_rate": 1.0
+    }
+  ],
+  "resource_usage": [
+    {
+      "mean_per_report": {
+        "input_tokens": 326117.083333,
+        "output_tokens": 6728.666667,
+        "request_count": 25.333333,
+        "total_tokens": 332845.75
+      },
+      "model_id": "Meta-Llama-3.1-8B-Instruct",
+      "report_count": 12,
+      "total": {
+        "input_tokens": 3913405.0,
+        "output_tokens": 80744.0,
+        "request_count": 304.0,
+        "total_tokens": 3994149.0
+      }
+    },
+    {
+      "mean_per_report": {
+        "input_tokens": 421292.25,
+        "output_tokens": 9280.5,
+        "request_count": 25.333333,
+        "total_tokens": 430572.75
+      },
+      "model_id": "Qwen3-14B",
+      "report_count": 12,
+      "total": {
+        "input_tokens": 5055507.0,
+        "output_tokens": 111366.0,
+        "request_count": 304.0,
+        "total_tokens": 5166873.0
+      }
+    }
+  ],
+  "cross": {
+    "comparisons": [
+      {
+        "arm": "ghost_hierarchy",
+        "comparison": "matched>reset",
+        "mean_delta": 0.021481,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_events": 27,
+        "stream": "memtracebench_stationary"
+      },
+      {
+        "arm": "mix_ghost",
+        "comparison": "matched>reset",
+        "mean_delta": 0.112963,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_events": 27,
+        "stream": "memtracebench_stationary"
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "comparison": "global>reset",
+        "mean_delta": 0.021481,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_events": 27,
+        "stream": "memtracebench_stationary"
+      },
+      {
+        "arm": "mix_ghost",
+        "comparison": "global>reset",
+        "mean_delta": 0.015,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_events": 27,
+        "stream": "memtracebench_stationary"
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "comparison": "global_prefix>global",
+        "mean_delta": 0.0,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_events": 20,
+        "stream": "memtracebench_stationary"
+      },
+      {
+        "arm": "mix_ghost",
+        "comparison": "global_prefix>global",
+        "mean_delta": 0.0,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_events": 20,
+        "stream": "memtracebench_stationary"
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "comparison": "global_prefix>matched",
+        "mean_delta": 0.0,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_events": 20,
+        "stream": "memtracebench_stationary"
+      },
+      {
+        "arm": "mix_ghost",
+        "comparison": "global_prefix>matched",
+        "mean_delta": -0.08475,
+        "model_id": "Meta-Llama-3.1-8B-Instruct",
+        "paired_events": 20,
+        "stream": "memtracebench_stationary"
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "comparison": "matched>reset",
+        "mean_delta": 0.0,
+        "model_id": "Qwen3-14B",
+        "paired_events": 9,
+        "stream": "memfail_abrupt_process_state_poison"
+      },
+      {
+        "arm": "mix_ghost",
+        "comparison": "matched>reset",
+        "mean_delta": 0.0,
+        "model_id": "Qwen3-14B",
+        "paired_events": 9,
+        "stream": "memfail_abrupt_process_state_poison"
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "comparison": "global>reset",
+        "mean_delta": 0.075833,
+        "model_id": "Qwen3-14B",
+        "paired_events": 9,
+        "stream": "memfail_abrupt_process_state_poison"
+      },
+      {
+        "arm": "mix_ghost",
+        "comparison": "global>reset",
+        "mean_delta": 0.0,
+        "model_id": "Qwen3-14B",
+        "paired_events": 9,
+        "stream": "memfail_abrupt_process_state_poison"
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "comparison": "global_prefix>global",
+        "mean_delta": 0.0,
+        "model_id": "Qwen3-14B",
+        "paired_events": 4,
+        "stream": "memfail_abrupt_process_state_poison"
+      },
+      {
+        "arm": "mix_ghost",
+        "comparison": "global_prefix>global",
+        "mean_delta": 0.0,
+        "model_id": "Qwen3-14B",
+        "paired_events": 4,
+        "stream": "memfail_abrupt_process_state_poison"
+      },
+      {
+        "arm": "ghost_hierarchy",
+        "comparison": "global_prefix>matched",
+        "mean_delta": 0.170625,
+        "model_id": "Qwen3-14B",
+        "paired_events": 4,
+        "stream": "memfail_abrupt_process_state_poison"
+      },
+      {
+        "arm": "mix_ghost",
+        "comparison": "global_prefix>matched",
+        "mean_delta": 0.0,
+        "model_id": "Qwen3-14B",
+        "paired_events": 4,
+        "stream": "memfail_abrupt_process_state_poison"
+      }
+    ],
+    "reports_expected": 8,
+    "reports_observed": 8
+  },
+  "claim_ledger": [
+    {
+      "boundary": "Family-blocked confidence intervals are positive; inspect overlap audit before claiming held-out generalization.",
+      "claim": "Matched ecological posterior improves over reset across Qwen3 and Llama.",
+      "status": "SUPPORTED_DEVELOPMENT"
+    },
+    {
+      "boundary": "Use all-arms pairwise family bootstrap for uncertainty and do not claim per-stream dominance.",
+      "claim": "Mix GHOST is the strongest matched router among the seven tested arms.",
+      "status": "SUPPORTED_DEVELOPMENT"
+    },
+    {
+      "boundary": "Phase-specific family bootstrap determines whether the return-phase advantage excludes zero.",
+      "claim": "Mix GHOST preserves ecological memory across A-B-A recurrence.",
+      "status": "SUPPORTED_DESCRIPTIVE"
+    },
+    {
+      "boundary": "Family-blocked resampling does not repair source-target case overlap.",
+      "claim": "Transferred posterior generalizes to unseen families.",
+      "status": "NOT_ESTABLISHED"
+    },
+    {
+      "boundary": "Current feedback is development-structural; sealed receipts and real false-commit evaluation are absent.",
+      "claim": "CMD provides confirmatory safe memory repair.",
+      "status": "NOT_ESTABLISHED"
+    },
+    {
+      "boundary": "Requires controlled LightMem, LycheeMem, and Mem0 result tables.",
+      "claim": "CMD outperforms deployed memory systems.",
+      "status": "NOT_ESTABLISHED"
+    },
+    {
+      "boundary": "GPT-4o key-condition evaluation is absent.",
+      "claim": "The conclusions extend to an external frontier model.",
+      "status": "NOT_ESTABLISHED"
+    },
+    {
+      "boundary": "Cross is supplemental; ABA, Mix-only, all-arms, and family bootstrap are independently tracked.",
+      "claim": "The compact experiment matrix is complete.",
+      "status": "COMPLETE"
+    }
+  ]
+}

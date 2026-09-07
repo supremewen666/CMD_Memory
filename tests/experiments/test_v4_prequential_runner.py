@@ -1,0 +1,607 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+
+import pytest
+
+from cmd_audit.counterfactual.actionability import resolve_actionability
+from cmd_audit.counterfactual.item_ordering import (
+    EvidenceReliability,
+    OrderingEvidence,
+    OrderingPolicy,
+)
+from cmd_audit.counterfactual.relation_graph import (
+    FrozenRelationEdge,
+    FrozenRelationGraph,
+    RelationMeasurementBinding,
+)
+from cmd_audit.eval.state_intent import RuntimeMemoryItem, RuntimeRepairCase
+from cmd_audit.repair.parametric_policy import PolicyContext, RepairIntent
+from cmd_audit.repair.deployment_feedback_evaluator import (
+    EvaluatorTrainingRow,
+    FrozenDeploymentEvaluator,
+    observable_features,
+)
+from experiments.v4_live_materialization import V4LiveMaterializer
+from cmd_audit.adapters.session_lineage_cli import merge_followup_evidence_into_v4_case
+from experiments.v4_prequential_runner import (
+    V4_ARMS,
+    V4CandidateOutcome,
+    V4PrequentialCase,
+    V4PrequentialRunner,
+    main,
+)
+
+
+def _graph(case_id: str) -> FrozenRelationGraph:
+    case = RuntimeRepairCase(
+        case_id=case_id,
+        family_id="runtime-only",
+        query="where does Dana work",
+        raw_events=(),
+        token_budget=64,
+        items=(
+            RuntimeMemoryItem("old", "Dana works at Acme", (), "runtime", 1, True),
+            RuntimeMemoryItem("new", "Dana works at Globex", (), "runtime", 0, True),
+        ),
+    )
+    policy = OrderingPolicy(
+        "ordering-v1",
+        ("observed_at",),
+        (("observed_at", "chronology_lower_target"),),
+    )
+    observed = (
+        datetime(2024, 1, 1, tzinfo=timezone.utc),
+        datetime(2024, 1, 2, tzinfo=timezone.utc),
+    )
+    evidence = tuple(
+        OrderingEvidence(
+            item_id,
+            observed_at=value,
+            observed_at_domain="utc",
+            provenance="runtime-sidecar",
+            audit_version="audit-v1",
+            deployment_visible=True,
+            reliability=EvidenceReliability.TRUSTED,
+        )
+        for item_id, value in zip(("old", "new"), observed, strict=True)
+    )
+    measurement = RelationMeasurementBinding.build(
+        left_text="Dana works at Acme",
+        right_text="Dana works at Globex",
+        relation="same_slot_different_value",
+        slot="employer",
+        abstained=False,
+        prompt_sha256="c" * 64,
+        parser_version="parser-v1",
+        model_id="model-v1",
+        model_config_hash="d" * 64,
+        normalization_version="norm-v1",
+        instrument_version="instrument-v1",
+        instrument_manifest_sha256="a" * 64,
+    )
+    edge_id = FrozenRelationEdge.relation_edge_id(
+        pair_id=f"pair-{case_id}",
+        case_id=case_id,
+        left_item_id="old",
+        right_item_id="new",
+    )
+    actionability = resolve_actionability(
+        "old",
+        "new",
+        "same_slot_different_value",
+        evidence[0],
+        evidence[1],
+        relation_edge_id=edge_id,
+        ordering_policy=policy,
+    )
+    edge = FrozenRelationEdge.build(
+        pair_id=f"pair-{case_id}",
+        case_id=case_id,
+        left_item_id="old",
+        right_item_id="new",
+        relation="same_slot_different_value",
+        measurement=measurement,
+        left_evidence=evidence[0],
+        right_evidence=evidence[1],
+        ordering_policy=policy,
+        actionability=actionability,
+    )
+    return FrozenRelationGraph.build(
+        case=case,
+        item_ids=("old", "new"),
+        protocol_manifest_sha256="f" * 64,
+        instrument_manifest_sha256="a" * 64,
+        cache_manifest_sha256="b" * 64,
+        edges=(edge,),
+    )
+
+
+def _case(index: int, *, probe_set: str, family: str) -> V4PrequentialCase:
+    case_id = f"case-{index}"
+    graph = _graph(case_id)
+    intent = RepairIntent.build(
+        strategy_id="prefer-trusted-later@v1",
+        relation_edge_id=graph.edges[0].edge_id,
+        target_item_id="old",
+        effect="demote",
+        proposer_id="recorded-proposer-v1",
+        proposer_model_hash="e" * 64,
+        evidence_ids=(graph.edges[0].edge_sha256,),
+    )
+    context = PolicyContext(
+        case_id,
+        index * 2 + 1,
+        graph.graph_sha256,
+        "tier2-item-repair",
+        "mem0",
+        "supersession",
+        "trusted-later",
+        {"trusted_order": 1.0},
+    )
+    return V4PrequentialCase(
+        case_id=case_id,
+        family_id=family,
+        probe_set=probe_set,
+        context=context,
+        graph=graph,
+        intents=(intent,),
+        legacy_intent_id=intent.intent_id,
+        candidate_outcomes=(
+            V4CandidateOutcome(
+                intent.intent_id,
+                recovery_gain=1.0,
+                locality_cost=0.01,
+                changed_item_count=1,
+                valid=True,
+                rolled_back=False,
+                target_binding_observed=True,
+                target_match_observed=True,
+            ),
+        ),
+        chain_attempts=(),
+    )
+
+
+def _cases() -> tuple[V4PrequentialCase, ...]:
+    return (
+        _case(0, probe_set="represented", family="f0"),
+        _case(1, probe_set="represented", family="f1"),
+        _case(2, probe_set="represented", family="f2"),
+        _case(3, probe_set="unseen", family="u0"),
+        _case(4, probe_set="unseen", family="u1"),
+    )
+
+
+def _evaluator() -> FrozenDeploymentEvaluator:
+    case = _cases()[0]
+    features = observable_features(
+        context=case.context,
+        graph=case.graph,
+        intent=case.intents[0],
+        telemetry=case.candidate_outcomes[0],
+    )
+    return FrozenDeploymentEvaluator.fit(
+        (EvaluatorTrainingRow(features, 0.8),),
+        training_provenance="ghost_dev_shadow_labels_only",
+    )
+
+
+def test_session_lineage_merge_is_identity_bound_and_effective_after() -> None:
+    case = _case(0, probe_set="represented", family="f0")
+    selection = {
+        "schema_version": "cmd-session-lineage-selection-v1",
+        "session_id": case.case_id,
+        "family_id": case.family_id,
+        "branch_id": "branch-a",
+        "repair_intent_id": case.intents[0].intent_id,
+        "selected_event_index": case.context.event_index,
+        "effective_after_event_index": case.context.event_index + 1,
+        "annotation_ids": [],
+        "changed_item_ids": [],
+        "exposure_start_event_index": case.context.event_index + 2,
+        "exposure_end_event_index": case.context.event_index + 2,
+    }
+    record = {
+        "selection": selection,
+        "followup_evidence": {
+            "annotation_consumed": {"kind": "annotation_consumed", "confirmed": None, "reason": "unknown", "source_event_id": None, "observed_at_event_index": None, "state_sha256": None, "schema_version": "cmd-session-lineage-evidence-v2"},
+            "delayed_confirmation": {"kind": "delayed_confirmation", "confirmed": True, "reason": "typed signal", "source_event_id": "followup-1", "observed_at_event_index": case.context.event_index + 2, "state_sha256": "s-followup", "schema_version": "cmd-session-lineage-evidence-v2"},
+            "no_regression_observed": {"kind": "no_regression_observed", "confirmed": True, "reason": "guard passed", "source_event_id": "followup-1", "observed_at_event_index": case.context.event_index + 2, "state_sha256": "s-followup", "schema_version": "cmd-session-lineage-evidence-v2"},
+        },
+        "evidence_schema_version": "cmd-session-lineage-evidence-v2",
+    }
+    merged = merge_followup_evidence_into_v4_case(case.to_mapping(), record)
+    outcome = V4PrequentialCase.from_mapping(merged).candidate_outcomes[0]
+    assert outcome.delayed_confirmation is True
+    assert outcome.no_regression_observed is True
+    assert outcome.typed_evidence_provenance["session_lineage"]["branch_id"] == "branch-a"
+    future = dict(record)
+    future["selection"] = {**selection, "selected_event_index": case.context.event_index + 1}
+    with pytest.raises(ValueError, match="effective-after"):
+        merge_followup_evidence_into_v4_case(case.to_mapping(), future)
+
+
+def _ghost_partitions() -> dict[str, str]:
+    return {
+        case.case_id: "ghost_dev" if case.probe_set == "represented" else "ghost_cal"
+        for case in _cases()
+    }
+
+
+def test_runner_is_arm_paired_test_then_update_and_sediments(tmp_path: Path) -> None:
+    streamed: list[dict[str, object]] = []
+    result = V4PrequentialRunner(
+        _cases(),
+        output_dir=tmp_path,
+        candidate_budget=1,
+        bootstrap_samples=100,
+        ghost_evaluator=_evaluator(),
+        ghost_partitions=_ghost_partitions(),
+        on_arm_outcome=streamed.append,
+    ).run()
+
+    assert len(result.outcomes) == len(_cases()) * len(V4_ARMS)
+    assert tuple(row for row in streamed) == tuple(
+        outcome.to_mapping() for outcome in result.outcomes
+    )
+    for case in _cases():
+        rows = [row for row in result.outcomes if row.case_id == case.case_id]
+        assert tuple(row.arm_id for row in rows) == V4_ARMS
+        assert all(row.candidate_count == 1 for row in rows if row.arm_id != "identity")
+        assert rows[0].selected_intent_id is None
+    stable = [
+        transition
+        for row in result.outcomes
+        if row.arm_id == "full_v4"
+        for transition in row.species_transitions
+        if transition["to_state"] == "stable"
+    ]
+    assert stable
+    assert result.report["selected_action_feedback_only"] is True
+    assert result.report["runner_model_calls"] == 0
+    assert result.report["gate"]["primary_baseline"] == "global_policy"
+    assert result.report["gate"]["passed"] is False
+
+
+def test_unseen_families_are_scored_without_policy_or_species_updates(
+    tmp_path: Path,
+) -> None:
+    result = V4PrequentialRunner(
+        _cases(),
+        output_dir=tmp_path,
+        candidate_budget=1,
+        bootstrap_samples=100,
+        ghost_evaluator=_evaluator(),
+        ghost_partitions=_ghost_partitions(),
+    ).run()
+
+    unseen = [row for row in result.outcomes if row.probe_set == "unseen"]
+    assert unseen
+    for row in unseen:
+        if row.arm_id in {"global_policy", "hierarchical_no_chain", "full_v4"}:
+            assert row.policy_snapshot_after == row.policy_snapshot_before
+            assert row.update_effective_after_event_index is None
+            assert row.species_transitions == ()
+            assert row.chain_decisions == ()
+        if row.arm_id == "ghost_hierarchy_v1":
+            assert row.policy_snapshot_after == row.policy_snapshot_before
+            assert row.update_effective_after_event_index is None
+
+
+def test_ghost_arm_is_registered_and_report_binds_frozen_evaluator(
+    tmp_path: Path,
+) -> None:
+    evaluator = _evaluator()
+    result = V4PrequentialRunner(
+        _cases(),
+        output_dir=tmp_path,
+        candidate_budget=1,
+        bootstrap_samples=100,
+        ghost_evaluator=evaluator,
+        ghost_partitions=_ghost_partitions(),
+    ).run()
+    assert V4_ARMS[-3:] == (
+        "full_v4_observable",
+        "ghost_hierarchy_v1",
+        "v4_observable_ghost_residual_v1",
+    )
+    assert result.report["ghost_feedback_gold_derived"] is False
+    assert result.report["ghost_evaluator_snapshot_sha256"] == evaluator.snapshot_sha256
+    assert result.report["ghost_cal_gate"]["updates_allowed"] is False
+    assert result.report["ghost_feedback_mode"] == (
+        "development_proxy"
+    )
+    assert result.report["arm_roles"]["full_v4"] == "shadow_gold_oracle_ceiling"
+    assert result.report["arm_roles"]["full_v4_observable"] == (
+        "same_feedback_online_residual_baseline"
+    )
+    assert result.report["arm_roles"][
+        "v4_observable_ghost_residual_v1"
+    ] == "observable_backbone_support_gated_hierarchical_residual"
+    assert result.report["feature_timing"]["selection"] == "pre_action_only"
+    assert result.report["ghost_residual_diagnostics"]["nonzero_count"] > 0
+    assert result.report["observable_residual_ghost_diagnostics"][
+        "residual_nonzero_count"
+    ] > 0
+    assert result.report["observable_residual_ghost_diagnostics"][
+        "residual_mean"
+    ] == pytest.approx(result.report["ghost_residual_diagnostics"]["mean"])
+    represented = [
+        row for row in result.outcomes
+        if row.probe_set == "represented" and row.arm_id == "ghost_hierarchy_v1"
+    ]
+    assert represented
+    assert all(row.policy_snapshot_after != row.policy_snapshot_before for row in represented)
+
+
+def test_observable_residual_arm_cold_start_matches_observable_backbone(
+    tmp_path: Path,
+) -> None:
+    result = V4PrequentialRunner(
+        _cases(),
+        output_dir=tmp_path,
+        candidate_budget=1,
+        bootstrap_samples=100,
+        ghost_evaluator=_evaluator(),
+        ghost_partitions=_ghost_partitions(),
+        ghost_feedback_mode="prospective_deployment",
+    ).run()
+    by_key = {(row.case_id, row.arm_id): row for row in result.outcomes}
+
+    assert V4_ARMS[-1] == "v4_observable_ghost_residual_v1"
+    for case in _cases():
+        assert by_key[
+            (case.case_id, "v4_observable_ghost_residual_v1")
+        ].selected_intent_id == by_key[
+            (case.case_id, "full_v4_observable")
+        ].selected_intent_id
+    diagnostics = result.report["observable_residual_ghost_diagnostics"]
+    assert diagnostics["fallback_rate"] == 1.0
+    assert diagnostics["exploration_count"] == 0
+
+
+def test_ghost_parameter_binding_prefers_actionability_compatible_intent() -> None:
+    case = _case(0, probe_set="represented", family="f0")
+    compatible = case.intents[0]
+    incompatible = RepairIntent.build(
+        strategy_id=compatible.strategy_id,
+        relation_edge_id=compatible.relation_edge_id,
+        target_item_id="new",
+        effect=compatible.effect,
+        proposer_id=compatible.proposer_id,
+        proposer_model_hash=compatible.proposer_model_hash,
+        evidence_ids=compatible.evidence_ids,
+    )
+    assert V4PrequentialRunner._ghost_parameter_rank(
+        case, compatible
+    ) < V4PrequentialRunner._ghost_parameter_rank(case, incompatible)
+
+
+def test_closed_case_schema_rejects_budget_and_outcome_mismatch(tmp_path: Path) -> None:
+    case = _cases()[0]
+    with pytest.raises(ValueError, match="candidate budget"):
+        V4PrequentialRunner(
+            (case,),
+            output_dir=tmp_path,
+            candidate_budget=2,
+            bootstrap_samples=100,
+            ghost_evaluator=_evaluator(),
+            ghost_partitions={case.case_id: "ghost_dev"},
+        )
+    broken = case.to_mapping()
+    broken["candidate_outcomes"] = []
+    with pytest.raises(ValueError, match="exactly cover"):
+        V4PrequentialCase.from_mapping(broken)
+
+
+def test_cli_streams_case_results_and_progress_jsonl(tmp_path: Path) -> None:
+    source = tmp_path / "cases.jsonl"
+    source.write_text(
+        "".join(json.dumps(row.to_mapping(), sort_keys=True) + "\n" for row in _cases()),
+        encoding="utf-8",
+    )
+    output = tmp_path / "run"
+    evaluator_path = tmp_path / "evaluator.json"
+    evaluator_path.write_text(json.dumps(_evaluator().to_mapping()), encoding="utf-8")
+    protocol_path = tmp_path / "ghost-protocol.json"
+    protocol_path.write_text(
+        json.dumps(
+            {
+                "assignments": [
+                    {"case_id": case_id, "partition": partition}
+                    for case_id, partition in _ghost_partitions().items()
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(
+        (
+            "--cases",
+            str(source),
+            "--output-dir",
+            str(output),
+            "--candidate-budget",
+            "1",
+            "--ghost-evaluator",
+            str(evaluator_path),
+            "--ghost-protocol",
+            str(protocol_path),
+            "--bootstrap-samples",
+            "100",
+        )
+    ) == 0
+
+    rows = [
+        json.loads(line)
+        for line in (output / "arm_outcomes.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    progress = [
+        json.loads(line)
+        for line in (output / "progress.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == len(_cases()) * len(V4_ARMS)
+    assert [row["event"] for row in progress] == [
+        "started",
+        *("case_completed" for _ in _cases()),
+        "completed",
+    ]
+    assert json.loads((output / "report.json").read_text(encoding="utf-8"))[
+        "case_count"
+    ] == len(_cases())
+    ghost_selections = [
+        json.loads(line)
+        for line in (output / "ghost_selections.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(ghost_selections) == len(_cases())
+    assert all(row["schema_version"] == "cmd-ghost-live-selection-v1" for row in ghost_selections)
+
+
+def test_prospective_mode_streams_pending_selections_without_proxy_updates(
+    tmp_path: Path,
+) -> None:
+    streamed: list[dict[str, object]] = []
+    result = V4PrequentialRunner(
+        _cases(),
+        output_dir=tmp_path,
+        candidate_budget=1,
+        bootstrap_samples=100,
+        ghost_evaluator=_evaluator(),
+        ghost_partitions=_ghost_partitions(),
+        ghost_feedback_mode="prospective_deployment",
+        on_ghost_selection=streamed.append,
+    ).run()
+    assert len(streamed) == len(_cases())
+    assert all(row["development_proxy"] is False for row in streamed)
+    assert result.report["ghost_feedback_mode"] == "prospective_deployment"
+    assert result.report["ghost_pending_feedback_count"] == len(_cases())
+    ghost_rows = [
+        row for row in result.outcomes if row.arm_id == "ghost_hierarchy_v1"
+    ]
+    assert all(row.policy_snapshot_after == row.policy_snapshot_before for row in ghost_rows)
+
+
+@pytest.mark.parametrize("lane", ["gpu0", "single_gpu"])
+def test_live_materializer_executes_typed_intents_before_shadow_scoring(
+    lane: str,
+) -> None:
+    case = _case(0, probe_set="represented", family="f0")
+    second_intent = RepairIntent.build(
+        strategy_id="suppress-trusted-earlier@v1",
+        relation_edge_id=case.graph.edges[0].edge_id,
+        target_item_id="old",
+        effect="suppress",
+        proposer_id="recorded-proposer-v1",
+        proposer_model_hash="e" * 64,
+        evidence_ids=(case.graph.edges[0].edge_sha256,),
+    )
+    live_intents = (*case.intents, second_intent)
+    runtime_case = RuntimeRepairCase(
+        case_id=case.case_id,
+        family_id="runtime-only",
+        query="where does Dana work",
+        raw_events=(),
+        token_budget=64,
+        items=(
+            RuntimeMemoryItem("old", "Dana works at Acme", (), "runtime", 1, True),
+            RuntimeMemoryItem("new", "Dana works at Globex", (), "runtime", 0, True),
+        ),
+    )
+    runtime_mapping = {
+        "case_id": runtime_case.case_id,
+        "family_id": runtime_case.family_id,
+        "query": runtime_case.query,
+        "token_budget": runtime_case.token_budget,
+        "runtime_surface": runtime_case.runtime_surface,
+        "items": [
+            {
+                "item_id": row.item_id,
+                "text": row.text,
+                "source_event_ids": list(row.source_event_ids),
+                "store": row.store,
+                "rank": row.rank,
+                "retrieved": row.retrieved,
+            }
+            for row in runtime_case.items
+        ],
+        "raw_events": [],
+    }
+    probe_case = {
+        "case_id": case.case_id,
+        "query": runtime_case.query,
+        "raw_events": [{"event_id": "e1", "text": "Dana now works at Globex"}],
+        "extracted_memory": [
+            {
+                "memory_id": "old",
+                "text": "Dana works at Acme",
+                "store": "runtime",
+            },
+            {
+                "memory_id": "new",
+                "text": "Dana works at Globex",
+                "store": "runtime",
+            },
+        ],
+        "gold_evidence": [
+            {
+                "evidence_id": "gold-1",
+                "text": "Dana works at Globex",
+                "source_memory_id": "new",
+            }
+        ],
+        "gold_answer": "Globex",
+        "baseline_outputs": [
+            {
+                "baseline_name": "vector_memory",
+                "answer": "Acme",
+                "retrieved_memory_ids": ["new", "old"],
+                "answer_score": 0.0,
+                "evidence_score": 0.0,
+                "injected_context": "Dana works at Acme\nDana works at Globex",
+            }
+        ],
+        "perturbation_label": "retrieval_error",
+    }
+    source = {
+        "schema_version": "cmd-v4-live-materialization-input-v1",
+        "case_id": case.case_id,
+        "family_id": case.family_id,
+        "probe_set": case.probe_set,
+        "context": case.context.to_mapping(),
+        "graph": case.graph.as_mapping(),
+        "runtime_case": runtime_mapping,
+        "intents": [row.to_mapping() for row in live_intents],
+        "legacy_intent_id": case.legacy_intent_id,
+        "chain_pairs": [[case.intents[0].intent_id, second_intent.intent_id]],
+        "probe_case": probe_case,
+    }
+
+    class Answerer:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def generate(self, prompt, *, system=None):
+            self.prompts.append(prompt if system is None else system + prompt)
+            return "Globex"
+
+    answerer = Answerer()
+    result = V4LiveMaterializer(
+        answer_client=answerer,
+        answer_verifier=lambda _answer, _gold: 1.0,
+    ).materialize(source, lane)
+    parsed = V4PrequentialCase.from_mapping(result)
+
+    assert len(parsed.candidate_outcomes) == len(live_intents)
+    assert parsed.candidate_outcomes[0].recovery_gain == 1.0
+    assert parsed.candidate_outcomes[0].changed_item_count == 1
+    assert len(parsed.chain_attempts) == 1
+    assert parsed.chain_attempts[0].materialized_intermediate is True
+    assert parsed.chain_attempts[0].first_intent_id == case.intents[0].intent_id
+    assert len(answerer.prompts) == len(live_intents) + 1
+    assert "Globex" not in parsed.context.features
